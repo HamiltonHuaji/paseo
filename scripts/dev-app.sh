@@ -2,31 +2,27 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="$SCRIPT_DIR/../node_modules/.bin:$PATH"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+export PATH="$ROOT_DIR/node_modules/.bin:$PATH"
 
 source "$SCRIPT_DIR/dev-home.sh"
 
 export PASEO_LISTEN="${PASEO_LISTEN:-127.0.0.1:6768}"
 configure_dev_paseo_home
 
-if [ -z "${PASEO_LOCAL_MODELS_DIR}" ]; then
-  export PASEO_LOCAL_MODELS_DIR="$HOME/.paseo/models/local-speech"
-  mkdir -p "$PASEO_LOCAL_MODELS_DIR"
-fi
+EXPO_PORT="${EXPO_PORT:-8081}"
+DAEMON_ENDPOINT="$(resolve_dev_daemon_endpoint)"
 
 echo "══════════════════════════════════════════════════════"
-echo "  Paseo Dev Daemon"
+echo "  Paseo App Dev"
 echo "══════════════════════════════════════════════════════"
+echo "  Metro:   http://localhost:${EXPO_PORT}"
+echo "  Daemon:  ${DAEMON_ENDPOINT}"
 echo "  Home:    ${PASEO_HOME}"
-echo "  Models:  ${PASEO_LOCAL_MODELS_DIR}"
-echo "  Listen:  ${PASEO_LISTEN}"
 echo "══════════════════════════════════════════════════════"
 
-export PASEO_CORS_ORIGINS="${PASEO_CORS_ORIGINS:-*}"
-export PASEO_NODE_INSPECT="${PASEO_NODE_INSPECT:---inspect=0}"
-
-if [ "${PASEO_SKIP_DEV_SERVER_BUILD:-0}" = "1" ]; then
-  exec npm run dev:server:watch
-fi
-
-exec sh -c 'npm run build:server-deps && npm run dev:server:watch'
+exec cross-env \
+  BROWSER="${BROWSER:-none}" \
+  APP_VARIANT=development \
+  EXPO_PUBLIC_LOCAL_DAEMON="$DAEMON_ENDPOINT" \
+  npm run start:expo --workspace=@getpaseo/app -- --port "$EXPO_PORT"
