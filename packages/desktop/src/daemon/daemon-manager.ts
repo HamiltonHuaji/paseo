@@ -41,6 +41,9 @@ import { getDesktopSettingsStore } from "../settings/desktop-settings-electron.j
 import { isRunningUnderARM64Translation } from "../system/arm64-translation.js";
 import { getDesktopAppLogs } from "../diagnostics/app-logs.js";
 import { tailFile } from "../diagnostics/tail-file.js";
+import { officialReleaseService } from "../features/official-release-electron.js";
+import { FORK_UPSTREAM_BASE_VERSION } from "../features/fork-build-info.js";
+import { forkDebUpdateService } from "../features/fork-deb-update-electron.js";
 
 const DAEMON_LOG_FILENAME = "daemon.log";
 const STARTUP_POLL_INTERVAL_MS = 200;
@@ -563,6 +566,8 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     desktop_get_runtime_info: () => ({
       appVersion: resolveDesktopAppVersion(),
       runningUnderARM64Translation: isRunningUnderARM64Translation(),
+      distribution: "fork",
+      upstreamBaseVersion: FORK_UPSTREAM_BASE_VERSION,
     }),
     desktop_daemon_status: () => resolveDesktopDaemonStatus(),
     start_desktop_daemon: () => startDaemon(),
@@ -597,21 +602,40 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     },
     check_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
-      return checkForAppUpdate({
+      const input = {
         currentVersion,
         releaseChannel: await resolveRequestedReleaseChannel(args),
         intent: parseAppUpdateCheckIntent(args),
-      });
+      };
+      return process.platform === "linux"
+        ? forkDebUpdateService.checkForAppUpdate(input)
+        : checkForAppUpdate(input);
     },
     install_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
-      return downloadAndInstallUpdate(
-        { currentVersion, releaseChannel: await resolveRequestedReleaseChannel(args) },
+      const input = {
+        currentVersion,
+        releaseChannel: await resolveRequestedReleaseChannel(args),
+      };
+      const install =
+        process.platform === "linux"
+          ? forkDebUpdateService.downloadAndInstallUpdate.bind(forkDebUpdateService)
+          : downloadAndInstallUpdate;
+      return install(input, async () => {
+        await stopDesktopDaemon("app_update");
+      });
+    },
+    check_official_app_release: (args) =>
+      officialReleaseService.check({
+        releaseChannel: parseReleaseChannel(args) ?? "stable",
+      }),
+    switch_to_official_app: (args) =>
+      officialReleaseService.switchToOfficial(
+        { releaseChannel: parseReleaseChannel(args) ?? "stable" },
         async () => {
           await stopDesktopDaemon("app_update");
         },
-      );
-    },
+      ),
     get_local_daemon_version: () => getLocalDaemonVersion(),
     install_cli: () => installCli(),
     get_cli_install_status: () => getCliInstallStatus(),

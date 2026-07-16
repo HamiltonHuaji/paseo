@@ -100,14 +100,80 @@ describe("desktop-updates helpers", () => {
       parseDesktopRuntimeInfo({
         appVersion: " 0.1.64 ",
         runningUnderARM64Translation: true,
+        distribution: "fork",
+        upstreamBaseVersion: " 0.1.63 ",
       }),
     ).toEqual({
       appVersion: "0.1.64",
       runningUnderARM64Translation: true,
+      distribution: "fork",
+      upstreamBaseVersion: "0.1.63",
     });
     expect(parseDesktopRuntimeInfo(null)).toEqual({
       appVersion: null,
       runningUnderARM64Translation: false,
+      distribution: null,
+      upstreamBaseVersion: null,
+    });
+  });
+
+  it("parses official release status defensively", async () => {
+    const { parseOfficialReleaseCheckResult } = await loadModuleForPlatform("web");
+
+    expect(
+      parseOfficialReleaseCheckResult({
+        upstreamBaseVersion: " 0.1.109 ",
+        latestVersion: "0.1.110",
+        hasNewerUpstream: true,
+        releaseUrl: "https://github.com/getpaseo/paseo/releases/tag/v0.1.110",
+        body: "Release notes",
+        date: "2026-07-16T07:49:02Z",
+        canSwitch: true,
+        assetName: "Paseo-Setup-0.1.110-x64.exe",
+        errorMessage: null,
+      }),
+    ).toEqual({
+      upstreamBaseVersion: "0.1.109",
+      latestVersion: "0.1.110",
+      hasNewerUpstream: true,
+      releaseUrl: "https://github.com/getpaseo/paseo/releases/tag/v0.1.110",
+      body: "Release notes",
+      date: "2026-07-16T07:49:02Z",
+      canSwitch: true,
+      assetName: "Paseo-Setup-0.1.110-x64.exe",
+      errorMessage: null,
+    });
+    expect(parseOfficialReleaseCheckResult(null)).toEqual({
+      upstreamBaseVersion: null,
+      latestVersion: null,
+      hasNewerUpstream: false,
+      releaseUrl: null,
+      body: null,
+      date: null,
+      canSwitch: false,
+      assetName: null,
+      errorMessage: null,
+    });
+  });
+
+  it("parses the official switch result", async () => {
+    const { parseOfficialSwitchResult } = await loadModuleForPlatform("web");
+
+    expect(
+      parseOfficialSwitchResult({
+        started: true,
+        version: "0.1.110",
+        message: "Installer started",
+      }),
+    ).toEqual({
+      started: true,
+      version: "0.1.110",
+      message: "Installer started",
+    });
+    expect(parseOfficialSwitchResult(null)).toEqual({
+      started: false,
+      version: null,
+      message: "The official Paseo installer could not be started.",
     });
   });
 

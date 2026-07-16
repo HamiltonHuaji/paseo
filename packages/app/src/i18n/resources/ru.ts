@@ -1010,6 +1010,13 @@ export const ru: TranslationResources = {
         idle: "Статус обновления еще не проверен.",
       },
       installError: "Невозможно установить обновление настольного приложения.",
+      official: {
+        switchFailed: "Не удалось перейти на официальную сборку Paseo.",
+        calloutTitle: "Доступен более новый официальный выпуск Paseo",
+        calloutDescription:
+          "Этот форк основан на {{baseVersion}}; доступна официальная версия {{latestVersion}}.",
+        viewRelease: "Открыть выпуск",
+      },
       callout: {
         installingTitle: "Установка обновления",
         failedTitle: "Обновление не выполнено",
@@ -1627,6 +1634,7 @@ export const ru: TranslationResources = {
       },
       updates: {
         label: "Обновления приложений",
+        forkLabel: "Обновления форка",
         readyToInstall: "Готово к установке:{{version}}",
         installTitle: "Установить обновление рабочего стола",
         installMessage: "Это обновит Paseo на этом компьютере.",
@@ -1638,6 +1646,22 @@ export const ru: TranslationResources = {
         checking: "Проверка...",
         alertTitle: "Ошибка",
         alertMessage: "Невозможно открыть диалоговое окно подтверждения обновления.",
+        official: {
+          label: "Официальный Paseo",
+          checking: "Проверка официальных выпусков...",
+          newerAvailable:
+            "Этот форк основан на {{baseVersion}}; доступна официальная версия {{latestVersion}}.",
+          latest: "Этот форк основан на последней официальной версии {{version}}.",
+          unavailable: "Статус официальной версии недоступен.",
+          check: "Проверить официальную",
+          viewRelease: "Открыть выпуск",
+          switchTo: "Перейти на {{version}}",
+          switching: "Переход...",
+          switchTitle: "Перейти на официальный Paseo?",
+          switchMessage:
+            "Это остановит работающие агенты и терминалы, а затем заменит этот форк официальной сборкой. Чтобы вернуться к форку, потребуется вручную установить его из HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Перейти на официальную",
+        },
       },
     },
     appearance: {

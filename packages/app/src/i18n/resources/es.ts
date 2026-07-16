@@ -1018,6 +1018,13 @@ export const es: TranslationResources = {
         idle: "El estado de la actualización aún no se ha comprobado.",
       },
       installError: "No se puede instalar la actualización de la aplicación de escritorio.",
+      official: {
+        switchFailed: "No se pudo cambiar a la compilación oficial de Paseo.",
+        calloutTitle: "Hay una versión oficial más reciente de Paseo",
+        calloutDescription:
+          "Este fork se basa en {{baseVersion}}; la versión oficial {{latestVersion}} está disponible.",
+        viewRelease: "Ver versión",
+      },
       callout: {
         installingTitle: "Instalando actualización",
         failedTitle: "La actualización falló",
@@ -1637,6 +1644,7 @@ export const es: TranslationResources = {
       },
       updates: {
         label: "Actualizaciones de aplicaciones",
+        forkLabel: "Actualizaciones del fork",
         readyToInstall: "Listo para instalar:{{version}}",
         installTitle: "Instalar actualización de escritorio",
         installMessage: "Esto actualizaPaseoen esta computadora.",
@@ -1648,6 +1656,22 @@ export const es: TranslationResources = {
         checking: "De cheques...",
         alertTitle: "Error",
         alertMessage: "No se puede abrir el cuadro de diálogo de confirmación de actualización.",
+        official: {
+          label: "Paseo oficial",
+          checking: "Buscando versiones oficiales...",
+          newerAvailable:
+            "Este fork se basa en {{baseVersion}}; la versión oficial {{latestVersion}} está disponible.",
+          latest: "Este fork se basa en la última versión oficial, {{version}}.",
+          unavailable: "El estado de la versión oficial no está disponible.",
+          check: "Comprobar oficial",
+          viewRelease: "Ver versión",
+          switchTo: "Cambiar a {{version}}",
+          switching: "Cambiando...",
+          switchTitle: "¿Cambiar a Paseo oficial?",
+          switchMessage:
+            "Esto detendrá los agentes y terminales en ejecución y reemplazará este fork por la compilación oficial. Para volver al fork, deberás instalarlo manualmente desde HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Cambiar a oficial",
+        },
       },
     },
     appearance: {

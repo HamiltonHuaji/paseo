@@ -988,6 +988,13 @@ export const ar: TranslationResources = {
         idle: "لم يتم التحقق من حالة التحديث بعد.",
       },
       installError: "غير قادر على تثبيت تحديث تطبيق سطح المكتب.",
+      official: {
+        switchFailed: "تعذّر التبديل إلى إصدار Paseo الرسمي.",
+        calloutTitle: "يتوفر إصدار رسمي أحدث من Paseo",
+        calloutDescription:
+          "يعتمد هذا الفرع على {{baseVersion}}؛ الإصدار الرسمي {{latestVersion}} متاح.",
+        viewRelease: "عرض الإصدار",
+      },
       callout: {
         installingTitle: "تثبيت التحديث",
         failedTitle: "فشل التحديث",
@@ -1594,6 +1601,7 @@ export const ar: TranslationResources = {
       },
       updates: {
         label: "تحديثات التطبيق",
+        forkLabel: "تحديثات الفرع",
         readyToInstall: "جاهز للتثبيت:{{version}}",
         installTitle: "تثبيت تحديث سطح المكتب",
         installMessage: "يؤدي هذا إلى تحديث Paseo على هذا الكمبيوتر",
@@ -1605,6 +1613,22 @@ export const ar: TranslationResources = {
         checking: "جارٍ التحقق...",
         alertTitle: "خطأ",
         alertMessage: "غير قادر على فتح مربع حوار تأكيد التحديث.",
+        official: {
+          label: "Paseo الرسمي",
+          checking: "جارٍ التحقق من الإصدارات الرسمية...",
+          newerAvailable:
+            "يعتمد هذا الفرع على {{baseVersion}}؛ الإصدار الرسمي {{latestVersion}} متاح.",
+          latest: "يعتمد هذا الفرع على أحدث إصدار رسمي، {{version}}.",
+          unavailable: "حالة الإصدار الرسمي غير متاحة.",
+          check: "تحقق من الرسمي",
+          viewRelease: "عرض الإصدار",
+          switchTo: "التبديل إلى {{version}}",
+          switching: "جارٍ التبديل...",
+          switchTitle: "التبديل إلى Paseo الرسمي؟",
+          switchMessage:
+            "سيؤدي هذا إلى إيقاف الوكلاء وجلسات الطرفية قيد التشغيل، ثم استبدال هذا الفرع بالإصدار الرسمي. للعودة إلى الفرع، يجب تثبيته يدويًا من HamiltonHuaji/paseo Releases.",
+          switchConfirm: "التبديل إلى الرسمي",
+        },
       },
     },
     appearance: {
