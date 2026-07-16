@@ -37,6 +37,11 @@ user-facing lineage, such as `0.1.109-fork.2`, comes from
 lineage as Expo's package version: Android would treat multiple revisions on the same upstream
 base as the same `versionCode`.
 
+The retained fork line restarted at installer `0.1.0` (`versionCode` 1000). Android will not install
+that APK over an experimental fork APK with the higher `0.1.112` version (`versionCode` 1112);
+uninstall the experimental APK once, then install the retained baseline. Future fork APKs increase
+normally from `0.1.0` and update in place under the EAS-managed fork signing key.
+
 The formula reserves three digits each for minor and patch. If either reaches `1000`, change the formula before cutting that release.
 
 ## Prerequisites (local dev)

@@ -29,7 +29,14 @@ and fork revision. Reset `revision` to `1` when `upstreamBaseVersion` advances; 
 it for each fork release. Do not put the fork version into package `version` fields: semver tools
 would treat it as a prerelease, and Android would derive colliding `versionCode` values.
 
-For example, installer `0.1.111` may be displayed as fork `0.1.109-fork.2`. After incorporating
+The retained fork release line starts at installer `0.1.0`, displayed as
+`0.1.109-fork.1`. Experimental installers through `0.1.112` were removed. A desktop installation
+of the experimental line must be replaced manually once because Electron correctly refuses to
+auto-downgrade from `0.1.112` to `0.1.0`; subsequent fork releases resume normal automatic updates
+at `0.1.1`, `0.1.2`, and so on. Keep the technical installer version monotonic from this new
+baseline and do not reset it again.
+
+For example, installer `0.1.1` may be displayed as fork `0.1.109-fork.2`. After incorporating
 official `0.1.110`, the next fork becomes `0.1.110-fork.1`, while its installer version continues
 upward. The release workflow writes both identities into the GitHub Release title and body.
 
