@@ -50,6 +50,38 @@ describe("splitMarkdownBlocks", () => {
     ]);
   });
 
+  it("keeps display math with internal blank lines together", () => {
+    expect(
+      splitMarkdownBlocks(
+        "Before\n\n$$\n\\begin{aligned}\na &= 1\\\\\n\nb &= 2\n\\end{aligned}\n$$\n\nAfter",
+      ),
+    ).toEqual([
+      "Before",
+      "$$\n\\begin{aligned}\na &= 1\\\\\n\nb &= 2\n\\end{aligned}\n$$",
+      "After",
+    ]);
+  });
+
+  it("keeps bracket-delimited display math with internal blank lines together", () => {
+    expect(splitMarkdownBlocks("Before\n\n\\[\na +\n\nb\n\\]\n\nAfter")).toEqual([
+      "Before",
+      "\\[\na +\n\nb\n\\]",
+      "After",
+    ]);
+  });
+
+  it("keeps an unclosed display math block together while content streams", () => {
+    expect(splitMarkdownBlocks("Before\n\n$$\na +\n\nb")).toEqual(["Before", "$$\na +\n\nb"]);
+    expect(splitMarkdownBlocks("Before\n\n\\[\na +\n\nb")).toEqual(["Before", "\\[\na +\n\nb"]);
+  });
+
+  it("does not interpret math delimiters inside fenced code", () => {
+    expect(splitMarkdownBlocks("```text\n$$\n\nnot math\n$$\n```\n\nAfter")).toEqual([
+      "```text\n$$\n\nnot math\n$$\n```",
+      "After",
+    ]);
+  });
+
   it("returns an empty array for empty input", () => {
     expect(splitMarkdownBlocks("")).toEqual([]);
   });
