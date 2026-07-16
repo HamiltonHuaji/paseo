@@ -1661,6 +1661,14 @@ export const ja: TranslationResources = {
           auto: "システム",
         },
       },
+      workspaceTabs: {
+        title: "ワークスペースタブ",
+        description: "広いペインでは左側、狭いペインでは自動的に上部へ戻ります",
+        options: {
+          top: "上",
+          left: "左",
+        },
+      },
       detailLevel: {
         title: "詳細レベル",
       },

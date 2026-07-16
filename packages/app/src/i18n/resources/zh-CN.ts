@@ -1626,6 +1626,14 @@ export const zhCN: TranslationResources = {
           auto: "系统",
         },
       },
+      workspaceTabs: {
+        title: "工作区标签",
+        description: "宽窗格显示在左侧；窄窗格会自动回退到顶部",
+        options: {
+          top: "顶部",
+          left: "左侧",
+        },
+      },
       detailLevel: {
         title: "详细程度",
       },

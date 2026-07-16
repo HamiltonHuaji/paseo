@@ -1645,6 +1645,14 @@ export const ar: TranslationResources = {
           auto: "نظام",
         },
       },
+      workspaceTabs: {
+        title: "علامات تبويب مساحة العمل",
+        description: "يُستخدم الجانب الأيسر في الأجزاء العريضة؛ وتعود الأجزاء الضيقة إلى الأعلى",
+        options: {
+          top: "أعلى",
+          left: "اليسار",
+        },
+      },
       detailLevel: {
         title: "مستوى التفاصيل",
       },

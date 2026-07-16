@@ -12,6 +12,7 @@ export type SendBehavior = "interrupt" | "queue";
 export type ReleaseChannel = "stable" | "beta";
 export type ServiceUrlBehavior = "ask" | "in-app" | "external";
 export type WorkspaceTitleSource = "title" | "branch";
+export type WorkspaceTabPlacement = "top" | "left";
 export type ToolCallDetailLevel = "overview" | "detailed";
 
 const VALID_THEMES = new Set<string>([...Object.keys(THEME_TO_UNISTYLES), "auto"]);
@@ -41,6 +42,7 @@ export interface AppSettings {
   codeFontSize: number; // clamped px, default 12
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
+  workspaceTabPlacement: WorkspaceTabPlacement;
   autoExpandReasoning: boolean;
   toolCallDetailLevel: ToolCallDetailLevel;
 }
@@ -64,6 +66,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   codeFontSize: DEFAULT_CODE_FONT_SIZE,
   syntaxTheme: "one",
   workspaceTitleSource: "title",
+  workspaceTabPlacement: "top",
   autoExpandReasoning: false,
   toolCallDetailLevel: "detailed",
 };
@@ -186,6 +189,10 @@ function parseToolCallDetailLevel(stored: StoredAppSettings): ToolCallDetailLeve
   return null;
 }
 
+function parseWorkspaceTabPlacement(value: unknown): WorkspaceTabPlacement | null {
+  return value === "top" || value === "left" ? value : null;
+}
+
 function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
   const result: Partial<AppSettings> = {};
   if (typeof stored.theme === "string" && VALID_THEMES.has(stored.theme)) {
@@ -238,6 +245,10 @@ function pickAppSettings(stored: StoredAppSettings): Partial<AppSettings> {
     VALID_WORKSPACE_TITLE_SOURCES.has(stored.workspaceTitleSource)
   ) {
     result.workspaceTitleSource = stored.workspaceTitleSource;
+  }
+  const workspaceTabPlacement = parseWorkspaceTabPlacement(stored.workspaceTabPlacement);
+  if (workspaceTabPlacement !== null) {
+    result.workspaceTabPlacement = workspaceTabPlacement;
   }
   if (typeof stored.autoExpandReasoning === "boolean") {
     result.autoExpandReasoning = stored.autoExpandReasoning;

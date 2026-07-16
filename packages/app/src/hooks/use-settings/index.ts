@@ -39,6 +39,7 @@ import {
   type ServiceUrlBehavior,
   type Settings,
   type SettingsDeps,
+  type WorkspaceTabPlacement,
   type WorkspaceTitleSource,
 } from "./storage";
 
@@ -69,6 +70,7 @@ export type {
   ServiceUrlBehavior,
   Settings,
   SettingsDeps,
+  WorkspaceTabPlacement,
   WorkspaceTitleSource,
 };
 
@@ -184,6 +186,9 @@ export function useSettings<TSelected>(
       }
       if (updates.workspaceTitleSource !== undefined) {
         appUpdates.workspaceTitleSource = updates.workspaceTitleSource;
+      }
+      if (updates.workspaceTabPlacement !== undefined) {
+        appUpdates.workspaceTabPlacement = updates.workspaceTabPlacement;
       }
       if (updates.autoExpandReasoning !== undefined) {
         appUpdates.autoExpandReasoning = updates.autoExpandReasoning;

@@ -82,6 +82,52 @@ describe("buildWorkspaceTabMenuEntries", () => {
     ]);
   });
 
+  it("uses vertical ordering labels, test IDs, and icons for desktop rail menus", () => {
+    const onCloseTabsBefore = vi.fn();
+    const onCloseTabsAfter = vi.fn();
+    const entries = buildWorkspaceTabMenuEntries({
+      surface: "desktop-rail",
+      tab: createAgentTab(),
+      index: 1,
+      tabCount: 3,
+      menuTestIDBase: "workspace-tab-context-agent_123",
+      onCopyResumeCommand: vi.fn(),
+      onCopyAgentId: vi.fn(),
+      onCopyFilePath: vi.fn(),
+      onReloadAgent: vi.fn(),
+      onRenameTab: vi.fn(),
+      onCloseTab: vi.fn(),
+      onCloseTabsBefore,
+      onCloseTabsAfter,
+      onCloseOtherTabs: vi.fn(),
+    });
+
+    const closeBefore = entries.find(
+      (entry) => entry.kind === "item" && entry.key === "close-before",
+    );
+    const closeAfter = entries.find(
+      (entry) => entry.kind === "item" && entry.key === "close-after",
+    );
+    if (!closeBefore || closeBefore.kind !== "item") throw new Error("Close above entry missing");
+    if (!closeAfter || closeAfter.kind !== "item") throw new Error("Close below entry missing");
+
+    expect(closeBefore).toMatchObject({
+      label: "Close tabs above",
+      icon: "arrow-up-to-line",
+      testID: "workspace-tab-context-agent_123-close-above",
+    });
+    expect(closeAfter).toMatchObject({
+      label: "Close tabs below",
+      icon: "arrow-down-to-line",
+      testID: "workspace-tab-context-agent_123-close-below",
+    });
+
+    closeBefore.onSelect();
+    closeAfter.onSelect();
+    expect(onCloseTabsBefore).toHaveBeenCalledWith("agent_123");
+    expect(onCloseTabsAfter).toHaveBeenCalledWith("agent_123");
+  });
+
   it("omits agent copy actions and rename for draft tabs", () => {
     const entries = buildWorkspaceTabMenuEntries({
       surface: "mobile",

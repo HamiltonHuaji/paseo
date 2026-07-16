@@ -1652,6 +1652,14 @@ export const en = {
           auto: "System",
         },
       },
+      workspaceTabs: {
+        title: "Workspace tabs",
+        description: "Left is used on wide panes; narrow panes fall back to the top",
+        options: {
+          top: "Top",
+          left: "Left",
+        },
+      },
       detailLevel: {
         title: "Detail level",
       },
