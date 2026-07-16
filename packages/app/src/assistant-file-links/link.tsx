@@ -1,11 +1,10 @@
 import { useMemo, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import { Platform, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
-import { isNative, isWeb } from "@/constants/platform";
+import { Platform, type StyleProp, type TextStyle } from "react-native";
+import { isNative } from "@/constants/platform";
 import { MarkdownTextSpan } from "@/components/markdown-text";
+import { LinkHoverTooltip } from "@/components/link-hover-tooltip";
 import { MarkdownLinkText } from "@/components/markdown/link-text";
 import { AssistantLinkPressProvider, type AssistantLinkPress } from "./link-press-context";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { markdownCopyDataSet } from "@/assistant-selection-copy/markup";
 import { useAssistantFileLinkResolverContext } from "./provider";
@@ -30,7 +29,7 @@ export function AssistantMarkdownLink({
   monoSurface,
   children,
 }: AssistantMarkdownLinkProps) {
-  const { target, onHoverIn, onPress } = useFileLink(source);
+  const { target, externalUrl, onHoverIn, onPress } = useFileLink(source);
   const { configRef } = useAssistantFileLinkResolverContext();
   const workspaceRoot = configRef.current.workspaceRoot;
   const tooltipPath = useMemo(
@@ -42,6 +41,7 @@ export function AssistantMarkdownLink({
     [onPress],
   );
   const unwrapForMarkdownCopy = source.sourceType === "inline-code" || source.markup === "linkify";
+  const tooltipTarget = tooltipPath ?? externalUrl;
 
   if (isNative) {
     // Must be a MarkdownTextSpan, not a plain <Text>: on iOS the link renders
@@ -68,13 +68,13 @@ export function AssistantMarkdownLink({
       </MarkdownTextSpan>
     );
     return (
-      <FileLinkHoverTooltip filePath={tooltipPath}>
+      <LinkHoverTooltip target={tooltipTarget}>
         {Platform.OS === "ios" ? (
           <AssistantLinkPressProvider value={linkPress}>{span}</AssistantLinkPressProvider>
         ) : (
           span
         )}
-      </FileLinkHoverTooltip>
+      </LinkHoverTooltip>
     );
   }
 
@@ -98,7 +98,7 @@ export function AssistantMarkdownLink({
     </a>
   );
 
-  return <FileLinkHoverTooltip filePath={tooltipPath}>{anchor}</FileLinkHoverTooltip>;
+  return <LinkHoverTooltip target={tooltipTarget}>{anchor}</LinkHoverTooltip>;
 }
 
 interface AssistantMarkdownCodeLinkProps {
@@ -193,38 +193,6 @@ export function AssistantInlineCodePathLink({
   );
 }
 
-const FILE_LINK_TOOLTIP_TRIGGER_STYLE: ViewStyle = {
-  // RN doesn't type "inline-flex" but RN-web honors it at runtime, which keeps
-  // the tooltip wrapper from breaking inline link flow.
-  display: "inline-flex" as ViewStyle["display"],
-};
-
-function FileLinkHoverTooltip({
-  filePath,
-  children,
-}: {
-  filePath: string | null;
-  children: ReactNode;
-}) {
-  if (!isWeb) {
-    return children;
-  }
-  return (
-    <Tooltip delayDuration={400} interactive retainOnContentSelection>
-      <TooltipTrigger asChild>
-        <View style={FILE_LINK_TOOLTIP_TRIGGER_STYLE}>{children}</View>
-      </TooltipTrigger>
-      {filePath ? (
-        <TooltipContent side="top" align="start" maxWidth={520}>
-          <Text selectable style={styles.tooltipPath}>
-            {filePath}
-          </Text>
-        </TooltipContent>
-      ) : null}
-    </Tooltip>
-  );
-}
-
 const LINK_ANCHOR_STYLE: CSSProperties = {
   display: "contents",
   color: "inherit",
@@ -234,11 +202,3 @@ const LINK_ANCHOR_STYLE: CSSProperties = {
 function preventAnchorNavigation(event: MouseEvent<HTMLAnchorElement>): void {
   event.preventDefault();
 }
-
-const styles = StyleSheet.create((theme) => ({
-  tooltipPath: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.normal,
-  },
-}));
