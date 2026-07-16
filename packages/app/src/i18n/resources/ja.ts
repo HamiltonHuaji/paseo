@@ -477,6 +477,8 @@ export const ja: TranslationResources = {
         copyAgentId: "エージェントIDをコピー",
         copyFilePath: "ファイルパスをコピー",
         rename: "名前を変更",
+        moveToTop: "一番上へ移動",
+        moveToBottom: "一番下へ移動",
         closeAbove: "上のタブを閉じる",
         closeBelow: "下のタブを閉じる",
         closeLeft: "左のタブを閉じる",

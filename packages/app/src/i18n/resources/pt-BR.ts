@@ -477,6 +477,8 @@ export const ptBR: TranslationResources = {
         copyAgentId: "Copiar ID do agente",
         copyFilePath: "Copiar caminho do arquivo",
         rename: "Renomear",
+        moveToTop: "Mover para o topo",
+        moveToBottom: "Mover para o final",
         closeAbove: "Fechar abas acima",
         closeBelow: "Fechar abas abaixo",
         closeLeft: "Fechar à esquerda",

@@ -473,6 +473,8 @@ export const zhCN: TranslationResources = {
         copyAgentId: "复制 Agent ID",
         copyFilePath: "Copy file path",
         rename: "重命名",
+        moveToTop: "移到最上方",
+        moveToBottom: "移到最下方",
         closeAbove: "关闭上方标签",
         closeBelow: "关闭下方标签",
         closeLeft: "关闭左侧标签",

@@ -617,6 +617,8 @@ function MobileWorkspaceTabOption({
       copyAgentId: t("workspace.tabs.menu.copyAgentId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
+      moveToTop: t("workspace.tabs.menu.moveToTop"),
+      moveToBottom: t("workspace.tabs.menu.moveToBottom"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
       closeBelow: t("workspace.tabs.menu.closeBelow"),
       closeLeft: t("workspace.tabs.menu.closeLeft"),

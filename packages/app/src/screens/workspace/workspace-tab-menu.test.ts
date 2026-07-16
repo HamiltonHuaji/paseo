@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildWorkspaceTabMenuEntries } from "@/screens/workspace/workspace-tab-menu";
+import {
+  buildWorkspaceTabMenuEntries,
+  moveWorkspaceTabToEdge,
+} from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 
 function createAgentTab(): WorkspaceTabDescriptor {
@@ -22,6 +25,8 @@ describe("buildWorkspaceTabMenuEntries", () => {
     const onCloseTabsBefore = vi.fn();
     const onCloseTabsAfter = vi.fn();
     const onCloseOtherTabs = vi.fn();
+    const onMoveTabToStart = vi.fn();
+    const onMoveTabToEnd = vi.fn();
 
     const entries = buildWorkspaceTabMenuEntries({
       surface: "desktop",
@@ -38,18 +43,74 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCloseTabsBefore,
       onCloseTabsAfter,
       onCloseOtherTabs,
+      onMoveTabToStart,
+      onMoveTabToEnd,
     });
 
-    expect(entries.filter((entry) => entry.kind === "item").map((entry) => entry.label)).toEqual([
-      "Copy resume command",
-      "Copy agent id",
-      "Rename",
-      "Close to the left",
-      "Close to the right",
-      "Close other tabs",
-      "Reload agent",
-      "Close",
+    expect(
+      entries.map((entry) => (entry.kind === "separator" ? `separator:${entry.key}` : entry.key)),
+    ).toEqual([
+      "copy-resume-command",
+      "copy-agent-id",
+      "rename",
+      "separator:actions-separator",
+      "move-to-start",
+      "move-to-end",
+      "separator:ordering-separator",
+      "reload-agent",
+      "close-before",
+      "close-after",
+      "close-others",
+      "close",
     ]);
+
+    const moveToStart = entries.find(
+      (entry) => entry.kind === "item" && entry.key === "move-to-start",
+    );
+    const moveToEnd = entries.find((entry) => entry.kind === "item" && entry.key === "move-to-end");
+    if (!moveToStart || moveToStart.kind !== "item") throw new Error("Move to top missing");
+    if (!moveToEnd || moveToEnd.kind !== "item") throw new Error("Move to bottom missing");
+
+    expect(moveToStart).toMatchObject({
+      label: "Move to top",
+      icon: "arrow-up-to-line",
+      disabled: false,
+      testID: "workspace-tab-context-agent_123-move-to-top",
+    });
+    expect(moveToEnd).toMatchObject({
+      label: "Move to bottom",
+      icon: "arrow-down-to-line",
+      disabled: false,
+      testID: "workspace-tab-context-agent_123-move-to-bottom",
+    });
+
+    moveToStart.onSelect();
+    moveToEnd.onSelect();
+    expect(onMoveTabToStart).toHaveBeenCalledWith("agent_123");
+    expect(onMoveTabToEnd).toHaveBeenCalledWith("agent_123");
+  });
+
+  it("moves a tab to either edge without changing an already-edge order", () => {
+    const first = createAgentTab();
+    const middle: WorkspaceTabDescriptor = {
+      ...createAgentTab(),
+      key: "agent_456",
+      tabId: "agent_456",
+      target: { kind: "agent", agentId: "agent-456" },
+    };
+    const last: WorkspaceTabDescriptor = {
+      ...createAgentTab(),
+      key: "agent_789",
+      tabId: "agent_789",
+      target: { kind: "agent", agentId: "agent-789" },
+    };
+    const tabs = [first, middle, last];
+
+    expect(moveWorkspaceTabToEdge(tabs, middle.tabId, "start")).toEqual([middle, first, last]);
+    expect(moveWorkspaceTabToEdge(tabs, middle.tabId, "end")).toEqual([first, last, middle]);
+    expect(moveWorkspaceTabToEdge(tabs, first.tabId, "start")).toBe(tabs);
+    expect(moveWorkspaceTabToEdge(tabs, last.tabId, "end")).toBe(tabs);
+    expect(moveWorkspaceTabToEdge(tabs, "missing", "start")).toBe(tabs);
   });
 
   it("uses stacked ordering labels for mobile menus", () => {
@@ -354,7 +415,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
     const terminalSeparator = terminalEntries
       .slice(terminalEntries.indexOf(terminalRename) + 1)
       .find((entry) => entry.kind === "separator");
-    expect(agentSeparator?.key).toBe("rename-separator");
-    expect(terminalSeparator?.key).toBe("rename-separator");
+    expect(agentSeparator?.key).toBe("actions-separator");
+    expect(terminalSeparator?.key).toBe("actions-separator");
   });
 });

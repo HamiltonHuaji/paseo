@@ -473,6 +473,8 @@ export const ar: TranslationResources = {
         copyAgentId: "نسخ معرف الوكيل",
         copyFilePath: "Copy file path",
         rename: "إعادة تسمية",
+        moveToTop: "نقل إلى الأعلى",
+        moveToBottom: "نقل إلى الأسفل",
         closeAbove: "إغلاق علامات التبويب أعلاه",
         closeBelow: "إغلاق علامات التبويب أدناه",
         closeLeft: "بالقرب من اليسار",

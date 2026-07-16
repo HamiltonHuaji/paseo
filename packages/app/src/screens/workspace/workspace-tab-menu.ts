@@ -11,6 +11,8 @@ export interface WorkspaceTabMenuLabels {
   copyAgentId: string;
   copyFilePath: string;
   rename: string;
+  moveToTop: string;
+  moveToBottom: string;
   closeAbove: string;
   closeBelow: string;
   closeLeft: string;
@@ -26,6 +28,8 @@ export const DEFAULT_WORKSPACE_TAB_MENU_LABELS: WorkspaceTabMenuLabels = {
   copyAgentId: i18n.t("workspace.tabs.menu.copyAgentId"),
   copyFilePath: i18n.t("workspace.tabs.menu.copyFilePath"),
   rename: i18n.t("workspace.tabs.menu.rename"),
+  moveToTop: i18n.t("workspace.tabs.menu.moveToTop"),
+  moveToBottom: i18n.t("workspace.tabs.menu.moveToBottom"),
   closeAbove: i18n.t("workspace.tabs.menu.closeAbove"),
   closeBelow: i18n.t("workspace.tabs.menu.closeBelow"),
   closeLeft: i18n.t("workspace.tabs.menu.closeLeft"),
@@ -78,6 +82,8 @@ interface BuildWorkspaceTabMenuEntriesInput {
   onCloseTabsBefore: (tabId: string) => Promise<void> | void;
   onCloseTabsAfter: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  onMoveTabToStart?: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd?: (tabId: string) => Promise<void> | void;
   labels?: WorkspaceTabMenuLabels;
 }
 
@@ -95,6 +101,8 @@ interface BuildWorkspaceDesktopTabActionsInput {
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  onMoveTabToStart: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd: (tabId: string) => Promise<void> | void;
   labels?: WorkspaceTabMenuLabels;
 }
 
@@ -102,6 +110,30 @@ export interface WorkspaceDesktopTabActions {
   contextMenuTestId: string;
   menuEntries: WorkspaceTabMenuEntry[];
   closeButtonTestId: string;
+}
+
+export function moveWorkspaceTabToEdge(
+  tabs: WorkspaceTabDescriptor[],
+  tabId: string,
+  edge: "start" | "end",
+): WorkspaceTabDescriptor[] {
+  const currentIndex = tabs.findIndex((tab) => tab.tabId === tabId);
+  const destinationIndex = edge === "start" ? 0 : tabs.length - 1;
+  if (currentIndex < 0 || currentIndex === destinationIndex) {
+    return tabs;
+  }
+
+  const nextTabs = [...tabs];
+  const [tab] = nextTabs.splice(currentIndex, 1);
+  if (!tab) {
+    return tabs;
+  }
+  if (edge === "start") {
+    nextTabs.unshift(tab);
+  } else {
+    nextTabs.push(tab);
+  }
+  return nextTabs;
 }
 
 function buildCloseBeforeLabel(
@@ -178,6 +210,8 @@ export function buildWorkspaceTabMenuEntries(
     onCloseTabsBefore,
     onCloseTabsAfter,
     onCloseOtherTabs,
+    onMoveTabToStart,
+    onMoveTabToEnd,
   } = input;
   const labels = input.labels ?? DEFAULT_WORKSPACE_TAB_MENU_LABELS;
   const isFirstTab = index === 0;
@@ -235,13 +269,9 @@ export function buildWorkspaceTabMenuEntries(
         onRenameTab(tab);
       },
     });
-    entries.push({
-      kind: "separator",
-      key: "rename-separator",
-    });
   }
 
-  entries.push({
+  const closeBeforeEntry: WorkspaceTabMenuEntry = {
     kind: "item",
     key: "close-before",
     label: buildCloseBeforeLabel(surface, labels),
@@ -251,8 +281,8 @@ export function buildWorkspaceTabMenuEntries(
     onSelect: () => {
       void onCloseTabsBefore(tab.tabId);
     },
-  });
-  entries.push({
+  };
+  const closeAfterEntry: WorkspaceTabMenuEntry = {
     kind: "item",
     key: "close-after",
     label: buildCloseAfterLabel(surface, labels),
@@ -262,8 +292,8 @@ export function buildWorkspaceTabMenuEntries(
     onSelect: () => {
       void onCloseTabsAfter(tab.tabId);
     },
-  });
-  entries.push({
+  };
+  const closeOthersEntry: WorkspaceTabMenuEntry = {
     kind: "item",
     key: "close-others",
     label: labels.closeOthers,
@@ -273,22 +303,8 @@ export function buildWorkspaceTabMenuEntries(
     onSelect: () => {
       void onCloseOtherTabs(tab.tabId);
     },
-  });
-  if (tab.target.kind === "agent") {
-    const { agentId } = tab.target;
-    entries.push({
-      kind: "item",
-      key: "reload-agent",
-      label: labels.reloadAgent,
-      icon: "rotate-cw",
-      tooltip: labels.reloadAgentTooltip,
-      testID: `${menuTestIDBase}-reload-agent`,
-      onSelect: () => {
-        void onReloadAgent(agentId);
-      },
-    });
-  }
-  entries.push({
+  };
+  const closeEntry: WorkspaceTabMenuEntry = {
     kind: "item",
     key: "close",
     label: labels.close,
@@ -297,7 +313,66 @@ export function buildWorkspaceTabMenuEntries(
     onSelect: () => {
       void onCloseTab(tab.tabId);
     },
+  };
+  const reloadAgentId = tab.target.kind === "agent" ? tab.target.agentId : null;
+  const reloadAgentEntry: WorkspaceTabMenuEntry | null =
+    reloadAgentId !== null
+      ? {
+          kind: "item",
+          key: "reload-agent",
+          label: labels.reloadAgent,
+          icon: "rotate-cw",
+          tooltip: labels.reloadAgentTooltip,
+          testID: `${menuTestIDBase}-reload-agent`,
+          onSelect: () => {
+            void onReloadAgent(reloadAgentId);
+          },
+        }
+      : null;
+
+  if (surface === "mobile") {
+    if (tab.target.kind === "agent" || tab.target.kind === "terminal") {
+      entries.push({ kind: "separator", key: "rename-separator" });
+    }
+    entries.push(closeBeforeEntry, closeAfterEntry, closeOthersEntry);
+    if (reloadAgentEntry) {
+      entries.push(reloadAgentEntry);
+    }
+    entries.push(closeEntry);
+    return entries;
+  }
+
+  if (entries.length > 0) {
+    entries.push({ kind: "separator", key: "actions-separator" });
+  }
+  entries.push({
+    kind: "item",
+    key: "move-to-start",
+    label: labels.moveToTop,
+    icon: "arrow-up-to-line",
+    disabled: isFirstTab,
+    testID: `${menuTestIDBase}-move-to-top`,
+    onSelect: () => {
+      void onMoveTabToStart?.(tab.tabId);
+    },
   });
+  entries.push({
+    kind: "item",
+    key: "move-to-end",
+    label: labels.moveToBottom,
+    icon: "arrow-down-to-line",
+    disabled: isLastTab,
+    testID: `${menuTestIDBase}-move-to-bottom`,
+    onSelect: () => {
+      void onMoveTabToEnd?.(tab.tabId);
+    },
+  });
+  entries.push({ kind: "separator", key: "ordering-separator" });
+
+  if (reloadAgentEntry) {
+    entries.push(reloadAgentEntry);
+  }
+  entries.push(closeBeforeEntry, closeAfterEntry, closeOthersEntry, closeEntry);
 
   return entries;
 }
@@ -323,6 +398,8 @@ export function buildWorkspaceDesktopTabActions(
       onCloseTabsBefore: input.onCloseTabsToLeft,
       onCloseTabsAfter: input.onCloseTabsToRight,
       onCloseOtherTabs: input.onCloseOtherTabs,
+      onMoveTabToStart: input.onMoveTabToStart,
+      onMoveTabToEnd: input.onMoveTabToEnd,
       labels: input.labels,
     }),
     closeButtonTestId: getCloseButtonTestId(input.tab),

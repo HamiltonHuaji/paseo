@@ -477,6 +477,8 @@ export const fr: TranslationResources = {
         copyAgentId: "Copier l'identifiant de l'agent",
         copyFilePath: "Copy file path",
         rename: "Rebaptiser",
+        moveToTop: "Déplacer tout en haut",
+        moveToBottom: "Déplacer tout en bas",
         closeAbove: "Fermer les onglets ci-dessus",
         closeBelow: "Fermer les onglets ci-dessous",
         closeLeft: "Près de la gauche",
