@@ -75,11 +75,14 @@ jobs:
             gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
             exit 0
           fi
-          args=(release create "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes")
+          args=(release create "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes" --draft)
           if [[ "$IS_PRERELEASE" == "true" ]]; then
             args+=(--prerelease)
           fi
-          gh "${args[@]}"
+          gh "${args[@]}" || {
+            gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null
+            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
+          }
 
       - name: Setup Node
         uses: actions/setup-node@v4
