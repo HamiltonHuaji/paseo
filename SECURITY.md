@@ -40,6 +40,8 @@ The daemon requires a valid cryptographic handshake before processing any comman
 
 The QR code or pairing link is the trust anchor. It contains the daemon's public key, which is required to establish the encrypted connection. Treat it like a password — don't share it publicly.
 
+An app client that is already connected to a daemon is a trusted operator and may request the current pairing link for that host. Client settings keep the link and QR code concealed until an explicit user action; that disclosure step reduces accidental screen exposure, but it is a UI safeguard rather than a separate authorization boundary.
+
 ## Local daemon trust boundary
 
 By default, the daemon binds to `127.0.0.1`. With no password configured, the local control plane is trusted by network reachability — anything that can reach the daemon socket can control the daemon. This is the same security model Docker documents for its daemon: the security boundary is access to the socket or listening address.

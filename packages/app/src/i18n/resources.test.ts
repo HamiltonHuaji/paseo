@@ -289,6 +289,13 @@ describe("translation resources", () => {
     expect(en.pairing.direct.fields.host).toBe("Host");
     expect(en.pairing.scan.title).toBe("Scan QR");
     expect(en.pairing.device.copy).toBe("Copy");
+    expect(en.pairing.device.qrCode).toBe("Pairing QR code");
+    expect(en.settings.host.pairDevices.offlineHint).toBe(
+      "Connect to this host to share its pairing link",
+    );
+    expect(en.settings.host.pairDevices.updateHostHint).toBe(
+      "Update this host to share its pairing link",
+    );
   });
 
   it("includes shared utility chrome keys for the Batch 4F migration", () => {

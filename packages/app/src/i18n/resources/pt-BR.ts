@@ -1346,6 +1346,7 @@ export const ptBR: TranslationResources = {
       unavailable: "Oferta de pareamento indisponível.",
       hint: "Escaneie este QR code com o Paseo no seu celular ou copie o link abaixo.",
       qrUnavailable: "QR code indisponível.",
+      qrCode: "QR code de pareamento",
       retry: "Tentar novamente",
       copy: "Copiar",
       copied: "Copiado",
@@ -1808,6 +1809,8 @@ export const ptBR: TranslationResources = {
         title: "Parear dispositivos",
         rowTitle: "Parear um dispositivo",
         rowHint: "Escaneie um QR code ou copie um link para conectar seu celular a este host",
+        offlineHint: "Conecte-se a este host para compartilhar o link de pareamento",
+        updateHostHint: "Atualize este host para compartilhar o link de pareamento",
       },
       orchestration: {
         title: "Orquestração",

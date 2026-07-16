@@ -40,9 +40,10 @@ import {
 import { LocalDaemonSection } from "@/desktop/components/desktop-updates-section";
 import { useDaemonStatus } from "@/desktop/hooks/use-daemon-status";
 import { loadDesktopSettings, useDesktopSettings } from "@/desktop/settings/desktop-settings";
-import { PairDeviceModal } from "@/desktop/components/pair-device-modal";
+import { PairDeviceModal } from "@/components/pair-device-modal";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useIsLocalDaemon } from "@/hooks/use-is-local-daemon";
+import { useHostFeature } from "@/runtime/host-features";
 import {
   getHostRuntimeStore,
   isHostRuntimeConnected,
@@ -76,6 +77,7 @@ const ThemedProfilePencil = withUnistyles(Pencil);
 const ThemedTrash2 = withUnistyles(Trash2);
 const ThemedProfileSquareTerminal = withUnistyles(SquareTerminal);
 const ThemedPlus = withUnistyles(Plus);
+const ThemedChevronRight = withUnistyles(ChevronRight);
 
 interface DynamicProviderIconProps {
   iconKey: string;
@@ -235,9 +237,7 @@ function HostConnectionError({ serverId }: { serverId: string }) {
 }
 
 export function HostConnectionsPage({ serverId }: { serverId: string }) {
-  const { t } = useTranslation();
   const host = useHostProfile(serverId);
-  const isLocalDaemon = useIsLocalDaemon(serverId);
 
   if (!host) {
     return <HostNotFound />;
@@ -247,11 +247,6 @@ export function HostConnectionsPage({ serverId }: { serverId: string }) {
     <View>
       <HostConnectionError serverId={serverId} />
       <ConnectionsSection host={host} />
-      {isLocalDaemon ? (
-        <SettingsSection title={t("settings.host.pairDevices.title")}>
-          <PairDeviceRow />
-        </SettingsSection>
-      ) : null}
     </View>
   );
 }
@@ -345,6 +340,7 @@ export function HostSettingsPage({
   serverId: string;
   onHostRemoved?: () => void;
 }) {
+  const { t } = useTranslation();
   const host = useHostProfile(serverId);
   const isLocalDaemon = useIsLocalDaemon(serverId);
 
@@ -366,6 +362,10 @@ export function HostSettingsPage({
       {isLocalDaemon ? <LocalDaemonSection /> : null}
 
       {!isLocalDaemon ? <UpdateDaemonCard host={host} /> : null}
+
+      <SettingsSection title={t("settings.host.pairDevices.title")}>
+        <PairDeviceRow serverId={serverId} />
+      </SettingsSection>
 
       <RemoveHostSection host={host} isLocalDaemon={isLocalDaemon} onRemoved={onHostRemoved} />
     </View>
@@ -1196,10 +1196,21 @@ function AppendSystemPromptCard({ serverId }: { serverId: string }) {
   );
 }
 
-function PairDeviceRow() {
+function PairDeviceRow({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
-  const { theme } = useUnistyles();
+  const isConnected = useHostRuntimeIsConnected(serverId);
+  // COMPAT(hostPairingOffer): daemon.get_pairing_offer shipped with daemonStatusRpc in v0.1.76;
+  // remove this gate after 2026-11-18.
+  const supportsPairingOffer = useHostFeature(serverId, "daemonStatusRpc");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const isAvailable = isConnected && supportsPairingOffer;
+  let hint = t("settings.host.pairDevices.rowHint");
+  if (!isConnected) {
+    hint = t("settings.host.pairDevices.offlineHint");
+  } else if (!supportsPairingOffer) {
+    hint = t("settings.host.pairDevices.updateHostHint");
+  }
+  const accessibilityState = useMemo(() => ({ disabled: !isAvailable }), [isAvailable]);
 
   const handleOpen = useCallback(() => setIsModalOpen(true), []);
   const handleClose = useCallback(() => setIsModalOpen(false), []);
@@ -1209,17 +1220,20 @@ function PairDeviceRow() {
       <Pressable
         style={settingsStyles.row}
         onPress={handleOpen}
+        disabled={!isAvailable}
         accessibilityRole="button"
+        accessibilityState={accessibilityState}
         testID="host-page-pair-device-row"
       >
         <View style={settingsStyles.rowContent}>
           <Text style={settingsStyles.rowTitle}>{t("settings.host.pairDevices.rowTitle")}</Text>
-          <Text style={settingsStyles.rowHint}>{t("settings.host.pairDevices.rowHint")}</Text>
+          <Text style={settingsStyles.rowHint}>{hint}</Text>
         </View>
-        <ChevronRight size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+        <ThemedChevronRight size={ICON_SIZE.sm} uniProps={mutedColorMapping} />
       </Pressable>
 
       <PairDeviceModal
+        serverId={serverId}
         visible={isModalOpen}
         onClose={handleClose}
         testID="host-page-pair-device-card"
