@@ -1,19 +1,9 @@
 import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
-import {
-  Platform,
-  Pressable,
-  Text,
-  View,
-  type StyleProp,
-  type TextStyle,
-  type ViewStyle,
-} from "react-native";
-import { StyleSheet } from "react-native-unistyles";
-import { isNative, isWeb } from "@/constants/platform";
+import { Platform, Pressable, Text, type StyleProp, type TextStyle } from "react-native";
+import { isNative } from "@/constants/platform";
 import { MarkdownTextSpan } from "@/components/markdown-text";
+import { LinkHoverTooltip } from "@/components/link-hover-tooltip";
 import { AssistantLinkPressProvider, type AssistantLinkPress } from "./link-press-context";
-import { Shortcut } from "@/components/ui/shortcut";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { useAssistantFileLinkResolverContext } from "./provider";
@@ -34,7 +24,7 @@ export function AssistantMarkdownLink({
   children,
 }: AssistantMarkdownLinkProps) {
   const [hovered, setHovered] = useState(false);
-  const { target, onHoverIn, onPress, onAuxPress } = useFileLink(source);
+  const { target, externalUrl, onHoverIn, onPress, onAuxPress } = useFileLink(source);
   const { configRef } = useAssistantFileLinkResolverContext();
   const workspaceRoot = configRef.current.workspaceRoot;
   const tooltipPath = useMemo(
@@ -62,6 +52,7 @@ export function AssistantMarkdownLink({
     () => ({ onPress, accessibilityRole: "link" }),
     [onPress],
   );
+  const tooltipTarget = tooltipPath ?? externalUrl;
 
   if (isNative) {
     // Must be a MarkdownTextSpan, not a plain <Text>: on iOS the link renders
@@ -88,13 +79,13 @@ export function AssistantMarkdownLink({
       </MarkdownTextSpan>
     );
     return (
-      <FileLinkHoverTooltip filePath={tooltipPath}>
+      <LinkHoverTooltip target={tooltipTarget} showFileShortcutHint={Boolean(tooltipPath)}>
         {Platform.OS === "ios" ? (
           <AssistantLinkPressProvider value={linkPress}>{span}</AssistantLinkPressProvider>
         ) : (
           span
         )}
-      </FileLinkHoverTooltip>
+      </LinkHoverTooltip>
     );
   }
 
@@ -118,7 +109,11 @@ export function AssistantMarkdownLink({
     </a>
   );
 
-  return <FileLinkHoverTooltip filePath={tooltipPath}>{anchor}</FileLinkHoverTooltip>;
+  return (
+    <LinkHoverTooltip target={tooltipTarget} showFileShortcutHint={Boolean(tooltipPath)}>
+      {anchor}
+    </LinkHoverTooltip>
+  );
 }
 
 interface AssistantMarkdownCodeLinkProps {
@@ -213,48 +208,6 @@ export function AssistantInlineCodePathLink({
   );
 }
 
-const FILE_LINK_TOOLTIP_TRIGGER_STYLE: ViewStyle = {
-  // RN doesn't type "inline-flex" but RN-web honors it at runtime, which keeps
-  // the tooltip wrapper from breaking inline link flow.
-  display: "inline-flex" as ViewStyle["display"],
-};
-
-const FILE_LINK_TOOLTIP_MOD_KEYS = ["mod"];
-
-function FileLinkHoverTooltip({
-  filePath,
-  children,
-}: {
-  filePath: string | null;
-  children: ReactNode;
-}) {
-  if (!isWeb) {
-    return children;
-  }
-  return (
-    <Tooltip delayDuration={400} interactive retainOnContentSelection>
-      <TooltipTrigger asChild>
-        <View style={FILE_LINK_TOOLTIP_TRIGGER_STYLE}>{children}</View>
-      </TooltipTrigger>
-      {filePath ? (
-        <TooltipContent side="top" align="start" maxWidth={520}>
-          <View style={styles.tooltipBody}>
-            <Text selectable style={styles.tooltipPath}>
-              {filePath}
-            </Text>
-            <View style={styles.tooltipHintRow}>
-              <Shortcut keys={FILE_LINK_TOOLTIP_MOD_KEYS} />
-              <Text selectable={false} style={styles.tooltipHintText}>
-                click for side pane
-              </Text>
-            </View>
-          </View>
-        </TooltipContent>
-      ) : null}
-    </Tooltip>
-  );
-}
-
 const LINK_ANCHOR_STYLE: CSSProperties = {
   display: "contents",
   color: "inherit",
@@ -268,24 +221,3 @@ function preventAnchorNavigation(event: MouseEvent<HTMLAnchorElement>): void {
 function isModifiedOpenEvent(event: MouseEvent<HTMLElement>): boolean {
   return event.metaKey || event.ctrlKey;
 }
-
-const styles = StyleSheet.create((theme) => ({
-  tooltipBody: {
-    gap: theme.spacing[1],
-  },
-  tooltipPath: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.normal,
-  },
-  tooltipHintRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-  },
-  tooltipHintText: {
-    color: theme.colors.foregroundMuted,
-    fontSize: theme.fontSize.xs,
-    fontWeight: theme.fontWeight.normal,
-  },
-}));
