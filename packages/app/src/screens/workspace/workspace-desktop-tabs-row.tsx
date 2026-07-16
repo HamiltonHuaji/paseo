@@ -14,6 +14,8 @@ import {
   Text,
   View,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type PressableStateCallbackType,
 } from "react-native";
 import {
@@ -62,6 +64,8 @@ import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT } from "@/constants/layout";
 import type { ShortcutKey } from "@/utils/format-shortcut";
 import { useWorkspaceTabLayout } from "@/screens/workspace/use-workspace-tab-layout";
+import { useHorizontalWheelScroll } from "@/hooks/use-horizontal-wheel-scroll";
+import { getWorkspaceTabRevealOffset } from "@/screens/workspace/workspace-tab-scroll";
 import {
   WorkspaceTabPresentationResolver,
   WorkspaceTabIcon,
@@ -767,6 +771,8 @@ export function WorkspaceDesktopTabsRow({
   const [tabsContainerWidth, setTabsContainerWidth] = useState<number>(0);
   const [tabsActionsWidth, setTabsActionsWidth] = useState<number>(0);
   const [inlineAddButtonWidth, setInlineAddButtonWidth] = useState<number>(0);
+  const tabsScrollRef = useRef<ScrollView>(null);
+  const tabsScrollOffsetRef = useRef(0);
 
   const handleTabsContainerLayout = useCallback((event: LayoutChangeEvent) => {
     updateMeasuredWidth(setTabsContainerWidth, event);
@@ -793,6 +799,7 @@ export function WorkspaceDesktopTabsRow({
       tabIconWidth: 14,
       tabHorizontalPadding: 12,
       estimatedCharWidth: 7,
+      minimumLabelCharacters: 4,
       closeButtonWidth: 22,
     }),
     [inlineAddButtonWidth, tabsActionsWidth],
@@ -838,6 +845,70 @@ export function WorkspaceDesktopTabsRow({
     viewportWidthOverride: tabsContainerWidth > 0 ? tabsContainerWidth : null,
     metrics: layoutMetrics,
   });
+  useHorizontalWheelScroll(tabsScrollRef, layout.requiresHorizontalScrollFallback);
+
+  const activeTabIndex = useMemo(() => tabs.findIndex((tab) => tab.isActive), [tabs]);
+  const activeTabId = activeTabIndex >= 0 ? (tabs[activeTabIndex]?.tab.tabId ?? null) : null;
+  const tabsViewportWidth = Math.max(0, tabsContainerWidth - tabsActionsWidth);
+  const tabsContentWidth = useMemo(
+    () =>
+      layout.items.reduce((total, item) => total + item.width, 0) +
+      (inlineAddButtonWidth || DEFAULT_INLINE_ADD_BUTTON_RESERVED_WIDTH),
+    [inlineAddButtonWidth, layout.items],
+  );
+  const activeTabStart = useMemo(
+    () =>
+      activeTabIndex < 0
+        ? null
+        : layout.items.slice(0, activeTabIndex).reduce((total, item) => total + item.width, 0),
+    [activeTabIndex, layout.items],
+  );
+  const activeTabEnd =
+    activeTabStart === null ? null : activeTabStart + (layout.items[activeTabIndex]?.width ?? 0);
+
+  const handleTabsScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    tabsScrollOffsetRef.current = event.nativeEvent.contentOffset.x;
+  }, []);
+
+  useEffect(() => {
+    const scrollView = tabsScrollRef.current;
+    if (!scrollView) return;
+
+    if (!layout.requiresHorizontalScrollFallback) {
+      if (tabsScrollOffsetRef.current !== 0) {
+        tabsScrollOffsetRef.current = 0;
+        scrollView.scrollTo({ x: 0, y: 0, animated: false });
+      }
+      return;
+    }
+
+    if (
+      !activeTabId ||
+      activeTabStart === null ||
+      activeTabEnd === null ||
+      tabsViewportWidth <= 0
+    ) {
+      return;
+    }
+    const nextOffset = getWorkspaceTabRevealOffset({
+      currentOffset: tabsScrollOffsetRef.current,
+      viewportWidth: tabsViewportWidth,
+      contentWidth: tabsContentWidth,
+      itemStart: activeTabStart,
+      itemEnd: activeTabEnd,
+    });
+    if (Math.abs(nextOffset - tabsScrollOffsetRef.current) <= 1) return;
+
+    tabsScrollOffsetRef.current = nextOffset;
+    scrollView.scrollTo({ x: nextOffset, y: 0, animated: false });
+  }, [
+    activeTabEnd,
+    activeTabId,
+    activeTabStart,
+    layout.requiresHorizontalScrollFallback,
+    tabsContentWidth,
+    tabsViewportWidth,
+  ]);
 
   const handleDragEnd = useCallback(
     (nextTabs: WorkspaceDesktopTabRowItem[]) => {
@@ -969,8 +1040,11 @@ export function WorkspaceDesktopTabsRow({
       onLayout={handleTabsContainerLayout}
     >
       <ScrollView
+        ref={tabsScrollRef}
         horizontal
         scrollEnabled={layout.requiresHorizontalScrollFallback}
+        onScroll={handleTabsScroll}
+        scrollEventThrottle={16}
         testID="workspace-tabs-scroll"
         style={tabsScrollStyle}
         contentContainerStyle={styles.tabsContent}
