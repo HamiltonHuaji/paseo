@@ -8,6 +8,7 @@ export interface RectLike {
 export interface HoverSafeZoneTrackerInput {
   getTriggerRect: () => RectLike | null;
   getContentRect: () => RectLike | null;
+  shouldRetainAfterLeave?: () => boolean;
   onEnterSafeZone: () => void;
   onLeaveSafeZone: () => void;
 }
@@ -16,6 +17,7 @@ export interface HoverSafeZoneTracker {
   pointerMoved(x: number, y: number): void;
   pointerLeftWindow(): void;
   windowBlurred(): void;
+  retentionChanged(): void;
 }
 
 // Tracks the pointer's position relative to a hover card's "safe zone": the
@@ -24,9 +26,16 @@ export interface HoverSafeZoneTracker {
 // `onEnterSafeZone` on every move that lands inside (so consumers can refresh
 // timers) and `onLeaveSafeZone` once per inside→outside transition.
 export function createHoverSafeZoneTracker(input: HoverSafeZoneTrackerInput): HoverSafeZoneTracker {
-  const { getTriggerRect, getContentRect, onEnterSafeZone, onLeaveSafeZone } = input;
+  const {
+    getTriggerRect,
+    getContentRect,
+    shouldRetainAfterLeave = () => false,
+    onEnterSafeZone,
+    onLeaveSafeZone,
+  } = input;
   // The pointer opened the card, so we start inside.
   let wasInside = true;
+  let pointerIsInside = true;
 
   function leave(): void {
     if (!wasInside) return;
@@ -34,17 +43,37 @@ export function createHoverSafeZoneTracker(input: HoverSafeZoneTrackerInput): Ho
     onLeaveSafeZone();
   }
 
+  function updateOutsideState(): void {
+    if (shouldRetainAfterLeave()) {
+      wasInside = true;
+      onEnterSafeZone();
+      return;
+    }
+    leave();
+  }
+
+  function pointerLeft(): void {
+    pointerIsInside = false;
+    updateOutsideState();
+  }
+
   return {
     pointerMoved(x, y) {
       if (isInsideSafeZone(getTriggerRect(), getContentRect(), x, y)) {
+        pointerIsInside = true;
         wasInside = true;
         onEnterSafeZone();
         return;
       }
-      leave();
+      pointerLeft();
     },
-    pointerLeftWindow: leave,
-    windowBlurred: leave,
+    pointerLeftWindow: pointerLeft,
+    windowBlurred: pointerLeft,
+    retentionChanged() {
+      if (!pointerIsInside) {
+        updateOutsideState();
+      }
+    },
   };
 }
 
