@@ -1363,6 +1363,7 @@ export const fr: TranslationResources = {
       unavailable: "Offre de jumelage indisponible.",
       hint: "Scannez ce codeQRavecPaseosur votre téléphone ou copiez le lien ci-dessous.",
       qrUnavailable: "CodeQRindisponible.",
+      qrCode: "Code QR d'association",
       retry: "Réessayer",
       copy: "Copie",
       copied: "Copié",
@@ -1827,6 +1828,8 @@ export const fr: TranslationResources = {
         title: "Associer des appareils",
         rowTitle: "Associer un appareil",
         rowHint: "Scannez un codeQRou copiez un lien pour connecter votre téléphone à cet hôte",
+        offlineHint: "Connectez-vous à cet hôte pour partager son lien d'association",
+        updateHostHint: "Mettez à jour cet hôte pour partager son lien d'association",
       },
       orchestration: {
         title: "Orchestration",

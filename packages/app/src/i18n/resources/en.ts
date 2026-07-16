@@ -1329,6 +1329,7 @@ export const en = {
       unavailable: "Pairing offer unavailable.",
       hint: "Scan this QR code with Paseo on your phone, or copy the link below.",
       qrUnavailable: "QR code unavailable.",
+      qrCode: "Pairing QR code",
       retry: "Retry",
       copy: "Copy",
       copied: "Copied",
@@ -1787,6 +1788,8 @@ export const en = {
         title: "Pair devices",
         rowTitle: "Pair a device",
         rowHint: "Scan a QR code or copy a link to connect your phone to this host",
+        offlineHint: "Connect to this host to share its pairing link",
+        updateHostHint: "Update this host to share its pairing link",
       },
       orchestration: {
         title: "Orchestration",

@@ -1338,6 +1338,7 @@ export const ja: TranslationResources = {
       unavailable: "ペアリングオファーが利用できません。",
       hint: "スマートフォンのPaseoでこのQRコードをスキャンするか、以下のリンクをコピーしてください。",
       qrUnavailable: "QRコードが利用できません。",
+      qrCode: "ペアリング用QRコード",
       retry: "再試行",
       copy: "コピー",
       copied: "コピーしました",
@@ -1798,6 +1799,8 @@ export const ja: TranslationResources = {
         title: "デバイスをペアリング",
         rowTitle: "デバイスをペアリング",
         rowHint: "QRコードをスキャンするかリンクをコピーしてスマートフォンをこのホストに接続",
+        offlineHint: "このホストに接続するとペアリングリンクを共有できます",
+        updateHostHint: "ペアリングリンクを共有するには、このホストを更新してください",
       },
       orchestration: {
         title: "オーケストレーション",

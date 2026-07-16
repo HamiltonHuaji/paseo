@@ -1,21 +1,32 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ActivityIndicator, Image, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
-import * as QRCode from "qrcode";
-import { useQuery } from "@tanstack/react-query";
-import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import Svg, { Path, Rect } from "react-native-svg";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { RotateCw, Copy, Check } from "lucide-react-native";
 import { settingsStyles } from "@/styles/settings";
 import { Button } from "@/components/ui/button";
-import { getDesktopDaemonPairing, shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
-import { useState } from "react";
+import { useHostRuntimeClient } from "@/runtime/host-runtime";
+import { useFetchQuery } from "@/data/query";
+import { ICON_SIZE, type Theme } from "@/styles/theme";
+import { createPairingQrModel } from "./pair-device-qr";
 
 type PairingViewState =
   | { tag: "loading" }
   | { tag: "error"; message: string }
   | { tag: "unavailable"; message: string }
   | { tag: "ready"; url: string };
+
+const ThemedRetryIcon = withUnistyles(RotateCw);
+const ThemedCopyIcon = withUnistyles(Copy);
+const ThemedCopiedIcon = withUnistyles(Check);
+const ThemedLinkInput = withUnistyles(TextInput, (theme) => ({
+  selectionColor: theme.colors.accent,
+}));
+
+const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foreground });
+const accentColorMapping = (theme: Theme) => ({ color: theme.colors.accent });
 
 function resolvePairingViewState(args: {
   isPending: boolean;
@@ -42,64 +53,74 @@ function resolvePairingViewState(args: {
   return { tag: "ready", url: args.data.url };
 }
 
-export function PairDeviceSection() {
-  const { theme } = useUnistyles();
+export function PairDeviceSection({ serverId }: { serverId: string }) {
   const { t } = useTranslation();
-  const showSection = shouldUseDesktopDaemon();
+  const client = useHostRuntimeClient(serverId);
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const pairingQuery = useQuery({
-    queryKey: ["desktop-daemon-pairing"],
-    queryFn: getDesktopDaemonPairing,
-    enabled: showSection,
-    staleTime: 5 * 60 * 1000,
+  const pairingQuery = useFetchQuery({
+    queryKey: ["daemon-pairing-offer", serverId],
+    queryFn: () => {
+      if (!client) {
+        throw new Error(t("settings.host.pairDevices.offlineHint"));
+      }
+      return client.getDaemonPairingOffer();
+    },
+    enabled: client !== null,
+    dataShape: "value",
+    staleTimeMs: 5 * 60 * 1000,
     retry: 1,
-  });
-
-  const qrQuery = useQuery({
-    queryKey: ["desktop-daemon-pairing-qr", pairingQuery.data?.url],
-    queryFn: () =>
-      QRCode.toDataURL(pairingQuery.data!.url!, {
-        errorCorrectionLevel: "M",
-        margin: 1,
-        width: 480,
-      }),
-    enabled: !!pairingQuery.data?.url,
-    staleTime: Infinity,
+    refetchOnWindowFocus: false,
   });
 
   const handleCopyLink = useCallback(async () => {
     if (!pairingQuery.data?.url) return;
-    await Clipboard.setStringAsync(pairingQuery.data.url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await Clipboard.setStringAsync(pairingQuery.data.url);
+      setCopied(true);
+      if (copiedTimerRef.current) {
+        clearTimeout(copiedTimerRef.current);
+      }
+      copiedTimerRef.current = setTimeout(() => {
+        copiedTimerRef.current = null;
+        setCopied(false);
+      }, 2000);
+    } catch {
+      setCopied(false);
+    }
   }, [pairingQuery.data?.url]);
 
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current) {
+        clearTimeout(copiedTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const handleRefetch = useCallback(() => {
+    if (!client) return;
     void pairingQuery.refetch();
-  }, [pairingQuery]);
+  }, [client, pairingQuery]);
 
   const handleCopyPress = useCallback(() => {
     void handleCopyLink();
   }, [handleCopyLink]);
 
-  const qrImageSource = useMemo(
-    () => (qrQuery.data ? { uri: qrQuery.data } : null),
-    [qrQuery.data],
-  );
-
   const retryIcon = useMemo(
-    () => <RotateCw size={theme.iconSize.sm} color={theme.colors.foreground} />,
-    [theme.iconSize.sm, theme.colors.foreground],
+    () => <ThemedRetryIcon size={ICON_SIZE.sm} uniProps={foregroundColorMapping} />,
+    [],
   );
   const copyButtonIcon = useMemo(
     () =>
       copied ? (
-        <Check size={theme.iconSize.sm} color={theme.colors.accent} />
+        <ThemedCopiedIcon size={ICON_SIZE.sm} uniProps={accentColorMapping} />
       ) : (
-        <Copy size={theme.iconSize.sm} color={theme.colors.foreground} />
+        <ThemedCopyIcon size={ICON_SIZE.sm} uniProps={foregroundColorMapping} />
       ),
-    [copied, theme.iconSize.sm, theme.colors.accent, theme.colors.foreground],
+    [copied],
   );
   const bodyLabels = useMemo(
     () => ({
@@ -109,34 +130,42 @@ export function PairDeviceSection() {
       retry: t("pairing.device.retry"),
       copy: t("pairing.device.copy"),
       copied: t("pairing.device.copied"),
+      qrCode: t("pairing.device.qrCode"),
     }),
     [t],
   );
 
-  if (!showSection) return null;
-
-  const viewState = resolvePairingViewState({
-    isPending: pairingQuery.isPending,
-    isError: pairingQuery.isError,
-    error: pairingQuery.error,
-    data: pairingQuery.data,
-    labels: {
-      failedToLoadOffer: t("pairing.device.failedToLoadOffer"),
-      relayDisabled: t("pairing.device.relayDisabled"),
-      unavailable: t("pairing.device.unavailable"),
-    },
-  });
+  const viewState = useMemo<PairingViewState>(() => {
+    if (!client) {
+      return { tag: "unavailable", message: t("settings.host.pairDevices.offlineHint") };
+    }
+    return resolvePairingViewState({
+      isPending: pairingQuery.isPending,
+      isError: pairingQuery.isError,
+      error: pairingQuery.error,
+      data: pairingQuery.data,
+      labels: {
+        failedToLoadOffer: t("pairing.device.failedToLoadOffer"),
+        relayDisabled: t("pairing.device.relayDisabled"),
+        unavailable: t("pairing.device.unavailable"),
+      },
+    });
+  }, [
+    client,
+    pairingQuery.data,
+    pairingQuery.error,
+    pairingQuery.isError,
+    pairingQuery.isPending,
+    t,
+  ]);
 
   return (
     <View style={settingsStyles.section} testID="host-page-pair-device-card">
       <View style={settingsStyles.card}>
         <PairDeviceBody
           viewState={viewState}
-          theme={theme}
           retryIcon={retryIcon}
           copyButtonIcon={copyButtonIcon}
-          qrImageSource={qrImageSource}
-          qrQuery={qrQuery}
           copied={copied}
           handleRefetch={handleRefetch}
           handleCopyPress={handleCopyPress}
@@ -149,11 +178,8 @@ export function PairDeviceSection() {
 
 interface PairDeviceBodyProps {
   viewState: PairingViewState;
-  theme: { colors: { accent: string } };
   retryIcon: React.ReactElement;
   copyButtonIcon: React.ReactElement;
-  qrImageSource: { uri: string } | null;
-  qrQuery: { isError: boolean };
   copied: boolean;
   handleRefetch: () => void;
   handleCopyPress: () => void;
@@ -164,22 +190,13 @@ interface PairDeviceBodyProps {
     retry: string;
     copy: string;
     copied: string;
+    qrCode: string;
   };
 }
 
 function PairDeviceBody(props: PairDeviceBodyProps) {
-  const {
-    viewState,
-    theme,
-    retryIcon,
-    copyButtonIcon,
-    qrImageSource,
-    qrQuery,
-    copied,
-    handleRefetch,
-    handleCopyPress,
-    labels,
-  } = props;
+  const { viewState, retryIcon, copyButtonIcon, copied, handleRefetch, handleCopyPress, labels } =
+    props;
 
   if (viewState.tag === "loading") {
     return (
@@ -206,19 +223,18 @@ function PairDeviceBody(props: PairDeviceBodyProps) {
       <Text style={styles.hint}>{labels.hint}</Text>
       <View style={styles.qrContainer}>
         <PairDeviceQrContent
-          qrImageSource={qrImageSource}
-          qrQuery={qrQuery}
+          url={viewState.url}
           unavailableLabel={labels.qrUnavailable}
+          accessibilityLabel={labels.qrCode}
         />
       </View>
       <View style={styles.linkRow}>
         <View style={styles.inputWrapper}>
-          <TextInput
+          <ThemedLinkInput
             style={styles.linkInput}
             value={viewState.url}
             readOnly
             selectTextOnFocus
-            selectionColor={theme.colors.accent}
           />
         </View>
         <Button variant="outline" size="sm" leftIcon={copyButtonIcon} onPress={handleCopyPress}>
@@ -230,17 +246,26 @@ function PairDeviceBody(props: PairDeviceBodyProps) {
 }
 
 function PairDeviceQrContent(props: {
-  qrImageSource: { uri: string } | null;
-  qrQuery: { isError: boolean };
+  url: string;
   unavailableLabel: string;
+  accessibilityLabel: string;
 }) {
-  if (props.qrImageSource) {
-    return <Image source={props.qrImageSource} style={styles.qrImage} resizeMode="contain" />;
-  }
-  if (props.qrQuery.isError) {
+  const model = useMemo(() => createPairingQrModel(props.url), [props.url]);
+  if (!model) {
     return <Text style={styles.hint}>{props.unavailableLabel}</Text>;
   }
-  return <ActivityIndicator size="small" />;
+  const viewBox = `0 0 ${model.size} ${model.size}`;
+  return (
+    <Svg
+      style={styles.qrImage}
+      viewBox={viewBox}
+      accessibilityLabel={props.accessibilityLabel}
+      testID="pair-device-qr"
+    >
+      <Rect width={model.size} height={model.size} fill="#ffffff" />
+      <Path d={model.path} fill="#000000" />
+    </Svg>
+  );
 }
 
 const styles = StyleSheet.create((theme) => ({
@@ -264,8 +289,9 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     alignSelf: "center",
-    width: 320,
-    height: 320,
+    width: "100%",
+    maxWidth: 320,
+    aspectRatio: 1,
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
     borderColor: theme.colors.border,

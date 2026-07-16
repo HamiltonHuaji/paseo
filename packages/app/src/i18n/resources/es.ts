@@ -1360,6 +1360,7 @@ export const es: TranslationResources = {
       unavailable: "Oferta de maridaje no disponible.",
       hint: "Escanee este códigoQRconPaseoen su teléfono o copie el enlace a continuación.",
       qrUnavailable: "CódigoQRno disponible.",
+      qrCode: "Código QR de emparejamiento",
       retry: "Rever",
       copy: "Copiar",
       copied: "Copiado",
@@ -1824,6 +1825,8 @@ export const es: TranslationResources = {
         title: "Emparejar dispositivos",
         rowTitle: "Emparejar un dispositivo",
         rowHint: "Escanee un códigoQRo copie un enlace para conectar su teléfono a este host",
+        offlineHint: "Conéctate a este host para compartir su enlace de emparejamiento",
+        updateHostHint: "Actualiza este host para compartir su enlace de emparejamiento",
       },
       orchestration: {
         title: "Orquestación",

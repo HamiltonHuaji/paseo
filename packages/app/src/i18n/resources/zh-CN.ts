@@ -1305,6 +1305,7 @@ export const zhCN: TranslationResources = {
       unavailable: "配对 offer 不可用。",
       hint: "用手机上的 Paseo 扫描此二维码，或复制下方链接。",
       qrUnavailable: "二维码不可用。",
+      qrCode: "配对二维码",
       retry: "重试",
       copy: "复制",
       copied: "已复制",
@@ -1761,6 +1762,8 @@ export const zhCN: TranslationResources = {
         title: "配对设备",
         rowTitle: "配对设备",
         rowHint: "扫描二维码或复制链接，将手机连接到这个 Host",
+        offlineHint: "连接到此 Host 后即可分享配对链接",
+        updateHostHint: "更新此 Host 后即可分享配对链接",
       },
       orchestration: {
         title: "编排",

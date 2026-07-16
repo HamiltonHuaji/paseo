@@ -1321,6 +1321,7 @@ export const ar: TranslationResources = {
       unavailable: "عرض الاقتران غير متاح.",
       hint: "قم بمسح رمز QR هذا باستخدام Paseo على هاتفك، أو انسخ الرابط أدناه.",
       qrUnavailable: "رمز QR غير متاح.",
+      qrCode: "رمز QR للإقران",
       retry: "أعد المحاولة",
       copy: "ينسخ",
       copied: "منقول",
@@ -1779,6 +1780,8 @@ export const ar: TranslationResources = {
         title: "إقران الأجهزة",
         rowTitle: "إقران جهاز",
         rowHint: "امسح رمز QR ضوئيًا أو انسخ رابطًا لتوصيل هاتفك بهذا المضيف",
+        offlineHint: "اتصل بهذا المضيف لمشاركة رابط الإقران الخاص به",
+        updateHostHint: "حدّث هذا المضيف لمشاركة رابط الإقران الخاص به",
       },
       orchestration: {
         title: "التنسيق",
