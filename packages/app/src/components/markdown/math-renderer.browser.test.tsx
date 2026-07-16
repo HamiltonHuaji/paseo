@@ -1,7 +1,9 @@
-import React from "react";
+import React, { type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
+import type { ASTNode } from "react-native-markdown-display";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMarkdownMathRules } from "./math-rules";
 import { MarkdownMath, type MarkdownMathProps } from "./math-renderer";
 
 const mocks = vi.hoisted(() => ({
@@ -49,11 +51,58 @@ function loadKaTeXStylesheet(): Promise<HTMLLinkElement> {
 }
 
 function mountMath(props: MarkdownMathProps): HTMLDivElement {
+  return mountRenderedMath(<MarkdownMath {...props} />);
+}
+
+function mountRenderedMath(rendered: ReactNode): HTMLDivElement {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  flushSync(() => root.render(<MarkdownMath {...props} />));
+  flushSync(() => root.render(rendered));
   mounted.push({ host, root });
+  return host;
+}
+
+function markdownAstNode(type: string, content = ""): ASTNode {
+  return {
+    type,
+    sourceType: type,
+    key: `${type}-key`,
+    content,
+    markup: "",
+    tokenIndex: 0,
+    index: 0,
+    attributes: {},
+    children: [],
+  };
+}
+
+function mountMathFromMarkdownRenderer({
+  color,
+  content,
+  displayMode,
+}: {
+  color: string;
+  content: string;
+  displayMode: boolean;
+}): HTMLDivElement {
+  const math = markdownAstNode(displayMode ? "math_block" : "math_inline", content);
+  const renderMath = createMarkdownMathRules()[math.type];
+  if (renderMath === undefined) {
+    throw new Error(`Missing render rule for ${math.type}`);
+  }
+  const rendered = renderMath(
+    math,
+    [],
+    [markdownAstNode("paragraph"), markdownAstNode("body")],
+    {},
+    { color },
+  );
+  const host = mountRenderedMath(rendered);
+  // RN Web paragraphs are flex Views without a text color. Text siblings get
+  // their semantic color from inheritedStyles, while an unstyled custom DOM
+  // child otherwise falls through to this browser default.
+  host.style.color = "rgb(0, 0, 0)";
   return host;
 }
 
@@ -112,18 +161,25 @@ describe("MarkdownMath", () => {
     ).toBe("max-content");
   });
 
-  it("inherits the surrounding foreground color for light and dark themes", () => {
-    const lightHost = mountMath({ content: "x", displayMode: false });
-    lightHost.style.color = "rgb(25, 30, 35)";
-    const darkHost = mountMath({ content: "x", displayMode: false });
-    darkHost.style.color = "rgb(230, 235, 240)";
+  it("applies the markdown renderer's inherited foreground to inline and display formulas", () => {
+    const cases = [
+      { color: "rgb(25, 30, 35)", displayMode: false },
+      { color: "rgb(230, 235, 240)", displayMode: true },
+    ];
 
-    expect(window.getComputedStyle(lightHost.querySelector(".katex") as HTMLElement).color).toBe(
-      "rgb(25, 30, 35)",
-    );
-    expect(window.getComputedStyle(darkHost.querySelector(".katex") as HTMLElement).color).toBe(
-      "rgb(230, 235, 240)",
-    );
+    for (const testCase of cases) {
+      const host = mountMathFromMarkdownRenderer({
+        ...testCase,
+        content: String.raw`\sqrt{x}`,
+      });
+      const math = host.querySelector<HTMLElement>("[data-paseo-markdown-math]");
+      const visibleLeaf = math?.querySelector<HTMLElement>(".katex-html .mathnormal");
+      const stretchySvg = math?.querySelector<SVGElement>(".katex-html svg");
+
+      expect(window.getComputedStyle(math as HTMLElement).color).toBe(testCase.color);
+      expect(window.getComputedStyle(visibleLeaf as HTMLElement).color).toBe(testCase.color);
+      expect(window.getComputedStyle(stretchySvg as SVGElement).fill).toBe(testCase.color);
+    }
   });
 
   it("loads bundled KaTeX fonts under the app-wide UI font override", async () => {

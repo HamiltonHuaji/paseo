@@ -35,8 +35,10 @@ import {
 } from "./html-ish";
 import { resolveInlineImageSize, type InlineImageDimensions } from "./inline-image-size";
 import { groupMarkdownParts, type MarkdownPartGroup } from "./part-groups";
-import { MarkdownMath } from "./math-renderer";
+import { createMarkdownMathRules } from "./math-rules";
 import { createMarkdownParser } from "./parser";
+
+export { createMarkdownMathRules } from "./math-rules";
 
 export type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
 
@@ -497,17 +499,6 @@ function SharedMarkdownLink({
 function getMarkdownLinkHref(node: ASTNode): string {
   const href = node.attributes?.href;
   return typeof href === "string" ? href : "";
-}
-
-export function createMarkdownMathRules(): RenderRules {
-  return {
-    math_inline: (node: ASTNode) => (
-      <MarkdownMath key={node.key} content={node.content ?? ""} displayMode={false} />
-    ),
-    math_block: (node: ASTNode) => (
-      <MarkdownMath key={node.key} content={node.content ?? ""} displayMode />
-    ),
-  };
 }
 
 export function createSharedMarkdownRules(): RenderRules {
