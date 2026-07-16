@@ -162,18 +162,76 @@ jobs:
       - name: Setup Expo and EAS
         uses: expo/expo-github-action@v8
         with:
-          eas-version: latest
+          eas-version: "21.0.1"
           token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Prepare local build safeguards
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const wrapperPath = path.join(process.env.RUNNER_TEMP, 'eas-local-build-wrapper');
+          fs.writeFileSync(
+            wrapperPath,
+            `#!/usr/bin/env bash
+          set +e
+          printf '::add-mask::%s\\n' "$1"
+          npx -y "eas-cli-local-build-plugin@\${EAS_LOCAL_BUILD_PLUGIN_VERSION}" "$1"
+          status=$?
+          printf '%s' "$status" > "$EAS_LOCAL_BUILD_STATUS_PATH"
+          exit 0
+          `,
+            { mode: 0o700 },
+          );
+
+          const gradleHome = process.env.GRADLE_USER_HOME || path.join(process.env.HOME, '.gradle');
+          const initDirectory = path.join(gradleHome, 'init.d');
+          fs.mkdirSync(initDirectory, { recursive: true });
+          fs.writeFileSync(
+            path.join(initDirectory, 'paseo-maven-central-mirror.gradle'),
+            `import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+          def centralHosts = ['repo.maven.apache.org', 'repo1.maven.org'] as Set
+          def centralMirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          def useCentralMirror = { repository ->
+              if (repository instanceof MavenArtifactRepository && centralHosts.contains(repository.url.host)) {
+                  repository.setUrl(centralMirror)
+              }
+          }
+
+          beforeSettings { settings ->
+              settings.pluginManagement.repositories.configureEach(useCentralMirror)
+              settings.dependencyResolutionManagement.repositories.configureEach(useCentralMirror)
+          }
+
+          settingsEvaluated { settings ->
+              settings.pluginManagement.repositories.configureEach(useCentralMirror)
+              settings.dependencyResolutionManagement.repositories.configureEach(useCentralMirror)
+          }
+
+          allprojects { project ->
+              project.repositories.configureEach(useCentralMirror)
+              project.buildscript.repositories.configureEach(useCentralMirror)
+          }
+          `,
+          );
+          NODE
 
       - name: Build and sign Android APK on GitHub
         id: artifact
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_LOCAL_BUILD_PLUGIN_PATH: ${{ runner.temp }}/eas-local-build-wrapper
+          EAS_LOCAL_BUILD_PLUGIN_VERSION: "21.0.1"
+          EAS_LOCAL_BUILD_STATUS_PATH: ${{ runner.temp }}/eas-local-build.exit
         shell: bash
         run: |
           set -euo pipefail
           asset_name="Paseo-Fork-${RELEASE_VERSION}-android.apk"
           asset_path="$RUNNER_TEMP/$asset_name"
+          rm -f "$EAS_LOCAL_BUILD_STATUS_PATH"
           cd packages/app
           eas build \
             --local \
@@ -182,6 +240,8 @@ jobs:
             --non-interactive \
             --freeze-credentials \
             --output "$asset_path"
+          test -f "$EAS_LOCAL_BUILD_STATUS_PATH"
+          test "$(cat "$EAS_LOCAL_BUILD_STATUS_PATH")" = "0"
           test -s "$asset_path"
           echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
           echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"

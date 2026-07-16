@@ -168,6 +168,17 @@ this package ID; protect it with MFA and keep the project under an account that
 will remain accessible. Keep this workflow manual-only: its runner briefly holds
 the signing material, so it must never run for pull requests or untrusted refs.
 
+The workflow invokes EAS's local-build plugin through a wrapper that records the
+plugin exit code without allowing EAS CLI to print the plugin's credential-bearing
+job argument when Gradle fails. Keep the EAS CLI and local-build plugin versions
+pinned together. The wrapper also registers the argument as a GitHub Actions mask;
+do not replace it with a direct `eas build --local` invocation in public CI.
+
+GitHub runner addresses can occasionally receive a Maven Central `403`. A Gradle
+init script redirects only the standard Maven Central hosts to Google's hosted
+Maven Central mirror. Google Maven, the Gradle Plugin Portal, and any other
+repositories retain their normal URLs.
+
 The fork profile deliberately runs Gradle serially with a 3 GiB heap. Hermes needs
 substantial memory to compile Paseo's release bundle, so the workflow also adds
 swap to the 16 GiB GitHub runner. Keep the same Gradle limits in the workflow's
