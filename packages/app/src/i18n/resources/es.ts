@@ -1635,6 +1635,8 @@ export const es: TranslationResources = {
       title: "Acerca de",
       appVersion: "Versión de la aplicación",
       thisDevice: "este dispositivo",
+      forkVersionDetails:
+        "Instalador {{installerVersion}} · basado en la versión oficial {{upstreamVersion}}",
       connectedHosts: "Anfitriones conectados",
       offline: "Desconectado",
       versionDiffers: "La versión difiere de este dispositivo.",

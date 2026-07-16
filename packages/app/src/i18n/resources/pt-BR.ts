@@ -1619,6 +1619,8 @@ export const ptBR: TranslationResources = {
       title: "Sobre",
       appVersion: "Versão do app",
       thisDevice: "Este dispositivo",
+      forkVersionDetails:
+        "Instalador {{installerVersion}} · baseado na versão oficial {{upstreamVersion}}",
       connectedHosts: "Hosts conectados",
       offline: "Offline",
       versionDiffers: "A versão é diferente da deste dispositivo",

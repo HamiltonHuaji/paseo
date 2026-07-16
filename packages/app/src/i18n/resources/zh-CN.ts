@@ -1574,6 +1574,7 @@ export const zhCN: TranslationResources = {
       title: "关于",
       appVersion: "应用版本",
       thisDevice: "此设备",
+      forkVersionDetails: "安装版本 {{installerVersion}} · 基于官方 {{upstreamVersion}}",
       connectedHosts: "已连接的 Host",
       offline: "离线",
       versionDiffers: "版本与此设备不同",

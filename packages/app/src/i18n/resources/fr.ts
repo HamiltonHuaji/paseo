@@ -1636,6 +1636,8 @@ export const fr: TranslationResources = {
       title: "À propos",
       appVersion: "Version de l'application",
       thisDevice: "Cet appareil",
+      forkVersionDetails:
+        "Installateur {{installerVersion}} · basé sur la version officielle {{upstreamVersion}}",
       connectedHosts: "Hôtes connectés",
       offline: "Hors ligne",
       versionDiffers: "La version diffère de cet appareil",

@@ -1608,6 +1608,7 @@ export const ja: TranslationResources = {
       title: "アプリ情報",
       appVersion: "アプリバージョン",
       thisDevice: "このデバイス",
+      forkVersionDetails: "インストール版 {{installerVersion}} · 公式 {{upstreamVersion}} ベース",
       connectedHosts: "接続されているホスト",
       offline: "オフライン",
       versionDiffers: "このデバイスとバージョンが異なります",

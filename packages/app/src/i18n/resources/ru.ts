@@ -1624,6 +1624,8 @@ export const ru: TranslationResources = {
       title: "О",
       appVersion: "Версия приложения",
       thisDevice: "Это устройство",
+      forkVersionDetails:
+        "Установочная версия {{installerVersion}} · на базе официальной {{upstreamVersion}}",
       connectedHosts: "Подключенные хосты",
       offline: "Оффлайн",
       versionDiffers: "Версия отличается от этого устройства",

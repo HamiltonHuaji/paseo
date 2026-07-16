@@ -1,3 +1,5 @@
+import metadata from "./fork-build-info.json";
+
 export const FORK_REPOSITORY = {
   owner: "HamiltonHuaji",
   repo: "paseo",
@@ -8,5 +10,8 @@ export const UPSTREAM_REPOSITORY = {
   repo: "paseo",
 } as const;
 
-// Update this after the fork has incorporated a newer upstream release.
-export const FORK_UPSTREAM_BASE_VERSION = "0.1.109";
+// Reset revision to 1 whenever upstreamBaseVersion advances. Increment it for
+// each subsequent fork build on the same upstream base.
+export const FORK_UPSTREAM_BASE_VERSION = metadata.upstreamBaseVersion;
+export const FORK_REVISION = metadata.revision;
+export const FORK_DISPLAY_VERSION = `${FORK_UPSTREAM_BASE_VERSION}-fork.${FORK_REVISION}`;

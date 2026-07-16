@@ -1592,6 +1592,8 @@ export const ar: TranslationResources = {
       title: "عن",
       appVersion: "نسخة التطبيق",
       thisDevice: "هذا الجهاز",
+      forkVersionDetails:
+        "إصدار التثبيت {{installerVersion}} · مبني على الإصدار الرسمي {{upstreamVersion}}",
       connectedHosts: "المضيفين المتصلين",
       offline: "غير متصل",
       versionDiffers: "الإصدار يختلف عن هذا الجهاز",

@@ -31,6 +31,12 @@ major * 1_000_000 + minor * 1_000 + patch
 
 Prerelease metadata is ignored, so `0.1.102-beta.1` and `0.1.102` both produce `1102`. The same value is used as the iOS `buildNumber` because `packages/app/eas.json` uses EAS's local app version source. Do not re-enable EAS remote version counters or Android `autoIncrement`; F-Droid and other source-based builders need the native build number to be visible in the repo.
 
+Fork APKs keep using this monotonically increasing installer version for `versionCode`. Their
+user-facing lineage, such as `0.1.109-fork.2`, comes from
+`packages/desktop/src/features/fork-build-info.json` and is shown separately. Do not use the fork
+lineage as Expo's package version: Android would treat multiple revisions on the same upstream
+base as the same `versionCode`.
+
 The formula reserves three digits each for minor and patch. If either reaches `1000`, change the formula before cutting that release.
 
 ## Prerequisites (local dev)
