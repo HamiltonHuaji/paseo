@@ -1001,6 +1001,13 @@ export const ja: TranslationResources = {
         idle: "更新ステータスはまだ確認されていません。",
       },
       installError: "デスクトップアプリの更新をインストールできません。",
+      official: {
+        switchFailed: "公式 Paseo ビルドに切り替えられませんでした。",
+        calloutTitle: "新しい公式 Paseo リリースがあります",
+        calloutDescription:
+          "この fork のベースは {{baseVersion}} です。公式 {{latestVersion}} が利用できます。",
+        viewRelease: "リリースを見る",
+      },
       callout: {
         installingTitle: "更新をインストール中",
         failedTitle: "更新に失敗しました",
@@ -1610,6 +1617,7 @@ export const ja: TranslationResources = {
       },
       updates: {
         label: "アプリの更新",
+        forkLabel: "Fork の更新",
         readyToInstall: "インストール準備完了: {{version}}",
         installTitle: "デスクトップの更新をインストール",
         installMessage: "このコンピューターのPaseoを更新します",
@@ -1621,6 +1629,22 @@ export const ja: TranslationResources = {
         checking: "確認中...",
         alertTitle: "エラー",
         alertMessage: "更新確認ダイアログを開けません。",
+        official: {
+          label: "公式 Paseo",
+          checking: "公式リリースを確認しています...",
+          newerAvailable:
+            "この fork のベースは {{baseVersion}} です。公式 {{latestVersion}} が利用できます。",
+          latest: "この fork は最新の公式リリース {{version}} をベースにしています。",
+          unavailable: "公式リリースの状態を取得できません。",
+          check: "公式版を確認",
+          viewRelease: "リリースを見る",
+          switchTo: "{{version}} に切り替え",
+          switching: "切り替え中...",
+          switchTitle: "公式 Paseo に切り替えますか？",
+          switchMessage:
+            "実行中の agent と terminal セッションを停止し、この fork を公式ビルドで置き換えます。fork に戻るには HamiltonHuaji/paseo Releases から手動でインストールする必要があります。",
+          switchConfirm: "公式版に切り替え",
+        },
       },
     },
     appearance: {

@@ -74,7 +74,12 @@ import { BrowserDataSection } from "@/desktop/components/browser-data-section";
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
-import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
+import { useOfficialRelease } from "@/desktop/updates/use-official-release";
+import {
+  formatVersionWithPrefix,
+  type OfficialReleaseCheckResult,
+} from "@/desktop/updates/desktop-updates";
+import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveAppVersion } from "@/utils/app-version";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
@@ -619,6 +624,114 @@ function getUpdateButtonLabel(
   return t("settings.about.updates.update");
 }
 
+function getOfficialReleaseStatusText(
+  t: TFunction,
+  isChecking: boolean,
+  release: OfficialReleaseCheckResult | null,
+): string {
+  if (isChecking && !release) {
+    return t("settings.about.updates.official.checking");
+  }
+  if (release?.hasNewerUpstream) {
+    return t("settings.about.updates.official.newerAvailable", {
+      baseVersion: formatVersionWithPrefix(release.upstreamBaseVersion),
+      latestVersion: formatVersionWithPrefix(release.latestVersion),
+    });
+  }
+  if (release?.latestVersion) {
+    return t("settings.about.updates.official.latest", {
+      version: formatVersionWithPrefix(release.latestVersion),
+    });
+  }
+  return t("settings.about.updates.official.unavailable");
+}
+
+function OfficialAppReleaseRow() {
+  const { t } = useTranslation();
+  const { isDesktopApp, release, isChecking, isSwitching, checkNow, switchToOfficial } =
+    useOfficialRelease();
+
+  const handleCheck = useCallback(() => {
+    void checkNow();
+  }, [checkNow]);
+
+  const handleViewRelease = useCallback(() => {
+    if (release?.releaseUrl) {
+      void openExternalUrl(release.releaseUrl);
+    }
+  }, [release?.releaseUrl]);
+
+  const handleSwitch = useCallback(() => {
+    void confirmDialog({
+      title: t("settings.about.updates.official.switchTitle"),
+      message: t("settings.about.updates.official.switchMessage"),
+      confirmLabel: t("settings.about.updates.official.switchConfirm"),
+      cancelLabel: t("common.actions.cancel"),
+    })
+      .then((confirmed) => {
+        if (!confirmed) {
+          return;
+        }
+        void switchToOfficial().catch(() => undefined);
+        return;
+      })
+      .catch((error) => {
+        console.error("[Settings] Failed to open official build confirmation", error);
+        Alert.alert(
+          t("settings.about.updates.alertTitle"),
+          t("settings.about.updates.alertMessage"),
+        );
+      });
+  }, [switchToOfficial, t]);
+
+  if (!isDesktopApp) {
+    return null;
+  }
+
+  return (
+    <View style={ROW_WITH_BORDER_STYLE}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.official.label")}</Text>
+        <Text style={settingsStyles.rowHint}>
+          {getOfficialReleaseStatusText(t, isChecking, release)}
+        </Text>
+        {release?.errorMessage ? (
+          <Text style={styles.aboutErrorText}>{release.errorMessage}</Text>
+        ) : null}
+      </View>
+      <View style={styles.aboutUpdateActions}>
+        <Button
+          variant="outline"
+          size="sm"
+          onPress={handleCheck}
+          disabled={isChecking || isSwitching}
+        >
+          {isChecking
+            ? t("settings.about.updates.checking")
+            : t("settings.about.updates.official.check")}
+        </Button>
+        {release?.releaseUrl ? (
+          <Button variant="outline" size="sm" onPress={handleViewRelease} disabled={isSwitching}>
+            {t("settings.about.updates.official.viewRelease")}
+          </Button>
+        ) : null}
+        <Button
+          variant="default"
+          size="sm"
+          onPress={handleSwitch}
+          disabled={isChecking || isSwitching || release?.canSwitch !== true}
+        >
+          {isSwitching
+            ? t("settings.about.updates.official.switching")
+            : t("settings.about.updates.official.switchTo", {
+                version: formatVersionWithPrefix(release?.latestVersion),
+              })}
+        </Button>
+      </View>
+    </View>
+  );
+}
+
 function DesktopAppUpdateRow() {
   const { t } = useTranslation();
   const { settings, updateSettings } = useSettings();
@@ -632,7 +745,6 @@ function DesktopAppUpdateRow() {
     checkForUpdates,
     installUpdate,
   } = useDesktopAppUpdater();
-
   useFocusEffect(
     useCallback(() => {
       if (!isDesktopApp) {
@@ -716,7 +828,7 @@ function DesktopAppUpdateRow() {
       </View>
       <View style={ROW_WITH_BORDER_STYLE}>
         <View style={settingsStyles.rowContent}>
-          <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.label")}</Text>
+          <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.forkLabel")}</Text>
           <Text style={settingsStyles.rowHint}>{statusText}</Text>
           {readyUpdateVersion ? (
             <Text style={settingsStyles.rowHint}>
@@ -746,6 +858,7 @@ function DesktopAppUpdateRow() {
           </Button>
         </View>
       </View>
+      <OfficialAppReleaseRow />
     </>
   );
 }
@@ -1597,7 +1710,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   aboutUpdateActions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: theme.spacing[2],
   },
   themeTrigger: {

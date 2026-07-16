@@ -13,6 +13,8 @@ import {
   type UpdateCalloutBody,
 } from "@/desktop/updates/resolve-update-callout";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
+import { useOfficialRelease } from "@/desktop/updates/use-official-release";
+import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { openExternalUrl } from "@/utils/open-external-url";
 
@@ -50,6 +52,7 @@ export function UpdateCalloutSource() {
     installUpdate,
     isInstalling,
   } = useDesktopAppUpdater();
+  const { release: officialRelease } = useOfficialRelease();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const openChangelog = useStableEvent(() => {
@@ -118,6 +121,32 @@ export function UpdateCalloutSource() {
     theme.iconSize.sm,
     t,
   ]);
+
+  useEffect(() => {
+    if (!isDesktopApp || !officialRelease?.hasNewerUpstream || !officialRelease.releaseUrl) {
+      return;
+    }
+
+    const releaseUrl = officialRelease.releaseUrl;
+    return callouts.show({
+      id: "official-upstream-release",
+      dismissalKey: `official-upstream-release:${officialRelease.latestVersion ?? "unknown"}`,
+      priority: 150,
+      title: t("desktop.updates.official.calloutTitle"),
+      description: t("desktop.updates.official.calloutDescription", {
+        baseVersion: formatVersionWithPrefix(officialRelease.upstreamBaseVersion),
+        latestVersion: formatVersionWithPrefix(officialRelease.latestVersion),
+      }),
+      actions: [
+        {
+          label: t("desktop.updates.official.viewRelease"),
+          onPress: () => void openExternalUrl(releaseUrl),
+          variant: "secondary",
+        },
+      ],
+      testID: "official-upstream-release-callout",
+    });
+  }, [callouts, isDesktopApp, officialRelease, t]);
 
   return null;
 }

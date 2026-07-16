@@ -1,5 +1,8 @@
 # Release
 
+Fork-only Windows/Linux desktop builds use the narrower workflow documented in
+[fork-desktop-distribution.md](fork-desktop-distribution.md).
+
 All workspaces share one version and release together.
 
 ## Two steps

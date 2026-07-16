@@ -1009,6 +1009,13 @@ export const ptBR: TranslationResources = {
         idle: "O status de atualização ainda não foi verificado.",
       },
       installError: "Não foi possível instalar a atualização do app desktop.",
+      official: {
+        switchFailed: "Não foi possível mudar para a versão oficial do Paseo.",
+        calloutTitle: "Há uma versão oficial mais recente do Paseo",
+        calloutDescription:
+          "Este fork é baseado na {{baseVersion}}; a versão oficial {{latestVersion}} está disponível.",
+        viewRelease: "Ver versão",
+      },
       callout: {
         installingTitle: "Instalando atualização",
         failedTitle: "Falha na atualização",
@@ -1621,6 +1628,7 @@ export const ptBR: TranslationResources = {
       },
       updates: {
         label: "Atualizações do app",
+        forkLabel: "Atualizações do fork",
         readyToInstall: "Pronta para instalar: {{version}}",
         installTitle: "Instalar atualização desktop",
         installMessage: "Isso atualiza o Paseo neste computador",
@@ -1632,6 +1640,22 @@ export const ptBR: TranslationResources = {
         checking: "Verificando...",
         alertTitle: "Erro",
         alertMessage: "Não foi possível abrir o diálogo de confirmação da atualização.",
+        official: {
+          label: "Paseo oficial",
+          checking: "Verificando versões oficiais...",
+          newerAvailable:
+            "Este fork é baseado na {{baseVersion}}; a versão oficial {{latestVersion}} está disponível.",
+          latest: "Este fork é baseado na versão oficial mais recente, {{version}}.",
+          unavailable: "O status da versão oficial não está disponível.",
+          check: "Verificar oficial",
+          viewRelease: "Ver versão",
+          switchTo: "Mudar para {{version}}",
+          switching: "Mudando...",
+          switchTitle: "Mudar para o Paseo oficial?",
+          switchMessage:
+            "Isso interromperá os agentes e terminais em execução e substituirá este fork pela versão oficial. Para voltar ao fork, será necessário instalá-lo manualmente em HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Mudar para oficial",
+        },
       },
     },
     appearance: {

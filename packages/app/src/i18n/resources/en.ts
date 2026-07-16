@@ -996,6 +996,13 @@ export const en = {
         idle: "Update status has not been checked yet.",
       },
       installError: "Unable to install the desktop app update.",
+      official: {
+        switchFailed: "Unable to switch to the official Paseo build.",
+        calloutTitle: "A newer official Paseo release is available",
+        calloutDescription:
+          "This fork is based on {{baseVersion}}; official {{latestVersion}} is available.",
+        viewRelease: "View release",
+      },
       callout: {
         installingTitle: "Installing update",
         failedTitle: "Update failed",
@@ -1601,6 +1608,7 @@ export const en = {
       },
       updates: {
         label: "App updates",
+        forkLabel: "Fork updates",
         readyToInstall: "Ready to install: {{version}}",
         installTitle: "Install desktop update",
         installMessage: "This updates Paseo on this computer",
@@ -1612,6 +1620,22 @@ export const en = {
         checking: "Checking...",
         alertTitle: "Error",
         alertMessage: "Unable to open the update confirmation dialog.",
+        official: {
+          label: "Official Paseo",
+          checking: "Checking official releases...",
+          newerAvailable:
+            "This fork is based on {{baseVersion}}; official {{latestVersion}} is available.",
+          latest: "This fork is based on the latest official release, {{version}}.",
+          unavailable: "Official release status is unavailable.",
+          check: "Check official",
+          viewRelease: "View release",
+          switchTo: "Switch to {{version}}",
+          switching: "Switching...",
+          switchTitle: "Switch to official Paseo?",
+          switchMessage:
+            "This will stop running agents and terminal sessions, then replace this fork with the official build. Returning to the fork requires manually installing it from HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Switch to official",
+        },
       },
     },
     appearance: {

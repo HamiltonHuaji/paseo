@@ -1017,6 +1017,13 @@ export const fr: TranslationResources = {
         idle: "L'état de la mise à jour n'a pas encore été vérifié.",
       },
       installError: "Impossible d'installer la mise à jour de l'application de bureau.",
+      official: {
+        switchFailed: "Impossible de passer à la version officielle de Paseo.",
+        calloutTitle: "Une version officielle plus récente de Paseo est disponible",
+        calloutDescription:
+          "Ce fork est basé sur {{baseVersion}} ; la version officielle {{latestVersion}} est disponible.",
+        viewRelease: "Voir la version",
+      },
       callout: {
         installingTitle: "Installation de la mise à jour",
         failedTitle: "La mise à jour a échoué",
@@ -1639,6 +1646,7 @@ export const fr: TranslationResources = {
       },
       updates: {
         label: "Mises à jour de l'application",
+        forkLabel: "Mises à jour du fork",
         readyToInstall: "Prêt à installer:{{version}}",
         installTitle: "Installer la mise à jour du bureau",
         installMessage: "Cela met à jourPaseosur cet ordinateur",
@@ -1650,6 +1658,22 @@ export const fr: TranslationResources = {
         checking: "Vérification...",
         alertTitle: "Erreur",
         alertMessage: "Impossible d'ouvrir la boîte de dialogue de confirmation de mise à jour.",
+        official: {
+          label: "Paseo officiel",
+          checking: "Recherche des versions officielles...",
+          newerAvailable:
+            "Ce fork est basé sur {{baseVersion}} ; la version officielle {{latestVersion}} est disponible.",
+          latest: "Ce fork est basé sur la dernière version officielle, {{version}}.",
+          unavailable: "L'état de la version officielle n'est pas disponible.",
+          check: "Vérifier l'officielle",
+          viewRelease: "Voir la version",
+          switchTo: "Passer à {{version}}",
+          switching: "Changement en cours...",
+          switchTitle: "Passer à Paseo officiel ?",
+          switchMessage:
+            "Cela arrêtera les agents et terminaux en cours, puis remplacera ce fork par la version officielle. Pour revenir au fork, vous devrez l'installer manuellement depuis HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Passer à l'officielle",
+        },
       },
     },
     appearance: {
