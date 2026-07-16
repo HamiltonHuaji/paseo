@@ -91,6 +91,9 @@ jobs:
           cache: "npm"
           cache-dependency-path: package-lock.json
 
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+
       - name: Prepare fork build metadata
         shell: bash
         run: |
