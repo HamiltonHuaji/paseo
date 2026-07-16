@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const pkg = require("./package.json");
+const forkBuildMetadata = require("../desktop/src/features/fork-build-info.json");
 const withFdroidAutolinking = require("./plugins/with-fdroid-autolinking");
 const appVariant = process.env.APP_VARIANT ?? "production";
 const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
@@ -8,6 +9,7 @@ const isForkBuild = appVariant === "fork";
 const officialEasProjectId = "0e7f65ce-0367-46c8-a238-2b65963d235a";
 const forkEasProjectId = process.env.PASEO_FORK_EAS_PROJECT_ID?.trim();
 const forkEasOwner = process.env.PASEO_FORK_EAS_OWNER?.trim();
+const forkDisplayVersion = `${forkBuildMetadata.upstreamBaseVersion}-fork.${forkBuildMetadata.revision}`;
 
 const buildProfile = isFdroidBuild
   ? {
@@ -224,6 +226,11 @@ export default {
     extra: {
       fdroidBuild: isFdroidBuild,
       distribution: isForkBuild ? "fork" : "official",
+      forkBuild: {
+        upstreamBaseVersion: forkBuildMetadata.upstreamBaseVersion,
+        revision: forkBuildMetadata.revision,
+        displayVersion: forkDisplayVersion,
+      },
       router: {},
       ...(easProjectId ? { eas: { projectId: easProjectId } } : {}),
     },

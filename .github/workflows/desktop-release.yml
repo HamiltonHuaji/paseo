@@ -64,20 +64,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: scripts
+          sparse-checkout: |
+            scripts
+            packages/desktop/src/features/fork-build-info.json
           ref: ${{ env.CHECKOUT_REF }}
 
       - name: Resolve release metadata
         shell: bash
-        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+        run: |
+          node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+          node scripts/emit-fork-build-env.mjs >> "$GITHUB_ENV"
 
       - name: Create GitHub release
         if: env.IS_SMOKE_TAG != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          title="Paseo $RELEASE_TAG"
+          notes=""
+          if [[ "$GITHUB_REPOSITORY" == "HamiltonHuaji/paseo" ]]; then
+            title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
+            notes=$(printf 'Fork version: `v%s`\n\nInstaller version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
+              "$FORK_DISPLAY_VERSION" "$RELEASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
+          fi
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists, skipping creation"
+            if [[ "$GITHUB_REPOSITORY" == "HamiltonHuaji/paseo" ]]; then
+              gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
+            else
+              echo "Release $RELEASE_TAG already exists, skipping creation"
+            fi
           else
             prerelease_flag=""
             if [[ "$IS_PRERELEASE" == "true" ]]; then
@@ -85,8 +100,8 @@ jobs:
             fi
             gh release create "$RELEASE_TAG" \
               --repo "${{ github.repository }}" \
-              --title "Paseo $RELEASE_TAG" \
-              --notes "" \
+              --title "$title" \
+              --notes "$notes" \
               $prerelease_flag || {
                 echo "Release creation raced with another workflow; continuing."
               }
@@ -132,7 +147,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set desktop package version from tag
+      - name: Set desktop and renderer package versions from tag
         shell: bash
         run: |
           node <<'NODE'
@@ -142,10 +157,14 @@ jobs:
           const version = process.env.DESKTOP_VERSION;
           if (!version) throw new Error('DESKTOP_VERSION env var is missing');
 
-          const packageJsonPath = path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json');
-          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-          packageJson.version = version;
-          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          for (const packageJsonPath of [
+            path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
+            'packages/app/package.json',
+          ]) {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
           NODE
 
       - name: Build desktop release
@@ -232,7 +251,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set desktop package version from tag
+      - name: Set desktop and renderer package versions from tag
         shell: bash
         run: |
           node <<'NODE'
@@ -242,10 +261,14 @@ jobs:
           const version = process.env.DESKTOP_VERSION;
           if (!version) throw new Error('DESKTOP_VERSION env var is missing');
 
-          const packageJsonPath = path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json');
-          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-          packageJson.version = version;
-          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          for (const packageJsonPath of [
+            path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
+            'packages/app/package.json',
+          ]) {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
           NODE
 
       - name: Install Linux smoke display
@@ -330,7 +353,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set desktop package version from tag
+      - name: Set desktop and renderer package versions from tag
         shell: bash
         run: |
           node <<'NODE'
@@ -340,10 +363,14 @@ jobs:
           const version = process.env.DESKTOP_VERSION;
           if (!version) throw new Error('DESKTOP_VERSION env var is missing');
 
-          const packageJsonPath = path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json');
-          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-          packageJson.version = version;
-          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          for (const packageJsonPath of [
+            path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
+            'packages/app/package.json',
+          ]) {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
           NODE
 
       - name: Build desktop release

@@ -7,7 +7,7 @@ user-data directory and daemon home.
 
 The fork produces only these desktop installers:
 
-- Windows x64 and arm64 NSIS installers (`Paseo-Setup-<version>-<arch>.exe`)
+- Windows x64 NSIS installer (`Paseo-Setup-<version>-x64.exe`)
 - Linux x64 Debian package (`Paseo-<version>-amd64.deb`)
 
 Windows fork updates use `electron-updater` and the manifests in the fork's GitHub release. A
@@ -17,15 +17,21 @@ release directly, requires GitHub's SHA-256 asset digest, and installs the verif
 
 ## Version ownership
 
-The package version is the installed-build version and must increase for every fork release. It is
-separate from `FORK_UPSTREAM_BASE_VERSION` in
-`packages/desktop/src/features/fork-build-info.ts`, which records the latest official version whose
-changes have been incorporated into the fork.
+Fork releases expose two deliberately separate versions:
 
-For example, a fork build may be `0.1.110` while its upstream base is `0.1.109`. When official
-`0.1.110` appears, the app reports it as a newer upstream release even though the two installed
-builds have the same package version. Update the base constant only after incorporating that
-official release.
+- The **fork version**, such as `0.1.109-fork.2`, identifies the incorporated official base and the
+  fork revision on that base. This is the user-facing version in Settings and GitHub Releases.
+- The **installer version**, such as `0.1.111`, is the monotonically increasing package version used
+  by Electron, Debian, and Android update ordering.
+
+`packages/desktop/src/features/fork-build-info.json` is the source of truth for the upstream base
+and fork revision. Reset `revision` to `1` when `upstreamBaseVersion` advances; otherwise increment
+it for each fork release. Do not put the fork version into package `version` fields: semver tools
+would treat it as a prerelease, and Android would derive colliding `versionCode` values.
+
+For example, installer `0.1.111` may be displayed as fork `0.1.109-fork.2`. After incorporating
+official `0.1.110`, the next fork becomes `0.1.110-fork.1`, while its installer version continues
+upward. The release workflow writes both identities into the GitHub Release title and body.
 
 ## Build and publish Windows + Linux
 
@@ -44,7 +50,7 @@ gh workflow run desktop-release.yml \
 ```
 
 Use a version greater than every previously published fork build. Confirm that the resulting
-`v<version>` release contains the two Windows installers, their updater metadata, and the Linux
+`v<version>` release contains the Windows x64 installer, its updater metadata, and the Linux
 `.deb` before distributing it.
 
 ## Official release visibility and one-way switch

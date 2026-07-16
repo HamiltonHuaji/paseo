@@ -1599,6 +1599,7 @@ export const en = {
       title: "About",
       appVersion: "App version",
       thisDevice: "This device",
+      forkVersionDetails: "Installer {{installerVersion}} · based on official {{upstreamVersion}}",
       connectedHosts: "Connected hosts",
       offline: "Offline",
       versionDiffers: "Version differs from this device",

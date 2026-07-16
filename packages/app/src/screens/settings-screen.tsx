@@ -82,7 +82,7 @@ import {
 } from "@/desktop/updates/desktop-updates";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveAppVersion } from "@/utils/app-version";
-import { isForkBuild } from "@/constants/build-profile";
+import { forkBuildInfo, isForkBuild } from "@/constants/build-profile";
 import { checkForkAndroidRelease, type ForkAndroidRelease } from "@/updates/fork-android-release";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
@@ -509,6 +509,16 @@ interface AboutSectionProps {
 
 function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSectionProps) {
   const { t } = useTranslation();
+  const activeForkBuildInfo = isDesktopApp || isForkBuild ? forkBuildInfo : null;
+  const displayedVersion = activeForkBuildInfo
+    ? formatVersionWithPrefix(activeForkBuildInfo.displayVersion)
+    : appVersionText;
+  const versionDetails = activeForkBuildInfo
+    ? t("settings.about.forkVersionDetails", {
+        installerVersion: appVersionText,
+        upstreamVersion: formatVersionWithPrefix(activeForkBuildInfo.upstreamBaseVersion),
+      })
+    : t("settings.about.thisDevice");
   return (
     <>
       <SettingsSection title={t("settings.about.title")}>
@@ -516,9 +526,9 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
           <View style={settingsStyles.row}>
             <View style={settingsStyles.rowContent}>
               <Text style={settingsStyles.rowTitle}>{t("settings.about.appVersion")}</Text>
-              <Text style={settingsStyles.rowHint}>{t("settings.about.thisDevice")}</Text>
+              <Text style={settingsStyles.rowHint}>{versionDetails}</Text>
             </View>
-            <Text style={styles.aboutValue}>{appVersionText}</Text>
+            <Text style={styles.aboutValue}>{displayedVersion}</Text>
           </View>
           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
           {isForkBuild && Platform.OS === "android" ? <ForkAndroidUpdateRow /> : null}
