@@ -1,6 +1,12 @@
 .paseo-markdown-math {
   max-width: 100%;
   color: inherit;
+  cursor: copy;
+}
+
+.paseo-markdown-math:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
 }
 
 .paseo-markdown-math .katex {
