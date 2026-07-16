@@ -1,3 +1,4 @@
+import type { DragOrientation } from "@/components/drag-orientation";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 
 export interface TabDropPreview {
@@ -6,31 +7,62 @@ export interface TabDropPreview {
   indicatorIndex: number;
 }
 
-interface ComputeTabDropPreviewInput {
+interface ComputeTabDropPreviewCommonInput {
   activePaneId: string;
   activeTabId: string;
   overPaneId: string;
   overTabId: string;
   targetTabs: WorkspaceTabDescriptor[];
-  activeRect: {
-    left: number;
-    width: number;
-  };
-  overRect: {
-    left: number;
-    width: number;
-  };
+}
+
+interface HorizontalTabDropRect {
+  left: number;
+  width: number;
+}
+
+interface VerticalTabDropRect {
+  top: number;
+  height: number;
+}
+
+type ComputeTabDropPreviewInput = ComputeTabDropPreviewCommonInput &
+  (
+    | {
+        orientation?: Extract<DragOrientation, "horizontal">;
+        activeRect: HorizontalTabDropRect;
+        overRect: HorizontalTabDropRect;
+      }
+    | {
+        orientation: Extract<DragOrientation, "vertical">;
+        activeRect: VerticalTabDropRect;
+        overRect: VerticalTabDropRect;
+      }
+  );
+
+function isAfterDropTarget(input: ComputeTabDropPreviewInput): boolean | null {
+  if (input.orientation === "vertical") {
+    if (input.overRect.height <= 0) {
+      return null;
+    }
+    const activeCenterY = input.activeRect.top + input.activeRect.height / 2;
+    const overCenterY = input.overRect.top + input.overRect.height / 2;
+    return activeCenterY >= overCenterY;
+  }
+
+  if (input.overRect.width <= 0) {
+    return null;
+  }
+  const activeCenterX = input.activeRect.left + input.activeRect.width / 2;
+  const overCenterX = input.overRect.left + input.overRect.width / 2;
+  return activeCenterX >= overCenterX;
 }
 
 export function computeTabDropPreview(input: ComputeTabDropPreviewInput): TabDropPreview | null {
   const targetIndex = input.targetTabs.findIndex((tab) => tab.tabId === input.overTabId);
-  if (targetIndex < 0 || input.overRect.width <= 0) {
+  const insertAfterTarget = isAfterDropTarget(input);
+  if (targetIndex < 0 || insertAfterTarget === null) {
     return null;
   }
-
-  const activeCenterX = input.activeRect.left + input.activeRect.width / 2;
-  const overCenterX = input.overRect.left + input.overRect.width / 2;
-  const insertAfterTarget = activeCenterX >= overCenterX;
 
   const indicatorIndex = targetIndex + (insertAfterTarget ? 1 : 0);
   let insertionIndex = indicatorIndex;

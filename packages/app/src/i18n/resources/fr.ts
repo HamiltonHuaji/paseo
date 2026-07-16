@@ -1690,6 +1690,14 @@ export const fr: TranslationResources = {
           auto: "Système",
         },
       },
+      workspaceTabs: {
+        title: "Onglets de l’espace de travail",
+        description: "À gauche sur les volets larges ; en haut sur les volets étroits",
+        options: {
+          top: "En haut",
+          left: "À gauche",
+        },
+      },
       detailLevel: {
         title: "Niveau de détail",
       },

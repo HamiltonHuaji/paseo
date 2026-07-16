@@ -1678,6 +1678,14 @@ export const ru: TranslationResources = {
           auto: "Система",
         },
       },
+      workspaceTabs: {
+        title: "Вкладки рабочей области",
+        description: "Слева на широких панелях; сверху на узких",
+        options: {
+          top: "Сверху",
+          left: "Слева",
+        },
+      },
       detailLevel: {
         title: "Уровень детализации",
       },

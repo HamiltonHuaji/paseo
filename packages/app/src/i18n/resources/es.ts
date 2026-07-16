@@ -1688,6 +1688,14 @@ export const es: TranslationResources = {
           auto: "Sistema",
         },
       },
+      workspaceTabs: {
+        title: "Pestañas del espacio de trabajo",
+        description: "La izquierda se usa en paneles anchos; los estrechos vuelven arriba",
+        options: {
+          top: "Arriba",
+          left: "Izquierda",
+        },
+      },
       detailLevel: {
         title: "Nivel de detalle",
       },

@@ -1672,6 +1672,14 @@ export const ptBR: TranslationResources = {
           auto: "Sistema",
         },
       },
+      workspaceTabs: {
+        title: "Abas do espaço de trabalho",
+        description: "À esquerda em painéis largos; no topo em painéis estreitos",
+        options: {
+          top: "Superior",
+          left: "Esquerda",
+        },
+      },
       detailLevel: {
         title: "Nível de detalhe",
       },
