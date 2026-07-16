@@ -146,10 +146,13 @@ jobs:
           echo "ANDROID_NDK=$ndk_home" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ndk_home" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ndk_home" >> "$GITHUB_ENV"
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          swap_bytes="$(free -b | awk '/Swap:/ {print $2}')"
+          if (( swap_bytes < 4294967296 )); then
+            sudo fallocate -l 4G /mnt/paseo-swapfile
+            sudo chmod 600 /mnt/paseo-swapfile
+            sudo mkswap /mnt/paseo-swapfile
+            sudo swapon /mnt/paseo-swapfile
+          fi
           free -h
           df -h /
 
