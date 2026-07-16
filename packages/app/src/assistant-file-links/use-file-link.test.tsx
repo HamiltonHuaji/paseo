@@ -99,6 +99,23 @@ function createWrapper(input: { client: TestClient; openedFiles: OpenedFile[]; t
 }
 
 describe("useFileLink", () => {
+  it("exposes external URLs for hover previews", () => {
+    const getDirectorySuggestions = vi.fn(async () => resolvedSuggestions([]));
+    const { result } = renderHook(
+      () => useFileLink({ href: "https://example.com/private/path?mode=review" }),
+      {
+        wrapper: createWrapper({
+          client: { getDirectorySuggestions },
+          openedFiles: [],
+        }),
+      },
+    );
+
+    expect(result.current.externalUrl).toBe("https://example.com/private/path?mode=review");
+    expect(result.current.target).toBeNull();
+    expect(getDirectorySuggestions).not.toHaveBeenCalled();
+  });
+
   it("returns the same object across no-op parent rerenders", () => {
     const getDirectorySuggestions = vi.fn(async () => resolvedSuggestions([]));
     const queryClient = createQueryClient();
