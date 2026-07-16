@@ -25,6 +25,7 @@ import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
 import { MarkdownFenceBlock } from "@/components/markdown/fence";
 import { MarkdownParagraphView, MarkdownTextSpan } from "@/components/markdown-text";
+import { LinkHoverTooltip } from "@/components/link-hover-tooltip";
 import { MarkdownTableCellText } from "@/components/markdown-text-selection";
 import { getMarkdownListMarker, getMarkdownListSpacing } from "@/utils/markdown-list";
 import { markdownNodeContainsType } from "@/utils/markdown-ast";
@@ -491,7 +492,7 @@ function SharedMarkdownLink({
     );
   }
 
-  return (
+  const link = (
     <MarkdownInheritedText
       inheritedStyles={inheritedStyles}
       textStyle={linkStyle}
@@ -501,6 +502,8 @@ function SharedMarkdownLink({
       {children}
     </MarkdownInheritedText>
   );
+
+  return <LinkHoverTooltip target={href || null}>{link}</LinkHoverTooltip>;
 }
 
 function getMarkdownLinkHref(node: ASTNode): string {
