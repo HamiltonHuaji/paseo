@@ -49,6 +49,7 @@ interface TooltipContextValue {
   enabled: boolean;
   openOnPress: boolean;
   interactive: boolean;
+  retainOnContentSelection: boolean;
   delayDuration: number;
   cancelClose: () => void;
   scheduleClose: () => void;
@@ -238,6 +239,7 @@ export function Tooltip({
   enabledOnDesktop = true,
   enabledOnMobile = false,
   interactive = false,
+  retainOnContentSelection = false,
   children,
 }: PropsWithChildren<{
   open?: boolean;
@@ -247,6 +249,7 @@ export function Tooltip({
   enabledOnDesktop?: boolean;
   enabledOnMobile?: boolean;
   interactive?: boolean;
+  retainOnContentSelection?: boolean;
 }>): ReactElement {
   const triggerRef = useRef<View>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -284,11 +287,22 @@ export function Tooltip({
       enabled,
       openOnPress: isCompact,
       interactive,
+      retainOnContentSelection,
       delayDuration,
       cancelClose,
       scheduleClose,
     }),
-    [isOpen, setIsOpen, enabled, isCompact, interactive, delayDuration, cancelClose, scheduleClose],
+    [
+      isOpen,
+      setIsOpen,
+      enabled,
+      isCompact,
+      interactive,
+      retainOnContentSelection,
+      delayDuration,
+      cancelClose,
+      scheduleClose,
+    ],
   );
 
   return <TooltipContext.Provider value={value}>{children}</TooltipContext.Provider>;
@@ -555,6 +569,7 @@ export function TooltipContent({
     enabled: isWeb && ctx.open && ctx.enabled && ctx.interactive,
     triggerRef: ctx.triggerRef,
     contentRef,
+    retainOnContentSelection: ctx.retainOnContentSelection,
     onEnterSafeZone: ctx.cancelClose,
     onLeaveSafeZone: ctx.scheduleClose,
   });
