@@ -32,12 +32,13 @@
     "fork-apk": {
       "distribution": "internal",
       "env": {
-        "APP_VARIANT": "fork"
+        "APP_VARIANT": "fork",
+        "GRADLE_OPTS": "-Dorg.gradle.jvmargs=\"-Xmx3072m -XX:MaxMetaspaceSize=768m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8\" -Dorg.gradle.parallel=false -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=1"
       },
       "android": {
         "buildType": "apk",
         "credentialsSource": "remote",
-        "gradleCommand": ":app:assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel"
+        "gradleCommand": ":app:assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel --max-workers=1 --no-parallel"
       }
     }
   },

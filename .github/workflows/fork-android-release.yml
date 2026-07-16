@@ -109,6 +109,8 @@ jobs:
           const owner = process.env.PASEO_FORK_EAS_OWNER;
           if (!version || !projectId || !owner) throw new Error('Fork build metadata is incomplete');
 
+          const forkGradleOpts = '-Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=768m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8" -Dorg.gradle.parallel=false -Dorg.gradle.daemon=false -Dorg.gradle.workers.max=1';
+
           const packagePath = 'packages/app/package.json';
           const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
           packageJson.version = version;
@@ -116,10 +118,15 @@ jobs:
 
           const easPath = 'packages/app/eas.json';
           const easJson = JSON.parse(fs.readFileSync(easPath, 'utf8'));
-          Object.assign(easJson.build['fork-apk'].env, {
+          const forkProfile = easJson.build['fork-apk'];
+          Object.assign(forkProfile.env, {
             PASEO_FORK_EAS_PROJECT_ID: projectId,
             PASEO_FORK_EAS_OWNER: owner,
+            GRADLE_OPTS: forkGradleOpts,
           });
+          if (!forkProfile.android.gradleCommand.includes('--max-workers=')) {
+            forkProfile.android.gradleCommand += ' --max-workers=1 --no-parallel';
+          }
           fs.writeFileSync(easPath, `${JSON.stringify(easJson, null, 2)}\n`);
           NODE
 

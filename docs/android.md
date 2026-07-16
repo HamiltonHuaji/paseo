@@ -165,6 +165,13 @@ in GitHub secrets. The Expo account is therefore the recovery root for future
 updates to this package ID; protect it with MFA and keep the project under an
 account that will remain accessible.
 
+The fork profile deliberately runs Gradle serially with a 3 GiB heap. Hermes needs
+substantial memory to compile Paseo's release bundle, so EAS's default parallel
+Gradle workers and 4 GiB heap can exhaust a medium builder before Hermes finishes.
+Keep the same limits in the workflow's metadata preparation step: that override
+allows an existing release tag to be rebuilt with a fixed build configuration
+without moving the tag or changing its application source.
+
 EAS prompts before generating a project's first keystore, so bootstrap it once
 from an authenticated terminal before using the non-interactive workflow:
 
