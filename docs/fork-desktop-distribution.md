@@ -33,6 +33,13 @@ For example, installer `0.1.111` may be displayed as fork `0.1.109-fork.2`. Afte
 official `0.1.110`, the next fork becomes `0.1.110-fork.1`, while its installer version continues
 upward. The release workflow writes both identities into the GitHub Release title and body.
 
+New releases remain GitHub drafts while the platform jobs upload installers. The desktop workflow
+publishes the release only after it has assembled and uploaded the final updater manifests. This
+prevents an installed client from discovering a release before `latest.yml` or
+`latest-linux.yml` exists. The Android workflow may attach an APK to an existing release, or create
+a draft when it runs first, but it never publishes that draft; desktop manifest finalization owns
+the publication barrier.
+
 ## Build and publish Windows + Linux
 
 Run the `Desktop Release` workflow manually. Its default `windows-linux` platform selection skips

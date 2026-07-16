@@ -102,6 +102,7 @@ jobs:
               --repo "${{ github.repository }}" \
               --title "$title" \
               --notes "$notes" \
+              --draft \
               $prerelease_flag || {
                 echo "Release creation raced with another workflow; continuing."
               }
@@ -535,3 +536,10 @@ jobs:
             }
           ' "${files[@]}"
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+      - name: Publish release after update manifests are available
+        if: env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release edit "$RELEASE_TAG" --draft=false --repo "${{ github.repository }}"
