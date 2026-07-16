@@ -148,8 +148,8 @@ Keep `react` and `react-dom` pinned to the React version embedded by the current
 ## Fork APK release
 
 `.github/workflows/fork-android-release.yml` builds the independently signed
-`Paseo Fork` APK on EAS, then attaches it to an existing GitHub release. Configure
-these repository settings before the first run:
+`Paseo Fork` APK on a GitHub-hosted runner, then attaches it to an existing GitHub
+release. Configure these repository settings before the first run:
 
 - Secret `EXPO_TOKEN`: a token for the Expo account that owns the fork project.
 - Variable `PASEO_FORK_EAS_OWNER`: that Expo account or organization name.
@@ -159,18 +159,21 @@ Run **Fork Android Release** manually with the release tag and the branch/ref to
 build. With `publish=false`, the APK is retained as a short-lived workflow
 artifact instead of changing the release.
 
-The `fork-apk` profile uses EAS remote credentials. EAS generates and retains the
-Android signing keystore, so no keystore file or password belongs in this repo or
-in GitHub secrets. The Expo account is therefore the recovery root for future
-updates to this package ID; protect it with MFA and keep the project under an
-account that will remain accessible.
+The workflow runs `eas build --local`: compilation and signing happen on the
+ephemeral GitHub runner, while the `fork-apk` profile fetches the EAS-managed
+remote credentials at build time. EAS generates and retains the Android signing
+keystore, so no keystore file or password belongs in this repo or in GitHub
+secrets. The Expo account is therefore the recovery root for future updates to
+this package ID; protect it with MFA and keep the project under an account that
+will remain accessible. Keep this workflow manual-only: its runner briefly holds
+the signing material, so it must never run for pull requests or untrusted refs.
 
 The fork profile deliberately runs Gradle serially with a 3 GiB heap. Hermes needs
-substantial memory to compile Paseo's release bundle, so EAS's default parallel
-Gradle workers and 4 GiB heap can exhaust a medium builder before Hermes finishes.
-Keep the same limits in the workflow's metadata preparation step: that override
-allows an existing release tag to be rebuilt with a fixed build configuration
-without moving the tag or changing its application source.
+substantial memory to compile Paseo's release bundle, so the workflow also adds
+swap to the 16 GiB GitHub runner. Keep the same Gradle limits in the workflow's
+metadata preparation step: that override allows an existing release tag to be
+rebuilt with a fixed build configuration without moving the tag or changing its
+application source.
 
 EAS prompts before generating a project's first keystore, so bootstrap it once
 from an authenticated terminal before using the non-interactive workflow:
