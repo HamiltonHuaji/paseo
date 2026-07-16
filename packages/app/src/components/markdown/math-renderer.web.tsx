@@ -46,12 +46,18 @@ function hasDocumentSelection(): boolean {
   return selection !== null && !selection.isCollapsed && selection.toString().length > 0;
 }
 
-function MathSource({ content, displayMode }: MarkdownMathProps) {
+function MathSource({ content, displayMode, foregroundColor }: MarkdownMathProps) {
+  const foregroundStyle = useMemo(
+    () => (foregroundColor === undefined ? undefined : { color: foregroundColor }),
+    [foregroundColor],
+  );
+
   if (displayMode) {
     return (
       <pre
         className="paseo-markdown-math-source paseo-markdown-math-source--block"
         data-paseo-math-fallback="block"
+        style={foregroundStyle}
       >
         <code>{content}</code>
       </pre>
@@ -62,15 +68,20 @@ function MathSource({ content, displayMode }: MarkdownMathProps) {
     <code
       className="paseo-markdown-math-source paseo-markdown-math-source--inline"
       data-paseo-math-fallback="inline"
+      style={foregroundStyle}
     >
       {content}
     </code>
   );
 }
 
-export function MarkdownMath({ content, displayMode }: MarkdownMathProps) {
+export function MarkdownMath({ content, displayMode, foregroundColor }: MarkdownMathProps) {
   const toast = useToast();
   const rendered = useMemo(() => renderMath(content, displayMode), [content, displayMode]);
+  const foregroundStyle = useMemo(
+    () => (foregroundColor === undefined ? undefined : { color: foregroundColor }),
+    [foregroundColor],
+  );
   const copyFormula = useCallback(() => {
     void copyToClipboard(getMathClipboardText(content, displayMode))
       .then(() => toast.copied())
@@ -100,7 +111,9 @@ export function MarkdownMath({ content, displayMode }: MarkdownMathProps) {
   );
 
   if (rendered.kind === "source") {
-    return <MathSource content={content} displayMode={displayMode} />;
+    return (
+      <MathSource content={content} displayMode={displayMode} foregroundColor={foregroundColor} />
+    );
   }
 
   if (displayMode) {
@@ -114,6 +127,7 @@ export function MarkdownMath({ content, displayMode }: MarkdownMathProps) {
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         role="button"
+        style={foregroundStyle}
         tabIndex={0}
         title={COPY_FORMULA_LABEL}
       />
@@ -130,6 +144,7 @@ export function MarkdownMath({ content, displayMode }: MarkdownMathProps) {
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       role="button"
+      style={foregroundStyle}
       tabIndex={0}
       title={COPY_FORMULA_LABEL}
     />
