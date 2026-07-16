@@ -3,6 +3,7 @@ import type Token from "markdown-it/lib/token.mjs";
 import type { ASTNode } from "react-native-markdown-display";
 import tokensToAST from "react-native-markdown-display/src/lib/util/tokensToAST";
 import { describe, expect, it } from "vitest";
+import { configureMarkdownMath as configureAndroidMarkdownMath } from "./configure-markdown-math.android";
 import { configureMarkdownMath as configureNativeMarkdownMath } from "./configure-markdown-math.native";
 import { createMarkdownParser } from "./parser";
 
@@ -155,6 +156,19 @@ describe("createMarkdownParser", () => {
       "softbreak",
       "text",
       "paragraph_close",
+    ]);
+  });
+
+  it("enables math tokens in the Android configuration", () => {
+    const parser = configureAndroidMarkdownMath(new MarkdownIt());
+
+    expect(
+      flattenTokens(parser.parse("$x$\n\n$$\ny\n$$", {}))
+        .filter((token) => token.type === "math_inline" || token.type === "math_block")
+        .map((token) => ({ type: token.type, content: token.content })),
+    ).toEqual([
+      { type: "math_inline", content: "x" },
+      { type: "math_block", content: "y\n" },
     ]);
   });
 });

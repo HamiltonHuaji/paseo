@@ -6,6 +6,7 @@ import "katex/contrib/copy-tex";
 import { useToast } from "@/contexts/toast-context";
 import { copyToClipboard } from "@/utils/copy-to-clipboard";
 import "./math-renderer.web.css";
+import { getMathClipboardText } from "./math-clipboard";
 import type { MarkdownMathProps } from "./math-renderer.types";
 
 export type { MarkdownMathProps } from "./math-renderer.types";
@@ -38,10 +39,6 @@ function renderMath(content: string, displayMode: boolean): MathRender {
   } catch {
     return { kind: "source" };
   }
-}
-
-function getMathClipboardText(content: string, displayMode: boolean): string {
-  return displayMode ? `$$${content}$$` : `$${content}$`;
 }
 
 function hasDocumentSelection(): boolean {

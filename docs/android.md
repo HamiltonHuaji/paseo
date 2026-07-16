@@ -4,14 +4,22 @@
 
 Controlled by `APP_VARIANT` in `packages/app/app.config.js` (vanilla Expo, no custom Gradle plugin):
 
-| Variant       | App name    | Package ID       |
-| ------------- | ----------- | ---------------- |
-| `production`  | Paseo       | `sh.paseo`       |
-| `development` | Paseo Debug | `sh.paseo.debug` |
+| Variant       | App name    | Package ID                      |
+| ------------- | ----------- | ------------------------------- |
+| `production`  | Paseo       | `sh.paseo`                      |
+| `development` | Paseo Debug | `sh.paseo.debug`                |
+| `fork`        | Paseo Fork  | `io.github.hamiltonhuaji.paseo` |
 
-EAS profiles: `development`, `production`, and `production-apk` in `packages/app/eas.json`.
+EAS profiles: `development`, `production`, `production-apk`, and `fork-apk` in
+`packages/app/eas.json`.
 
 `development` uses Android `debug`.
+
+The fork uses a separate package ID and `paseo-fork` URL scheme, so it installs
+alongside the official app. It deliberately disables EAS Update and remote push
+registration: the fork's APK comes from the fork GitHub release, while the
+official app keeps using the official OTA and notification projects. QR scanning
+and all local app data remain available.
 
 ## Version codes
 
@@ -125,6 +133,56 @@ Keep the excluded npm packages installed. Normal builds use them, while the F-Dr
 ### React version lockstep
 
 Keep `react` and `react-dom` pinned to the React version embedded by the current `react-native` release. React Native `0.81.x` embeds `react-native-renderer` `19.1.0`, so `packages/app` must use React `19.1.0`. Bumping React to a newer patch can build successfully but crash at JS startup on Android with `Incompatible React versions`, leaving the app on the native splash screen.
+
+## Fork APK release
+
+`.github/workflows/fork-android-release.yml` builds the independently signed
+`Paseo Fork` APK on EAS, then attaches it to an existing GitHub release. Configure
+these repository settings before the first run:
+
+- Secret `EXPO_TOKEN`: a token for the Expo account that owns the fork project.
+- Variable `PASEO_FORK_EAS_OWNER`: that Expo account or organization name.
+- Variable `PASEO_FORK_EAS_PROJECT_ID`: the UUID of the fork's EAS project.
+
+Run **Fork Android Release** manually with the release tag and the branch/ref to
+build. With `publish=false`, the APK is retained as a short-lived workflow
+artifact instead of changing the release.
+
+The `fork-apk` profile uses EAS remote credentials. EAS generates and retains the
+Android signing keystore, so no keystore file or password belongs in this repo or
+in GitHub secrets. The Expo account is therefore the recovery root for future
+updates to this package ID; protect it with MFA and keep the project under an
+account that will remain accessible.
+
+EAS prompts before generating a project's first keystore, so bootstrap it once
+from an authenticated terminal before using the non-interactive workflow:
+
+```bash
+cd packages/app
+PASEO_FORK_EAS_OWNER=<owner> \
+PASEO_FORK_EAS_PROJECT_ID=<project-uuid> \
+APP_VARIANT=fork \
+npx eas credentials:configure-build --platform android --profile fork-apk
+```
+
+Choose **Generate new keystore**. This creates the key directly in EAS; it does
+not require keeping a local key file. Subsequent CI builds pass
+`--freeze-credentials`, so a missing or changed credential stops the build
+instead of silently creating a different signing identity.
+
+The fork's About page checks the latest stable `HamiltonHuaji/paseo` GitHub
+release. When that release contains the expected
+`Paseo-Fork-<version>-android.apk` asset, the update action opens its trusted
+GitHub download URL; Android remains responsible for verifying the matching
+signature and installing the update.
+
+## Formula rendering
+
+Web and Electron Markdown use KaTeX. Android uses the native
+`ratex-react-native` renderer and enables the same TeX delimiters in the shared
+Markdown parser. Tapping a rendered Android formula copies its delimited TeX
+source. iOS intentionally retains the source fallback until it has a separately
+validated native renderer.
 
 ## Screenshots
 
