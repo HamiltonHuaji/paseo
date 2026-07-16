@@ -12,6 +12,7 @@ export interface WorkspaceTabLayoutInput {
     tabIconWidth: number;
     tabHorizontalPadding: number;
     estimatedCharWidth: number;
+    minimumLabelCharacters: number;
     closeButtonWidth: number;
   };
 }
@@ -61,15 +62,20 @@ export function computeWorkspaceTabLayout(
     input.metrics.tabIconWidth +
     input.metrics.tabHorizontalPadding * 2 +
     input.metrics.closeButtonWidth;
-  const iconOnlyTotalTabsWidth = iconOnlyTabWidth * tabCount;
-  const requiresHorizontalScrollFallback = availableTabsWidth < iconOnlyTotalTabsWidth;
+  const minimumReadableTabWidth = clamp(
+    iconOnlyTabWidth + input.metrics.minimumLabelCharacters * input.metrics.estimatedCharWidth,
+    iconOnlyTabWidth,
+    input.metrics.maxTabWidth,
+  );
+  const minimumReadableTotalTabsWidth = minimumReadableTabWidth * tabCount;
+  const requiresHorizontalScrollFallback = availableTabsWidth < minimumReadableTotalTabsWidth;
   const resolvedWidth = requiresHorizontalScrollFallback
-    ? iconOnlyTabWidth
-    : clamp(availableTabsWidth / tabCount, iconOnlyTabWidth, input.metrics.maxTabWidth);
+    ? minimumReadableTabWidth
+    : clamp(availableTabsWidth / tabCount, minimumReadableTabWidth, input.metrics.maxTabWidth);
   const resolvedWidths = Array.from({ length: tabCount }, () => resolvedWidth);
 
   const roundedWidths = resolvedWidths.map((width) =>
-    Math.round(clamp(width, iconOnlyTabWidth, input.metrics.maxTabWidth)),
+    Math.round(clamp(width, minimumReadableTabWidth, input.metrics.maxTabWidth)),
   );
 
   return {

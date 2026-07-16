@@ -17,6 +17,7 @@ interface UseWorkspaceTabLayoutInput {
     tabIconWidth: number;
     tabHorizontalPadding: number;
     estimatedCharWidth: number;
+    minimumLabelCharacters: number;
     closeButtonWidth: number;
   };
 }

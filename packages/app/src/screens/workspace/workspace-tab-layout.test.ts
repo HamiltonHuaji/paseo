@@ -10,6 +10,7 @@ const metrics = {
   tabIconWidth: 14,
   tabHorizontalPadding: 12,
   estimatedCharWidth: 7,
+  minimumLabelCharacters: 4,
   closeButtonWidth: 22,
 };
 
@@ -58,7 +59,20 @@ describe("computeWorkspaceTabLayout", () => {
     expect(result.items.map((item) => item.width)).toEqual([175, 175, 175, 175]);
   });
 
-  it("collapses to icon-only before allowing horizontal scroll fallback", () => {
+  it("keeps a readable label while tabs still fit", () => {
+    const result = computeWorkspaceTabLayout({
+      viewportWidth: 500,
+      tabLabelLengths: [14, 14, 14, 14],
+      metrics,
+    });
+
+    expect(result.closeButtonPolicy).toBe("all");
+    expect(result.requiresHorizontalScrollFallback).toBe(false);
+    expect(result.items.map((item) => item.width)).toEqual([88, 88, 88, 88]);
+    expect(result.items.every((item) => item.showLabel)).toBe(true);
+  });
+
+  it("uses horizontal scrolling instead of collapsing labels to icons", () => {
     const result = computeWorkspaceTabLayout({
       viewportWidth: 388,
       tabLabelLengths: [14, 14, 14, 14],
@@ -66,22 +80,9 @@ describe("computeWorkspaceTabLayout", () => {
     });
 
     expect(result.closeButtonPolicy).toBe("all");
-    expect(result.requiresHorizontalScrollFallback).toBe(false);
-    expect(result.items.map((item) => item.width)).toEqual([60, 60, 60, 60]);
-    expect(result.items.every((item) => !item.showLabel)).toBe(true);
-  });
-
-  it("allows horizontal scroll only when icon-only tabs still cannot fit", () => {
-    const result = computeWorkspaceTabLayout({
-      viewportWidth: 300,
-      tabLabelLengths: [14, 14, 14, 14],
-      metrics,
-    });
-
-    expect(result.closeButtonPolicy).toBe("all");
     expect(result.requiresHorizontalScrollFallback).toBe(true);
-    expect(result.items.map((item) => item.width)).toEqual([60, 60, 60, 60]);
-    expect(result.items.every((item) => !item.showLabel)).toBe(true);
+    expect(result.items.map((item) => item.width)).toEqual([88, 88, 88, 88]);
+    expect(result.items.every((item) => item.showLabel)).toBe(true);
   });
 
   it("returns empty layout details when there are no tabs", () => {
