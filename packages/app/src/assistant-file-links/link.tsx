@@ -232,7 +232,7 @@ function FileLinkHoverTooltip({
     return children;
   }
   return (
-    <Tooltip delayDuration={400} interactive>
+    <Tooltip delayDuration={400} interactive retainOnContentSelection>
       <TooltipTrigger asChild>
         <View style={FILE_LINK_TOOLTIP_TRIGGER_STYLE}>{children}</View>
       </TooltipTrigger>

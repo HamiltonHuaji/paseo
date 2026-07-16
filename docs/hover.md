@@ -124,6 +124,8 @@ For this case, use `useHoverSafeZone` (`packages/app/src/hooks/use-hover-safe-zo
 
 For selectable or otherwise interactive tooltip content, pass `interactive` to `<Tooltip>`. The tooltip primitive then enables pointer events and wires its trigger, portaled content, and the gap between them into `useHoverSafeZone`. Ordinary informational tooltips stay non-interactive so they cannot intercept clicks or selections.
 
+If selected tooltip text must survive a pointer drag outside the safe zone, also pass `retainOnContentSelection`. This opt-in installs a `selectionchange` listener only while the interactive tooltip is open. A non-empty selection intersecting the tooltip content suppresses the pending close; clearing that selection closes the tooltip when the pointer is already outside. Closing or unmounting the tooltip removes the listener.
+
 Don't roll your own. The math is annoying, the edge cases (pointer leaves window, drag in progress, content unmounts) are subtle, and we already paid for the hook.
 
 ## Pre-PR checklist
