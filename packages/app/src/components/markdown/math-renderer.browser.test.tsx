@@ -1,8 +1,22 @@
 import React from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MarkdownMath, type MarkdownMathProps } from "./math-renderer";
+
+const mocks = vi.hoisted(() => ({
+  copied: vi.fn(),
+  copyToClipboard: vi.fn<() => Promise<void>>(),
+  error: vi.fn(),
+}));
+
+vi.mock("@/contexts/toast-context", () => ({
+  useToast: () => ({ copied: mocks.copied, error: mocks.error, show: vi.fn() }),
+}));
+
+vi.mock("@/utils/copy-to-clipboard", () => ({
+  copyToClipboard: mocks.copyToClipboard,
+}));
 
 const KATEX_STYLESHEET_PATH = "/katex-0.17.0/katex.min.css";
 const KATEX_MAIN_FONT_PATH = "/katex-0.17.0/fonts/KaTeX_Main-Regular.woff2";
@@ -49,6 +63,13 @@ beforeAll(async () => {
 
 afterAll(() => {
   katexStylesheet?.remove();
+});
+
+beforeEach(() => {
+  mocks.copied.mockReset();
+  mocks.copyToClipboard.mockReset();
+  mocks.copyToClipboard.mockResolvedValue(undefined);
+  mocks.error.mockReset();
 });
 
 afterEach(() => {
@@ -172,5 +193,57 @@ describe("MarkdownMath", () => {
     expect(clipboardData.getData("text/plain")).toBe(`Before $${content}$ after`);
     expect(clipboardData.getData("text/html")).toContain("katex");
     selection?.removeAllRanges();
+  });
+
+  it("copies an inline formula as delimited TeX when clicked", async () => {
+    const content = String.raw`E = mc^2`;
+    const host = mountMath({ content, displayMode: false });
+    const math = host.querySelector<HTMLElement>("[data-paseo-markdown-math='inline']");
+
+    math?.click();
+
+    await vi.waitFor(() => {
+      expect(mocks.copyToClipboard).toHaveBeenCalledWith(`$${content}$`);
+      expect(mocks.copied).toHaveBeenCalledOnce();
+    });
+    expect(math?.getAttribute("role")).toBe("button");
+    expect(math?.getAttribute("tabindex")).toBe("0");
+    expect(math?.getAttribute("aria-label")).toBe(`Copy formula: ${content}`);
+    expect(math?.getAttribute("title")).toBe("Copy formula");
+    expect(window.getComputedStyle(math as HTMLElement).cursor).toBe("copy");
+  });
+
+  it("does not replace drag-selection behavior with click-to-copy", () => {
+    const host = mountMath({ content: String.raw`x + y`, displayMode: false });
+    const math = host.querySelector<HTMLElement>("[data-paseo-markdown-math='inline']");
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(math as HTMLElement);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    math?.click();
+
+    expect(mocks.copyToClipboard).not.toHaveBeenCalled();
+    selection?.removeAllRanges();
+  });
+
+  it("copies a display formula with display delimiters from the keyboard", async () => {
+    const content = String.raw`\int_0^1 x^2\,dx`;
+    const host = mountMath({ content, displayMode: true });
+    const math = host.querySelector<HTMLElement>("[data-paseo-markdown-math='block']");
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+    });
+
+    math?.dispatchEvent(event);
+
+    await vi.waitFor(() => {
+      expect(mocks.copyToClipboard).toHaveBeenCalledWith(`$$${content}$$`);
+      expect(mocks.copied).toHaveBeenCalledOnce();
+    });
+    expect(event.defaultPrevented).toBe(true);
   });
 });
