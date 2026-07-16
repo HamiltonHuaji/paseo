@@ -473,6 +473,8 @@ export const en = {
         copyAgentId: "Copy agent id",
         copyFilePath: "Copy file path",
         rename: "Rename",
+        moveToTop: "Move to top",
+        moveToBottom: "Move to bottom",
         closeAbove: "Close tabs above",
         closeBelow: "Close tabs below",
         closeLeft: "Close to the left",

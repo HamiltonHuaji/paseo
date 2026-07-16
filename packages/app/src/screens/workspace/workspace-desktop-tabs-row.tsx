@@ -77,6 +77,7 @@ import {
 import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
 import {
   buildWorkspaceDesktopTabActions,
+  moveWorkspaceTabToEdge,
   type WorkspaceDesktopTabActions,
   type WorkspaceTabMenuEntry,
   type WorkspaceTabMenuLabels,
@@ -511,6 +512,32 @@ export interface WorkspaceDesktopTabsRowProps {
   showPaneSplitActions?: boolean;
 }
 
+function useWorkspaceTabEdgeReorder(
+  tabs: WorkspaceDesktopTabRowItem[],
+  onReorderTabs: (nextTabs: WorkspaceTabDescriptor[]) => void,
+) {
+  const orderedTabs = useMemo(() => tabs.map((item) => item.tab), [tabs]);
+  const onMoveTabToStart = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "start");
+      if (nextTabs !== orderedTabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, orderedTabs],
+  );
+  const onMoveTabToEnd = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "end");
+      if (nextTabs !== orderedTabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, orderedTabs],
+  );
+  return { onMoveTabToStart, onMoveTabToEnd };
+}
+
 function getFallbackTabLabel(
   tab: WorkspaceTabDescriptor,
   labels: { newAgent: string; setup: string; terminal: string; agent: string },
@@ -538,6 +565,8 @@ function useWorkspaceTabMenuLabels(): WorkspaceTabMenuLabels {
       copyAgentId: t("workspace.tabs.menu.copyAgentId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
+      moveToTop: t("workspace.tabs.menu.moveToTop"),
+      moveToBottom: t("workspace.tabs.menu.moveToBottom"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
       closeBelow: t("workspace.tabs.menu.closeBelow"),
       closeLeft: t("workspace.tabs.menu.closeLeft"),
@@ -917,6 +946,7 @@ export function WorkspaceDesktopTabsRow({
     [t],
   );
   const tabMenuLabels = useWorkspaceTabMenuLabels();
+  const { onMoveTabToStart, onMoveTabToEnd } = useWorkspaceTabEdgeReorder(tabs, onReorderTabs);
   const tabLabelLengths = useMemo(
     () =>
       tabs.map((tab) => {
@@ -1077,6 +1107,8 @@ export function WorkspaceDesktopTabsRow({
           onCloseTabsToLeft={onCloseTabsToLeft}
           onCloseTabsToRight={onCloseTabsToRight}
           onCloseOtherTabs={onCloseOtherTabs}
+          onMoveTabToStart={onMoveTabToStart}
+          onMoveTabToEnd={onMoveTabToEnd}
           resolvedTabWidth={resolvedTabWidth}
           showLabel={showLabel}
           showCloseButton={shouldShowCloseButton}
@@ -1107,6 +1139,8 @@ export function WorkspaceDesktopTabsRow({
       onNavigateTab,
       onReloadAgent,
       onRenameTab,
+      onMoveTabToStart,
+      onMoveTabToEnd,
       setHoveredCloseTabKey,
       tabMenuLabels,
       tabDropPreviewIndex,
@@ -1229,6 +1263,7 @@ export function WorkspaceDesktopTabsRail({
   const splitRightKeys = useShortcutKeys("workspace-pane-split-right");
   const splitDownKeys = useShortcutKeys("workspace-pane-split-down");
   const tabMenuLabels = useWorkspaceTabMenuLabels();
+  const { onMoveTabToStart, onMoveTabToEnd } = useWorkspaceTabEdgeReorder(tabs, onReorderTabs);
   const railScrollRef = useRef<ScrollView>(null);
   const railScrollOffsetRef = useRef(0);
   const [railViewportHeight, setRailViewportHeight] = useState(0);
@@ -1356,6 +1391,8 @@ export function WorkspaceDesktopTabsRail({
           onCloseTabsToLeft={onCloseTabsToLeft}
           onCloseTabsToRight={onCloseTabsToRight}
           onCloseOtherTabs={onCloseOtherTabs}
+          onMoveTabToStart={onMoveTabToStart}
+          onMoveTabToEnd={onMoveTabToEnd}
           resolvedTabWidth={WORKSPACE_TAB_RAIL_WIDTH}
           showLabel
           showCloseButton
@@ -1385,6 +1422,8 @@ export function WorkspaceDesktopTabsRail({
       onNavigateTab,
       onReloadAgent,
       onRenameTab,
+      onMoveTabToStart,
+      onMoveTabToEnd,
       setHoveredCloseTabKey,
       tabDropPreviewIndex,
       tabMenuLabels,
@@ -1476,6 +1515,8 @@ function ResolvedDesktopTabChip({
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
+  onMoveTabToStart,
+  onMoveTabToEnd,
   resolvedTabWidth,
   showLabel,
   showCloseButton,
@@ -1503,6 +1544,8 @@ function ResolvedDesktopTabChip({
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  onMoveTabToStart: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd: (tabId: string) => Promise<void> | void;
   resolvedTabWidth: number;
   showLabel: boolean;
   showCloseButton: boolean;
@@ -1532,6 +1575,8 @@ function ResolvedDesktopTabChip({
         onCloseTabsToLeft,
         onCloseTabsToRight,
         onCloseOtherTabs,
+        onMoveTabToStart,
+        onMoveTabToEnd,
         labels,
       }),
     [
@@ -1545,6 +1590,8 @@ function ResolvedDesktopTabChip({
       onCopyFilePath,
       onCopyResumeCommand,
       labels,
+      onMoveTabToEnd,
+      onMoveTabToStart,
       onReloadAgent,
       onRenameTab,
       orientation,
