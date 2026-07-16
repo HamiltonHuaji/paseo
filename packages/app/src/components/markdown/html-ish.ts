@@ -30,6 +30,7 @@ const BACKTICK_RUN_RE = /`+/g;
 const SAFE_IMAGE_SRC_RE = /^(https?:\/\/|data:image\/(?:png|gif|jpe?g);base64,)/i;
 const SAFE_LINK_HREF_RE = /^(https?:\/\/|#(?:$|[\w-]))/i;
 const VOID_HTML_TAGS = new Set(["br", "img"]);
+const TRANSPARENT_CONTAINER_TAGS = new Set(["p"]);
 
 interface ProtectedMarkdownRange {
   start: number;
@@ -78,7 +79,13 @@ interface HtmlishTokenParser {
 }
 
 export function splitHtmlishMarkdown(source: string): MarkdownDisplayPart[] {
-  return splitHtmlishTokens(tokenizeHtmlishMarkdown(source));
+  return splitHtmlishTokens(removeTransparentContainerTags(tokenizeHtmlishMarkdown(source)));
+}
+
+function removeTransparentContainerTags(tokens: HtmlToken[]): HtmlToken[] {
+  return tokens.filter(
+    (token) => token.kind !== "tag" || !TRANSPARENT_CONTAINER_TAGS.has(token.name),
+  );
 }
 
 function splitHtmlishTokens(tokens: HtmlToken[]): MarkdownDisplayPart[] {
@@ -346,10 +353,23 @@ function renderInlineTokens(tokens: HtmlToken[]): string {
 function renderImageToken(token: HtmlTagToken): string {
   const image = imageTokenToInlineImage(token, undefined);
   if (!image) {
+    const src = token.attributes.src ?? "";
+    if (isRelativeImageSource(src)) {
+      return token.attributes.alt ?? "";
+    }
     return token.raw;
   }
 
   return `![${escapeMarkdownImageAlt(image.alt)}](${image.src})`;
+}
+
+function isRelativeImageSource(src: string): boolean {
+  return (
+    src.length > 0 &&
+    !src.startsWith("//") &&
+    !src.startsWith("#") &&
+    !/^[a-z][a-z\d+.-]*:/i.test(src)
+  );
 }
 
 function renderLinkToken(token: HtmlTagToken, children: HtmlToken[]): string {

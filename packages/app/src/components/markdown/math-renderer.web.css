@@ -1,0 +1,46 @@
+.paseo-markdown-math {
+  max-width: 100%;
+  color: inherit;
+}
+
+.paseo-markdown-math .katex {
+  color: inherit;
+  font-size: 1em;
+}
+
+.paseo-markdown-math--inline {
+  display: inline;
+  vertical-align: baseline;
+}
+
+.paseo-markdown-math--block {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.paseo-markdown-math--block > .katex-display {
+  min-width: max-content;
+}
+
+.paseo-markdown-math-source {
+  max-width: 100%;
+  padding: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  background: transparent;
+  border: 0;
+}
+
+.paseo-markdown-math-source--inline {
+  display: inline;
+}
+
+.paseo-markdown-math-source--block {
+  display: block;
+  overflow-x: auto;
+}

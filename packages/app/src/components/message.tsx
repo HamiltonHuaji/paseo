@@ -28,7 +28,8 @@ import {
   cloneElement,
 } from "react";
 import type { ComponentType, ReactNode } from "react";
-import { MarkdownIt, type ASTNode, type RenderRules } from "react-native-markdown-display";
+import type MarkdownIt from "markdown-it";
+import { type ASTNode, type RenderRules } from "react-native-markdown-display";
 import { useQuery } from "@tanstack/react-query";
 import MaskedView from "@react-native-masked-view/masked-view";
 import {
@@ -61,7 +62,12 @@ import Animated, {
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "react-native-svg";
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
-import { MarkdownRenderer, type MarkdownStyles } from "@/components/markdown/renderer";
+import {
+  createMarkdownMathRules,
+  MarkdownRenderer,
+  type MarkdownStyles,
+} from "@/components/markdown/renderer";
+import { createMarkdownParser } from "@/components/markdown/parser";
 import type { TodoEntry, UserMessageImageAttachment } from "@/types/stream";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
@@ -1032,10 +1038,7 @@ function resolveAssistantImageErrorText(
   return fallbackText;
 }
 
-function getInlineCodeAutoLinkUrl(
-  markdownParser: ReturnType<typeof MarkdownIt>,
-  content: string,
-): string | null {
+function getInlineCodeAutoLinkUrl(markdownParser: MarkdownIt, content: string): string | null {
   const trimmed = content.trim();
   if (!trimmed) {
     return null;
@@ -1580,16 +1583,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   spacing = "default",
 }: AssistantMessageProps) {
   const markdownParser = useMemo(() => {
-    const parser = MarkdownIt({ typographer: true, linkify: true });
-    const defaultValidateLink = parser.validateLink.bind(parser);
-    parser.validateLink = (url: string) => {
-      if (url.trim().toLowerCase().startsWith("file://")) {
-        return true;
-      }
-
-      return defaultValidateLink(url);
-    };
-    return parser;
+    return createMarkdownParser({ allowFileLinks: true });
   }, []);
 
   const fileLinkActions = useAssistantFileLinkActions();
@@ -1602,6 +1596,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 
   const markdownRules = useMemo<RenderRules>(() => {
     return {
+      ...createMarkdownMathRules(),
       text: (
         node: ASTNode,
         _children: ReactNode[],

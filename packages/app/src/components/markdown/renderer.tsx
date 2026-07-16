@@ -16,11 +16,8 @@ import {
   type ViewStyle,
 } from "react-native";
 import { ChevronDown, ChevronRight } from "lucide-react-native";
-import Markdown, {
-  MarkdownIt,
-  type ASTNode,
-  type RenderRules,
-} from "react-native-markdown-display";
+import Markdown, { type ASTNode, type RenderRules } from "react-native-markdown-display";
+import type MarkdownIt from "markdown-it";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { AppearanceStyleBoundary } from "@/components/appearance-style-boundary";
 import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
@@ -38,6 +35,8 @@ import {
 } from "./html-ish";
 import { resolveInlineImageSize, type InlineImageDimensions } from "./inline-image-size";
 import { groupMarkdownParts, type MarkdownPartGroup } from "./part-groups";
+import { MarkdownMath } from "./math-renderer";
+import { createMarkdownParser } from "./parser";
 
 export type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
 
@@ -45,7 +44,7 @@ interface MarkdownWithStableRendererProps {
   children: ReactNode;
   style: ReturnType<typeof createMarkdownStyles> | ReturnType<typeof createCompactMarkdownStyles>;
   rules?: RenderRules;
-  markdownit?: ReturnType<typeof MarkdownIt>;
+  markdownit?: MarkdownIt;
   onLinkPress?: (url: string) => boolean;
   allowedImageHandlers?: readonly string[];
   topLevelMaxExceededItem?: ReactNode;
@@ -62,14 +61,14 @@ function compactMarkdownStyleMapping(theme: Theme): Partial<MarkdownWithStableRe
   return { style: createCompactMarkdownStyles(theme) };
 }
 
-const defaultMarkdownParser = MarkdownIt({ typographer: true, linkify: true });
+const defaultMarkdownParser = createMarkdownParser();
 const EMPTY_TEXT_STYLE: TextStyle = {};
 const MARKDOWN_LIST_ITEM_CONTENT_FLEX: ViewStyle = { flex: 1, flexShrink: 1, minWidth: 0 };
 export interface MarkdownRendererProps {
   text: string;
   compact?: boolean;
   rules?: RenderRules;
-  markdownit?: ReturnType<typeof MarkdownIt>;
+  markdownit?: MarkdownIt;
   onLinkPress?: (url: string) => boolean;
   allowedImageHandlers?: readonly string[];
   topLevelMaxExceededItem?: ReactNode;
@@ -500,8 +499,20 @@ function getMarkdownLinkHref(node: ASTNode): string {
   return typeof href === "string" ? href : "";
 }
 
+export function createMarkdownMathRules(): RenderRules {
+  return {
+    math_inline: (node: ASTNode) => (
+      <MarkdownMath key={node.key} content={node.content ?? ""} displayMode={false} />
+    ),
+    math_block: (node: ASTNode) => (
+      <MarkdownMath key={node.key} content={node.content ?? ""} displayMode />
+    ),
+  };
+}
+
 export function createSharedMarkdownRules(): RenderRules {
   return {
+    ...createMarkdownMathRules(),
     text: (
       node: ASTNode,
       _children: ReactNode[],
