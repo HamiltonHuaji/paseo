@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import type { ComponentType, ReactNode } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -81,6 +82,8 @@ import {
 } from "@/desktop/updates/desktop-updates";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveAppVersion } from "@/utils/app-version";
+import { isForkBuild } from "@/constants/build-profile";
+import { checkForkAndroidRelease, type ForkAndroidRelease } from "@/updates/fork-android-release";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
 import { settingsStyles } from "@/styles/settings";
 import { THINKING_TONE_NATIVE_PCM_BASE64 } from "@/utils/thinking-tone.native-pcm";
@@ -518,6 +521,7 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
             <Text style={styles.aboutValue}>{appVersionText}</Text>
           </View>
           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
+          {isForkBuild && Platform.OS === "android" ? <ForkAndroidUpdateRow /> : null}
         </View>
       </SettingsSection>
       <ConnectedHostsSection clientVersion={appVersion} />
@@ -622,6 +626,84 @@ function getUpdateButtonLabel(
     });
   }
   return t("settings.about.updates.update");
+}
+
+function ForkAndroidUpdateRow() {
+  const { t } = useTranslation();
+  const currentVersion = resolveAppVersion();
+  const requestIdRef = useRef(0);
+  const [release, setRelease] = useState<ForkAndroidRelease | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [hasCheckError, setHasCheckError] = useState(false);
+
+  const checkNow = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    setIsChecking(true);
+    setHasCheckError(false);
+    try {
+      if (!currentVersion) throw new Error("The current app version is unavailable.");
+      const nextRelease = await checkForkAndroidRelease(currentVersion);
+      if (requestId === requestIdRef.current) setRelease(nextRelease);
+    } catch (error) {
+      console.error("[Settings] Failed to check fork Android release", error);
+      if (requestId === requestIdRef.current) setHasCheckError(true);
+    } finally {
+      if (requestId === requestIdRef.current) setIsChecking(false);
+    }
+  }, [currentVersion]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void checkNow();
+      return () => {
+        requestIdRef.current += 1;
+      };
+    }, [checkNow]),
+  );
+
+  const handleOpenUpdate = useCallback(() => {
+    const url = release?.hasUpdate && release.apkUrl ? release.apkUrl : release?.releaseUrl;
+    if (url) void openExternalUrl(url);
+  }, [release]);
+
+  let statusText = "—";
+  if (isChecking && !release) {
+    statusText = t("settings.about.updates.checking");
+  } else if (hasCheckError) {
+    statusText = t("settings.about.updates.official.unavailable");
+  } else if (release?.hasUpdate) {
+    statusText = t("settings.about.updates.updateTo", {
+      version: formatVersionWithPrefix(release.latestVersion),
+    });
+  } else if (release) {
+    statusText = formatVersionWithPrefix(release.latestVersion);
+  }
+
+  const canDownloadUpdate = release?.hasUpdate === true && release.apkUrl !== null;
+  const canViewRelease = release?.releaseUrl !== undefined && !canDownloadUpdate;
+
+  return (
+    <View style={ROW_WITH_BORDER_STYLE}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.forkLabel")}</Text>
+        <Text style={settingsStyles.rowHint}>{statusText}</Text>
+      </View>
+      <View style={styles.aboutUpdateActions}>
+        <Button variant="outline" size="sm" onPress={checkNow} disabled={isChecking}>
+          {isChecking ? t("settings.about.updates.checking") : t("settings.about.updates.check")}
+        </Button>
+        {canDownloadUpdate || canViewRelease ? (
+          <Button variant="default" size="sm" onPress={handleOpenUpdate} disabled={isChecking}>
+            {canDownloadUpdate
+              ? t("settings.about.updates.updateTo", {
+                  version: formatVersionWithPrefix(release?.latestVersion),
+                })
+              : t("settings.about.updates.official.viewRelease")}
+          </Button>
+        ) : null}
+      </View>
+    </View>
+  );
 }
 
 function getOfficialReleaseStatusText(

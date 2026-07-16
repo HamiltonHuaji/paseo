@@ -21,6 +21,7 @@ env:
 
 jobs:
   publish-android-apk:
+    if: github.repository == 'getpaseo/paseo'
     permissions:
       contents: write
       packages: read

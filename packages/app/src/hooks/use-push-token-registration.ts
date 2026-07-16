@@ -4,6 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { isForkBuild } from "@/constants/build-profile";
 import { isWeb } from "@/constants/platform";
 
 const STORAGE_PREFIX = "@paseo:expo-push-token:";
@@ -46,7 +47,9 @@ export function usePushTokenRegistration(params: { client: DaemonClient; serverI
   }, [client]);
 
   useEffect(() => {
-    if (isWeb) return;
+    // The fork has its own EAS signing project but no FCM project yet. Avoid a
+    // notification permission prompt until remote push is actually available.
+    if (isWeb || isForkBuild) return;
 
     const storageKey = `${STORAGE_PREFIX}${serverId}`;
     let cancelled = false;

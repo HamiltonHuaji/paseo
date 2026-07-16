@@ -693,6 +693,10 @@ export function createSharedMarkdownRules(): RenderRules {
         key={node.key}
         paragraphStyle={styles.paragraph}
         containsImage={markdownNodeContainsType(node, "image")}
+        containsMath={
+          markdownNodeContainsType(node, "math_inline") ||
+          markdownNodeContainsType(node, "math_block")
+        }
       >
         {children}
       </MarkdownParagraphView>

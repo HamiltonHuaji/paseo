@@ -1,0 +1,162 @@
+name: Fork Android Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to attach the APK to (e.g. v0.1.110)."
+        required: true
+        type: string
+      checkout_ref:
+        description: "Branch/ref containing the fork code to build."
+        required: false
+        default: "main"
+        type: string
+      publish:
+        description: "Upload the APK to the GitHub release."
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: fork-android-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_TAG: ${{ inputs.tag }}
+  CHECKOUT_REF: ${{ inputs.checkout_ref || 'main' }}
+  SHOULD_PUBLISH: ${{ inputs.publish != 'false' }}
+  PASEO_FORK_EAS_PROJECT_ID: ${{ vars.PASEO_FORK_EAS_PROJECT_ID }}
+  PASEO_FORK_EAS_OWNER: ${{ vars.PASEO_FORK_EAS_OWNER }}
+
+jobs:
+  publish-android-apk:
+    permissions:
+      contents: write
+      packages: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release metadata
+        shell: bash
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+
+      - name: Validate EAS configuration
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$EXPO_TOKEN" || { echo "::error::EXPO_TOKEN secret is missing"; exit 1; }
+          test -n "$PASEO_FORK_EAS_PROJECT_ID" || { echo "::error::PASEO_FORK_EAS_PROJECT_ID variable is missing"; exit 1; }
+          test -n "$PASEO_FORK_EAS_OWNER" || { echo "::error::PASEO_FORK_EAS_OWNER variable is missing"; exit 1; }
+
+      - name: Ensure GitHub release exists
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            exit 0
+          fi
+          args=(release create "$RELEASE_TAG" --repo "${{ github.repository }}" --title "Paseo $RELEASE_TAG" --notes "")
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh "${args[@]}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare fork build metadata
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const version = process.env.RELEASE_VERSION;
+          const projectId = process.env.PASEO_FORK_EAS_PROJECT_ID;
+          const owner = process.env.PASEO_FORK_EAS_OWNER;
+          if (!version || !projectId || !owner) throw new Error('Fork build metadata is incomplete');
+
+          const packagePath = 'packages/app/package.json';
+          const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          packageJson.version = version;
+          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const easPath = 'packages/app/eas.json';
+          const easJson = JSON.parse(fs.readFileSync(easPath, 'utf8'));
+          Object.assign(easJson.build['fork-apk'].env, {
+            PASEO_FORK_EAS_PROJECT_ID: projectId,
+            PASEO_FORK_EAS_OWNER: owner,
+          });
+          fs.writeFileSync(easPath, `${JSON.stringify(easJson, null, 2)}\n`);
+          NODE
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build signed Android APK on EAS
+        id: eas_build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd packages/app
+          build_json="$(npx eas build --platform android --profile fork-apk --non-interactive --freeze-credentials --wait --json)"
+          echo "$build_json" > "$RUNNER_TEMP/eas-build.json"
+          build_id="$(jq -r 'if type == "array" then .[0].id // empty else .id // empty end' "$RUNNER_TEMP/eas-build.json")"
+          test -n "$build_id" || { cat "$RUNNER_TEMP/eas-build.json"; exit 1; }
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd packages/app
+          build_json="$(npx eas build:view '${{ steps.eas_build.outputs.build_id }}' --json)"
+          artifact_url="$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' <<<"$build_json")"
+          test -n "$artifact_url" || { echo "$build_json"; exit 1; }
+          asset_name="Paseo-Fork-${RELEASE_VERSION}-android.apk"
+          asset_path="$RUNNER_TEMP/$asset_name"
+          curl --fail --location --output "$asset_path" "$artifact_url"
+          echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
+          echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK to GitHub release
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "${{ github.repository }}"
+
+      - name: Upload APK to workflow
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.asset_name }}
+          path: ${{ steps.artifact.outputs.asset_path }}
+          retention-days: 7

@@ -91,6 +91,7 @@
     "markdown-it": "^14.3.0",
     "mnemonic-id": "^3.2.7",
     "qrcode": "^1.5.4",
+    "ratex-react-native": "^0.1.13",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-i18next": "^17.0.8",
