@@ -82,6 +82,39 @@ describe("hover safe-zone tracker", () => {
     expect(handle.leaves).toBe(1);
   });
 
+  it("retains an outside pointer while content interaction is active", () => {
+    let retainAfterLeave = true;
+    let enters = 0;
+    let leaves = 0;
+    const tracker = createHoverSafeZoneTracker({
+      getTriggerRect: () => TRIGGER,
+      getContentRect: () => CONTENT,
+      shouldRetainAfterLeave: () => retainAfterLeave,
+      onEnterSafeZone: () => {
+        enters += 1;
+      },
+      onLeaveSafeZone: () => {
+        leaves += 1;
+      },
+    });
+
+    tracker.pointerMoved(300, 40);
+    expect(enters).toBe(1);
+    expect(leaves).toBe(0);
+
+    retainAfterLeave = false;
+    tracker.retentionChanged();
+    expect(leaves).toBe(1);
+
+    retainAfterLeave = true;
+    tracker.retentionChanged();
+    expect(enters).toBe(2);
+
+    retainAfterLeave = false;
+    tracker.retentionChanged();
+    expect(leaves).toBe(2);
+  });
+
   it("falls back to trigger-or-content membership when a rect is missing", () => {
     const handle = createHandle({ trigger: TRIGGER, content: null });
 
