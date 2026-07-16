@@ -232,14 +232,14 @@ function FileLinkHoverTooltip({
     return children;
   }
   return (
-    <Tooltip delayDuration={400}>
+    <Tooltip delayDuration={400} interactive>
       <TooltipTrigger asChild>
         <View style={FILE_LINK_TOOLTIP_TRIGGER_STYLE}>{children}</View>
       </TooltipTrigger>
       {filePath ? (
         <TooltipContent side="top" align="start" maxWidth={520}>
           <View style={styles.tooltipBody}>
-            <Text selectable={false} style={styles.tooltipPath}>
+            <Text selectable style={styles.tooltipPath}>
               {filePath}
             </Text>
             <View style={styles.tooltipHintRow}>

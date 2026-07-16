@@ -63,12 +63,25 @@ function isInsideSafeZone(
   if (isInsideRect(content, x, y)) return true;
   if (!trigger || !content) return false;
 
-  // Bridge: the horizontal strip connecting trigger and content, stretched
-  // vertically to span both. If they overlap horizontally there's no bridge.
-  const bridgeLeft = Math.min(trigger.right, content.right);
-  const bridgeRight = Math.max(trigger.left, content.left);
-  if (bridgeLeft >= bridgeRight) return false;
-  const bridgeTop = Math.min(trigger.top, content.top);
-  const bridgeBottom = Math.max(trigger.bottom, content.bottom);
-  return x >= bridgeLeft && x <= bridgeRight && y >= bridgeTop && y <= bridgeBottom;
+  // Horizontal bridge for content placed to the left or right of the trigger.
+  // Stretch across both rects vertically so a diagonal pointer path stays safe.
+  const horizontalBridgeLeft = Math.min(trigger.right, content.right);
+  const horizontalBridgeRight = Math.max(trigger.left, content.left);
+  if (horizontalBridgeLeft < horizontalBridgeRight) {
+    const bridgeTop = Math.min(trigger.top, content.top);
+    const bridgeBottom = Math.max(trigger.bottom, content.bottom);
+    return (
+      x >= horizontalBridgeLeft && x <= horizontalBridgeRight && y >= bridgeTop && y <= bridgeBottom
+    );
+  }
+
+  // Vertical bridge for content placed above or below the trigger. This is the
+  // common tooltip shape: trigger and content overlap horizontally, with a
+  // small visual gap between them.
+  const verticalBridgeTop = Math.min(trigger.bottom, content.bottom);
+  const verticalBridgeBottom = Math.max(trigger.top, content.top);
+  if (verticalBridgeTop >= verticalBridgeBottom) return false;
+  const bridgeLeft = Math.min(trigger.left, content.left);
+  const bridgeRight = Math.max(trigger.right, content.right);
+  return x >= bridgeLeft && x <= bridgeRight && y >= verticalBridgeTop && y <= verticalBridgeBottom;
 }

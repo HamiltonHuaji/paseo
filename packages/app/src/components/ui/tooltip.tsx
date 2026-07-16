@@ -30,6 +30,7 @@ import { StyleSheet } from "react-native-unistyles";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { FloatingSurface } from "@/components/ui/floating";
 import { isWeb } from "@/constants/platform";
+import { useHoverSafeZone } from "@/hooks/use-hover-safe-zone";
 
 type Side = "top" | "bottom" | "left" | "right";
 type Align = "start" | "center" | "end";
@@ -47,8 +48,13 @@ interface TooltipContextValue {
   triggerRef: React.RefObject<View | null>;
   enabled: boolean;
   openOnPress: boolean;
+  interactive: boolean;
   delayDuration: number;
+  cancelClose: () => void;
+  scheduleClose: () => void;
 }
+
+const INTERACTIVE_CLOSE_GRACE_MS = 100;
 
 const TooltipContext = createContext<TooltipContextValue | null>(null);
 
@@ -231,6 +237,7 @@ export function Tooltip({
   delayDuration = 0,
   enabledOnDesktop = true,
   enabledOnMobile = false,
+  interactive = false,
   children,
 }: PropsWithChildren<{
   open?: boolean;
@@ -239,8 +246,10 @@ export function Tooltip({
   delayDuration?: number;
   enabledOnDesktop?: boolean;
   enabledOnMobile?: boolean;
+  interactive?: boolean;
 }>): ReactElement {
   const triggerRef = useRef<View>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isOpen, setIsOpen] = useControllableOpenState({
     open,
     defaultOpen,
@@ -250,6 +259,23 @@ export function Tooltip({
   const isCompact = useIsCompactFormFactor();
   const enabled = isCompact ? enabledOnMobile : enabledOnDesktop;
 
+  const cancelClose = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleClose = useCallback(() => {
+    if (closeTimerRef.current) return;
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      setIsOpen(false);
+    }, INTERACTIVE_CLOSE_GRACE_MS);
+  }, [setIsOpen]);
+
+  useEffect(() => cancelClose, [cancelClose]);
+
   const value = useMemo<TooltipContextValue>(
     () => ({
       open: isOpen,
@@ -257,9 +283,12 @@ export function Tooltip({
       triggerRef,
       enabled,
       openOnPress: isCompact,
+      interactive,
       delayDuration,
+      cancelClose,
+      scheduleClose,
     }),
-    [isOpen, setIsOpen, enabled, isCompact, delayDuration],
+    [isOpen, setIsOpen, enabled, isCompact, interactive, delayDuration, cancelClose, scheduleClose],
   );
 
   return <TooltipContext.Provider value={value}>{children}</TooltipContext.Provider>;
@@ -292,6 +321,7 @@ export function TooltipTrigger({
 
   const scheduleOpen = useCallback(() => {
     if (!ctx.enabled || disabled) return;
+    ctx.cancelClose();
     clearOpenTimer();
     if (ctx.delayDuration <= 0) {
       ctx.setOpen(true);
@@ -305,6 +335,7 @@ export function TooltipTrigger({
 
   const close = useCallback(() => {
     clearOpenTimer();
+    ctx.cancelClose();
     ctx.setOpen(false);
   }, [clearOpenTimer, ctx]);
 
@@ -325,9 +356,13 @@ export function TooltipTrigger({
   const handleHoverOut = useCallback(
     (e?: unknown) => {
       if (isCallable(onHoverOut)) onHoverOut(e);
-      close();
+      if (ctx.interactive) {
+        ctx.scheduleClose();
+      } else {
+        close();
+      }
     },
-    [onHoverOut, close],
+    [onHoverOut, close, ctx],
   );
 
   const handleFocus = useCallback(
@@ -336,6 +371,7 @@ export function TooltipTrigger({
       if (!ctx.enabled || disabled) return;
       if (!shouldOpenOnFocus()) return;
       clearOpenTimer();
+      ctx.cancelClose();
       ctx.setOpen(true);
     },
     [clearOpenTimer, ctx, disabled, onFocus],
@@ -344,9 +380,13 @@ export function TooltipTrigger({
   const handleBlur = useCallback(
     (e: unknown) => {
       if (isCallable(onBlur)) onBlur(e);
-      close();
+      if (ctx.interactive) {
+        ctx.scheduleClose();
+      } else {
+        close();
+      }
     },
-    [close, onBlur],
+    [close, ctx, onBlur],
   );
 
   const handlePress = useCallback(
@@ -447,6 +487,7 @@ export function TooltipContent({
 }>): ReactElement | null {
   const ctx = useTooltipContext("TooltipContent");
   const bottomSheetInternal = useBottomSheetModalInternal(true);
+  const contentRef = useRef<View>(null);
   const [triggerRect, setTriggerRect] = useState<Rect | null>(null);
   const [contentSize, setContentSize] = useState<{ width: number; height: number } | null>(null);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
@@ -510,17 +551,27 @@ export function TooltipContent({
 
   const handleDismiss = useCallback(() => ctx.setOpen(false), [ctx]);
 
+  useHoverSafeZone({
+    enabled: isWeb && ctx.open && ctx.enabled && ctx.interactive,
+    triggerRef: ctx.triggerRef,
+    contentRef,
+    onEnterSafeZone: ctx.cancelClose,
+    onLeaveSafeZone: ctx.scheduleClose,
+  });
+
   if (!ctx.open || !ctx.enabled) return null;
 
   // On web, avoid React Native's <Modal/> implementation (it uses <dialog> and can
   // steal focus / disrupt hover). Rendering via Portal + position:fixed keeps the
   // exact same positioning math as DropdownMenu, without hover feedback loops.
   if (isWeb) {
+    const pointerEvents = ctx.interactive ? "auto" : "none";
     return (
       <Portal hostName={bottomSheetInternal?.hostName}>
-        <View pointerEvents="none" style={styles.portalOverlay}>
+        <View pointerEvents={ctx.interactive ? "box-none" : "none"} style={styles.portalOverlay}>
           <FloatingSurface
-            pointerEvents="none"
+            ref={contentRef}
+            pointerEvents={pointerEvents}
             entering={FadeIn.duration(80)}
             exiting={FadeOut.duration(80)}
             collapsable={false}

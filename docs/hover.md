@@ -122,6 +122,8 @@ Sometimes the revealed content can't live inside the trigger — a hover card po
 
 For this case, use `useHoverSafeZone` (`packages/app/src/hooks/use-hover-safe-zone.ts`). It computes a rectangular "bridge" between the trigger and the content; while the pointer is inside trigger, content, or the bridge, the card stays open. A short grace timer absorbs jitter at the edges. The canonical caller is `packages/app/src/components/workspace-hover-card.tsx`.
 
+For selectable or otherwise interactive tooltip content, pass `interactive` to `<Tooltip>`. The tooltip primitive then enables pointer events and wires its trigger, portaled content, and the gap between them into `useHoverSafeZone`. Ordinary informational tooltips stay non-interactive so they cannot intercept clicks or selections.
+
 Don't roll your own. The math is annoying, the edge cases (pointer leaves window, drag in progress, content unmounts) are subtle, and we already paid for the hook.
 
 ## Pre-PR checklist
