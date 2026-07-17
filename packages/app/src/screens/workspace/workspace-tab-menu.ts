@@ -330,18 +330,6 @@ export function buildWorkspaceTabMenuEntries(
         }
       : null;
 
-  if (surface === "mobile") {
-    if (tab.target.kind === "agent" || tab.target.kind === "terminal") {
-      entries.push({ kind: "separator", key: "rename-separator" });
-    }
-    entries.push(closeBeforeEntry, closeAfterEntry, closeOthersEntry);
-    if (reloadAgentEntry) {
-      entries.push(reloadAgentEntry);
-    }
-    entries.push(closeEntry);
-    return entries;
-  }
-
   if (entries.length > 0) {
     entries.push({ kind: "separator", key: "actions-separator" });
   }

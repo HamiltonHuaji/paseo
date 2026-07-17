@@ -19,8 +19,10 @@ import { useTranslation } from "react-i18next";
 import { DiffStat } from "@/components/diff-stat";
 import {
   CopyX,
+  ArrowDownToLine,
   ArrowLeftToLine,
   ArrowRightToLine,
+  ArrowUpToLine,
   ChevronDown,
   Copy,
   Ellipsis,
@@ -130,6 +132,7 @@ import {
 } from "@/screens/workspace/workspace-desktop-tabs-row";
 import {
   buildWorkspaceTabMenuEntries,
+  moveWorkspaceTabToEdge,
   type WorkspaceTabMenuEntry,
   type WorkspaceTabMenuLabels,
 } from "@/screens/workspace/workspace-tab-menu";
@@ -242,6 +245,8 @@ const ThemedCopy = withUnistyles(Copy);
 const ThemedRotateCw = withUnistyles(RotateCw);
 const ThemedArrowLeftToLine = withUnistyles(ArrowLeftToLine);
 const ThemedArrowRightToLine = withUnistyles(ArrowRightToLine);
+const ThemedArrowUpToLine = withUnistyles(ArrowUpToLine);
+const ThemedArrowDownToLine = withUnistyles(ArrowDownToLine);
 const ThemedCopyX = withUnistyles(CopyX);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedX = withUnistyles(X);
@@ -403,6 +408,7 @@ interface MobileWorkspaceTabSwitcherProps {
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  onReorderTabs: (nextTabs: WorkspaceTabDescriptor[]) => void;
 }
 
 function MobileActiveTabTrigger({
@@ -540,6 +546,10 @@ function MobileTabDropdownMenuItem({
         return <ThemedCopy size={16} uniProps={mutedColorMapping} />;
       case "rotate-cw":
         return <ThemedRotateCw size={16} uniProps={mutedColorMapping} />;
+      case "arrow-up-to-line":
+        return <ThemedArrowUpToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-down-to-line":
+        return <ThemedArrowDownToLine size={16} uniProps={mutedColorMapping} />;
       case "arrow-left-to-line":
         return <ThemedArrowLeftToLine size={16} uniProps={mutedColorMapping} />;
       case "arrow-right-to-line":
@@ -591,6 +601,8 @@ function MobileWorkspaceTabOption({
   onCloseTabsAbove,
   onCloseTabsBelow,
   onCloseOtherTabs,
+  onMoveTabToStart,
+  onMoveTabToEnd,
 }: {
   tab: WorkspaceTabDescriptor;
   tabIndex: number;
@@ -609,6 +621,8 @@ function MobileWorkspaceTabOption({
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  onMoveTabToStart: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd: (tabId: string) => Promise<void> | void;
 }) {
   const { t } = useTranslation();
   const tabMenuLabels = useMemo<WorkspaceTabMenuLabels>(
@@ -646,6 +660,8 @@ function MobileWorkspaceTabOption({
     onCloseTabsBefore: onCloseTabsAbove,
     onCloseTabsAfter: onCloseTabsBelow,
     onCloseOtherTabs,
+    onMoveTabToStart,
+    onMoveTabToEnd,
     labels: tabMenuLabels,
   });
 
@@ -713,6 +729,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
   onCloseTabsAbove,
   onCloseTabsBelow,
   onCloseOtherTabs,
+  onReorderTabs,
 }: MobileWorkspaceTabSwitcherProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -729,6 +746,24 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
     Keyboard.dismiss();
     setIsOpen(true);
   }, []);
+  const handleMoveTabToStart = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(tabs, tabId, "start");
+      if (nextTabs !== tabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, tabs],
+  );
+  const handleMoveTabToEnd = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(tabs, tabId, "end");
+      if (nextTabs !== tabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, tabs],
+  );
 
   const renderTabOption = useCallback(
     ({
@@ -769,6 +804,8 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
           onCloseTabsAbove={onCloseTabsAbove}
           onCloseTabsBelow={onCloseTabsBelow}
           onCloseOtherTabs={onCloseOtherTabs}
+          onMoveTabToStart={handleMoveTabToStart}
+          onMoveTabToEnd={handleMoveTabToEnd}
         />
       );
     },
@@ -787,6 +824,8 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
       onCloseTabsAbove,
       onCloseTabsBelow,
       onCloseOtherTabs,
+      handleMoveTabToStart,
+      handleMoveTabToEnd,
     ],
   );
 
@@ -3613,6 +3652,7 @@ function WorkspaceScreenContent({
           onCloseTabsAbove={handleCloseTabsToLeft}
           onCloseTabsBelow={handleCloseTabsToRight}
           onCloseOtherTabs={handleCloseOtherTabs}
+          onReorderTabs={handleReorderTabsInFocusedPane}
         />
       ) : null}
 

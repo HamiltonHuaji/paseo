@@ -114,6 +114,8 @@ describe("buildWorkspaceTabMenuEntries", () => {
   });
 
   it("uses stacked ordering labels for mobile menus", () => {
+    const onMoveTabToStart = vi.fn();
+    const onMoveTabToEnd = vi.fn();
     const entries = buildWorkspaceTabMenuEntries({
       surface: "mobile",
       tab: createAgentTab(),
@@ -129,18 +131,33 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCloseTabsBefore: vi.fn(),
       onCloseTabsAfter: vi.fn(),
       onCloseOtherTabs: vi.fn(),
+      onMoveTabToStart,
+      onMoveTabToEnd,
     });
 
     expect(entries.filter((entry) => entry.kind === "item").map((entry) => entry.label)).toEqual([
       "Copy resume command",
       "Copy agent id",
       "Rename",
+      "Move to top",
+      "Move to bottom",
+      "Reload agent",
       "Close tabs above",
       "Close tabs below",
       "Close other tabs",
-      "Reload agent",
       "Close",
     ]);
+
+    const moveToStart = entries.find(
+      (entry) => entry.kind === "item" && entry.key === "move-to-start",
+    );
+    const moveToEnd = entries.find((entry) => entry.kind === "item" && entry.key === "move-to-end");
+    if (!moveToStart || moveToStart.kind !== "item") throw new Error("Move to top missing");
+    if (!moveToEnd || moveToEnd.kind !== "item") throw new Error("Move to bottom missing");
+    moveToStart.onSelect();
+    moveToEnd.onSelect();
+    expect(onMoveTabToStart).toHaveBeenCalledWith("agent_123");
+    expect(onMoveTabToEnd).toHaveBeenCalledWith("agent_123");
   });
 
   it("uses vertical ordering labels, test IDs, and icons for desktop rail menus", () => {
@@ -219,7 +236,9 @@ describe("buildWorkspaceTabMenuEntries", () => {
       false,
     );
     expect(entries.some((entry) => entry.kind === "item" && entry.label === "Rename")).toBe(false);
-    expect(entries.some((entry) => entry.kind === "separator")).toBe(false);
+    expect(entries.filter((entry) => entry.kind === "separator").map((entry) => entry.key)).toEqual(
+      ["ordering-separator"],
+    );
   });
 
   it("adds reload tooltip copy for agent tabs", () => {
