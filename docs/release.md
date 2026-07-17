@@ -1,5 +1,8 @@
 # Release
 
+The fork branch topology and upstream rebase procedure are documented in
+[fork-overlay.md](fork-overlay.md).
+
 All workspaces share one version and release together.
 
 ## Two steps
