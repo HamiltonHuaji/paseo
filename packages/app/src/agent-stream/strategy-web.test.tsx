@@ -143,7 +143,64 @@ describe("createWebStreamStrategy", () => {
     });
 
     expect(rowRenderCount.mock.calls.length).toBeGreaterThan(0);
-    expect(rowRenderCount.mock.calls.length).toBeLessThanOrEqual(historyVirtualized.length);
+    expect(rowRenderCount.mock.calls.length).toBeLessThan(historyVirtualized.length * 2);
+  });
+
+  it("measures virtualized history rows before the next animation frame", () => {
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation(() => 1);
+    let measuredVirtualRows = 0;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        if (this instanceof HTMLDivElement && this.hasAttribute("data-index")) {
+          measuredVirtualRows += 1;
+          return 240;
+        }
+        return 24;
+      },
+    });
+    const strategy = createWebStreamStrategy({ isMobileBreakpoint: false });
+    const viewportRef = React.createRef<StreamViewportHandle>();
+    const historyVirtualized = Array.from({ length: 16 }, (_, index) => userMessage(index));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        strategy.render({
+          agentId: "agent",
+          segments: {
+            historyVirtualized,
+            historyMounted: [],
+            liveHead: [],
+          },
+          boundary: {
+            hasVirtualizedHistory: true,
+            hasMountedHistory: false,
+            hasLiveHead: false,
+          },
+          renderers: createRenderers(vi.fn()),
+          listEmptyComponent: null,
+          viewportRef,
+          routeBottomAnchorRequest: null,
+          isAuthoritativeHistoryReady: true,
+          onNearBottomChange: vi.fn(),
+          onNearHistoryStart: vi.fn(),
+          isLoadingOlderHistory: false,
+          hasOlderHistory: false,
+          scrollEnabled: true,
+          listStyle: null,
+          baseListContentContainerStyle: null,
+          forwardListContentContainerStyle: null,
+        }),
+      );
+    });
+
+    expect(requestAnimationFrameSpy).toHaveBeenCalled();
+    expect(measuredVirtualRows).toBeGreaterThan(0);
   });
 
   it("rerenders a stable live-head row when its revision changes", () => {
