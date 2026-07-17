@@ -744,6 +744,91 @@ describe("processTimelineResponse", () => {
     expect(result.cursor).toEqual({ epoch: "epoch-1", startSeq: 1, endSeq: 5 });
   });
 
+  it("replaces a committed assistant prefix when after-page returns the full projected message", () => {
+    const messageId = "assistant-one";
+    const currentTail: StreamItem[] = [
+      {
+        kind: "assistant_message",
+        id: messageId,
+        messageId,
+        text: "This is a par",
+        timestamp: new Date(1003),
+        timelineCursor: { epoch: "epoch-1", seq: 3 },
+      },
+    ];
+
+    const result = processTimelineResponse({
+      ...baseTimelineInput,
+      currentTail,
+      currentCursor: { epoch: "epoch-1", startSeq: 1, endSeq: 3 },
+      payload: {
+        ...baseTimelineInput.payload,
+        direction: "after",
+        epoch: "epoch-1",
+        startCursor: { seq: 4 },
+        endCursor: { seq: 5 },
+        entries: [
+          {
+            ...makeTimelineEntry(1, "This is a paragraph", "assistant_message", 5),
+            item: {
+              type: "assistant_message",
+              text: "This is a paragraph",
+              messageId,
+            },
+            sourceSeqRanges: [{ startSeq: 1, endSeq: 5 }],
+            collapsed: ["assistant_merge"],
+          },
+        ],
+      },
+    });
+
+    expect(getAssistantTexts(result.tail)).toEqual(["This is a paragraph"]);
+    expect(result.head).toEqual([]);
+  });
+
+  it("collapses promoted blocks when after-page returns their full projected message", () => {
+    const messageId = "assistant-one";
+    const streamed = processAgentStreamEvents({
+      events: [
+        makeStreamReducerEvent(makeAssistantTimelineEvent("First paragraph", messageId), 1),
+        makeStreamReducerEvent(makeAssistantTimelineEvent("\n\nSecond par", messageId), 2),
+      ],
+      currentTail: [],
+      currentHead: [],
+      currentCursor: undefined,
+      currentAgent: null,
+    });
+
+    const result = processTimelineResponse({
+      ...baseTimelineInput,
+      currentTail: streamed.tail,
+      currentHead: streamed.head,
+      currentCursor: streamed.cursor ?? undefined,
+      payload: {
+        ...baseTimelineInput.payload,
+        direction: "after",
+        epoch: "epoch-1",
+        startCursor: { seq: 3 },
+        endCursor: { seq: 3 },
+        entries: [
+          {
+            ...makeTimelineEntry(1, "First paragraph\n\nSecond paragraph", "assistant_message", 3),
+            item: {
+              type: "assistant_message",
+              text: "First paragraph\n\nSecond paragraph",
+              messageId,
+            },
+            sourceSeqRanges: [{ startSeq: 1, endSeq: 3 }],
+            collapsed: ["assistant_merge"],
+          },
+        ],
+      },
+    });
+
+    expect(result.tail).toEqual([]);
+    expect(getAssistantTexts(result.head)).toEqual(["First paragraph\n\nSecond paragraph"]);
+  });
+
   it("detects gap and emits catch-up side effect", () => {
     const existingCursor: TimelineCursor = {
       epoch: "epoch-1",

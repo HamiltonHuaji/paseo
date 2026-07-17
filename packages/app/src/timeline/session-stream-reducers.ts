@@ -2,7 +2,7 @@ import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import type { AgentLifecycleStatus } from "@getpaseo/protocol/agent-lifecycle";
 import type { Agent } from "@/stores/session-store";
 import { useSessionStore } from "@/stores/session-store";
-import type { StreamItem, UserMessageItem } from "@/types/stream";
+import type { AssistantMessageItem, StreamItem, UserMessageItem } from "@/types/stream";
 import {
   applyStreamEvent,
   hydrateStreamState,
@@ -516,32 +516,89 @@ function mergePrependedCanonicalTail(olderTail: StreamItem[], currentTail: Strea
   ];
 }
 
-function replaceLiveAssistantWithProjectedText(params: {
+function replaceExistingAssistantWithProjectedText(params: {
+  tail: StreamItem[];
   head: StreamItem[];
   event: AgentStreamEventPayload;
   timestamp: Date;
   timelineCursor: { epoch: string; seq: number };
-}): StreamItem[] | null {
-  const { head, event, timestamp, timelineCursor } = params;
+  sourceSeqRanges: TimelineSeqRange[];
+}): { tail: StreamItem[]; head: StreamItem[] } | null {
+  const { tail, head, event, timestamp, timelineCursor, sourceSeqRanges } = params;
   if (event.type !== "timeline" || event.item.type !== "assistant_message") {
     return null;
   }
-  const index = head.findLastIndex((item) => item.kind === "assistant_message");
-  const current = head[index];
-  if (!current || current.kind !== "assistant_message") {
-    return null;
-  }
-  if (!event.item.text.startsWith(current.text)) {
-    return null;
-  }
-  const next = [...head];
-  next[index] = {
-    ...current,
-    text: event.item.text,
-    timestamp,
-    timelineCursor,
+  const projectedText = event.item.text;
+  const messageId = event.item.messageId;
+  const matchesId = (item: StreamItem): item is AssistantMessageItem =>
+    item.kind === "assistant_message" && item.messageId === messageId;
+  const matchesAnonymousHead = (item: StreamItem): item is AssistantMessageItem =>
+    item.kind === "assistant_message" && projectedText.startsWith(item.text);
+  const matchesAnonymousTail = (item: StreamItem): item is AssistantMessageItem =>
+    matchesAnonymousHead(item) &&
+    item.timelineCursor?.epoch === timelineCursor.epoch &&
+    sourceSeqRanges.some(
+      (range) =>
+        item.timelineCursor &&
+        item.timelineCursor.seq >= range.startSeq &&
+        item.timelineCursor.seq <= range.endSeq,
+    );
+  const createReplacement = (current: AssistantMessageItem): AssistantMessageItem => {
+    const resolvedMessageId = messageId ?? current.messageId;
+    return {
+      kind: "assistant_message",
+      id: current.blockGroupId ?? current.id,
+      ...(resolvedMessageId ? { messageId: resolvedMessageId } : {}),
+      text: projectedText,
+      timestamp,
+      timelineCursor,
+    };
   };
-  return next;
+
+  const headAnchorIndex = messageId
+    ? head.findIndex(matchesId)
+    : head.findLastIndex(matchesAnonymousHead);
+  const headAnchor = head[headAnchorIndex];
+  if (headAnchorIndex >= 0 && headAnchor?.kind === "assistant_message") {
+    const replacement = createReplacement(headAnchor);
+    if (!messageId) {
+      const nextHead = [...head];
+      nextHead[headAnchorIndex] = replacement;
+      return { tail, head: nextHead };
+    }
+    return {
+      tail: tail.filter((item) => !matchesId(item)),
+      head: head.flatMap<StreamItem>((item, index) => {
+        if (!matchesId(item)) {
+          return [item];
+        }
+        return index === headAnchorIndex ? [replacement] : [];
+      }),
+    };
+  }
+
+  const tailAnchorIndex = messageId
+    ? tail.findIndex(matchesId)
+    : tail.findLastIndex(matchesAnonymousTail);
+  const tailAnchor = tail[tailAnchorIndex];
+  if (tailAnchorIndex < 0 || tailAnchor?.kind !== "assistant_message") {
+    return null;
+  }
+  const replacement = createReplacement(tailAnchor);
+  if (!messageId) {
+    const nextTail = [...tail];
+    nextTail[tailAnchorIndex] = replacement;
+    return { tail: nextTail, head };
+  }
+  return {
+    tail: tail.flatMap<StreamItem>((item, index) => {
+      if (!matchesId(item)) {
+        return [item];
+      }
+      return index === tailAnchorIndex ? [replacement] : [];
+    }),
+    head,
+  };
 }
 
 function applyTimelineIncrementalPath(args: {
@@ -586,39 +643,40 @@ function applyTimelineIncrementalPath(args: {
         { source: "canonical" },
       );
       nextTail = mergePrependedCanonicalTail(olderTail, currentTail);
-    } else if (currentHead.length > 0) {
-      for (const { event, timestamp, seqEnd } of acceptedUnits) {
+    } else {
+      for (const { event, timestamp, seqEnd, sourceSeqRanges } of acceptedUnits) {
         const timelineCursor = { epoch: payload.epoch, seq: seqEnd };
-        const replacedHead = replaceLiveAssistantWithProjectedText({
-          head: nextHead,
-          event,
-          timestamp,
-          timelineCursor,
-        });
-        if (replacedHead) {
-          nextHead = replacedHead;
-          continue;
-        }
-        const applied = applyStreamEvent({
+        const replacedAssistant = replaceExistingAssistantWithProjectedText({
           tail: nextTail,
           head: nextHead,
           event,
           timestamp,
+          timelineCursor,
+          sourceSeqRanges,
+        });
+        if (replacedAssistant) {
+          nextTail = replacedAssistant.tail;
+          nextHead = replacedAssistant.head;
+          continue;
+        }
+        if (nextHead.length > 0) {
+          const applied = applyStreamEvent({
+            tail: nextTail,
+            head: nextHead,
+            event,
+            timestamp,
+            source: "canonical",
+            timelineCursor,
+          });
+          nextTail = applied.tail;
+          nextHead = applied.head;
+          continue;
+        }
+        nextTail = reduceStreamUpdate(nextTail, event, timestamp, {
           source: "canonical",
           timelineCursor,
         });
-        nextTail = applied.tail;
-        nextHead = applied.head;
       }
-    } else {
-      nextTail = acceptedUnits.reduce<StreamItem[]>(
-        (state, { event, timestamp, seqEnd }) =>
-          reduceStreamUpdate(state, event, timestamp, {
-            source: "canonical",
-            timelineCursor: { epoch: payload.epoch, seq: seqEnd },
-          }),
-        currentTail,
-      );
     }
   }
 

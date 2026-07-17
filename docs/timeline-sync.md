@@ -33,6 +33,12 @@ Page limits are projected-item targets. A tool call lifecycle is one projected i
 
 When the app fetches `direction: "after"` and the daemon responds with `hasNewer: true`, the app must immediately fetch the next page from `endCursor`. The catch-up is complete only when `hasNewer: false`.
 
+A projected `after` page may contain the full form of an assistant message whose live chunks are
+already split between the committed tail and streaming head. Reconcile that message by its stable
+provider `messageId` across both lanes; replacing only the head leaves a committed prefix visible
+beside the authoritative full message. For legacy anonymous messages, replacement requires both a
+text-prefix match and an overlapping source sequence range.
+
 Initialization timeouts guard lack of catch-up progress, not the full multi-page sync. A successful page that queues the next `after` page refreshes the watchdog.
 
 The first load of an agent without a local cursor is different: it fetches a bounded latest tail page. Older history remains user-driven by scrolling upward.
