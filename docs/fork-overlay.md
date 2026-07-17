@@ -61,3 +61,14 @@ first, make `overlay` the GitHub default branch, and only then replace remote `m
 that remote `main` requires an explicit one-time `--force-with-lease`; routine updates after the
 migration must be fast-forward only. Keeping `overlay` as the default also makes manual GitHub
 Actions runs and pull requests target the fork product rather than the upstream mirror.
+
+## Fork workflow routing
+
+The workflow files on `overlay` route ordinary CI and pull-request checks to `overlay`. Docker
+publishing remains tag-driven, so routine overlay pushes do not spend time on an unpublished
+multi-architecture image.
+
+The fork repository keeps the upstream Cloudflare website deployment and Nix bot hash-update
+workflows disabled in GitHub Actions. They depend on upstream-owned credentials and must not run
+when `main` is refreshed as a mirror. Re-enable them only after replacing their deployment target
+and credentials with fork-owned infrastructure.
