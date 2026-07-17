@@ -61,8 +61,10 @@ import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { isVersionMismatch } from "@/desktop/updates/desktop-updates";
-import { resolveAppVersion } from "@/utils/app-version";
+import {
+  isDaemonVersionBelowBaseline,
+  resolveDaemonCompatibilityVersion,
+} from "@/utils/app-version";
 import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons";
 import { formatLatency } from "@/utils/latency";
 import { ICON_SIZE } from "@/styles/theme";
@@ -773,8 +775,8 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     (state) => state.sessions[host.serverId]?.serverInfo?.features?.daemonSelfUpdate === true,
   );
 
-  const appVersion = resolveAppVersion();
-  const hasVersionMismatch = isVersionMismatch(appVersion, daemonVersion);
+  const compatibilityBaseline = resolveDaemonCompatibilityVersion();
+  const isDaemonOutdated = isDaemonVersionBelowBaseline(compatibilityBaseline, daemonVersion);
 
   useEffect(() => {
     return () => {
@@ -932,8 +934,8 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     [theme.iconSize.sm, theme.colors.foreground],
   );
 
-  // Don't show if the daemon doesn't support self-update or versions match
-  if (!supportsSelfUpdate || !hasVersionMismatch) {
+  // A newer official daemon is compatible; only offer an update when the host is behind.
+  if (!supportsSelfUpdate || !isDaemonOutdated) {
     return null;
   }
 

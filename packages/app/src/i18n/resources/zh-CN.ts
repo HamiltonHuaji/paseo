@@ -958,6 +958,7 @@ export const zhCN: TranslationResources = {
       advancedSettings: "高级设置",
       openAdvancedSettings: "打开 daemon 高级设置",
       versionMismatch: "App 和 daemon 版本不匹配。请将两者更新到相同版本，以获得最佳体验。",
+      versionOutdated: "Daemon 版本低于此 App 的上游兼容基线。请更新 daemon 以获得最佳体验。",
       loadFailed: "无法加载桌面 daemon 状态。",
     },
     updates: {
@@ -1578,6 +1579,7 @@ export const zhCN: TranslationResources = {
       connectedHosts: "已连接的 Host",
       offline: "离线",
       versionDiffers: "版本与此设备不同",
+      daemonOutdated: "Host 版本低于此客户端要求的版本",
       releaseChannel: {
         label: "发布通道",
         description: "切换到 Beta 可更早获取更新并参与改进",

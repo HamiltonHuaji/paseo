@@ -994,6 +994,8 @@ export const fr: TranslationResources = {
       openAdvancedSettings: "Ouvrir les paramètres avancés du démon",
       versionMismatch:
         "Les versions de l'application et du démon ne correspondent pas. Mettez à jour les deux vers la même version pour une meilleure expérience.",
+      versionOutdated:
+        "Le démon est antérieur à la base de compatibilité upstream de cette application. Mettez le démon à jour pour une meilleure expérience.",
       loadFailed: "Impossible de charger l'état du démon de bureau.",
     },
     updates: {
@@ -1641,6 +1643,7 @@ export const fr: TranslationResources = {
       connectedHosts: "Hôtes connectés",
       offline: "Hors ligne",
       versionDiffers: "La version diffère de cet appareil",
+      daemonOutdated: "La version de l’hôte est antérieure à celle requise par ce client",
       releaseChannel: {
         label: "Canal de sortie",
         description:

@@ -2,7 +2,7 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { DaemonClientConfig } from "@getpaseo/client/internal/daemon-client";
 import type { HostConnection } from "@/types/host-connection";
 import { getOrCreateClientId } from "./client-id";
-import { resolveAppVersion } from "./app-version";
+import { resolveDaemonCompatibilityVersion } from "./app-version";
 import {
   buildDaemonWebSocketUrl,
   buildRelayWebSocketUrl,
@@ -27,7 +27,7 @@ interface LocalTransportUrlInput {
 
 export interface DaemonConnectionDependencies<TClient extends DaemonProbeClient> {
   getClientId(): Promise<string>;
-  resolveAppVersion(): string | null;
+  resolveDaemonCompatibilityVersion(): string | null;
   createLocalTransportFactory(): DaemonClientConfig["transportFactory"] | null;
   buildLocalTransportUrl(input: LocalTransportUrlInput): string;
   createClient(config: DaemonClientConfig): TClient;
@@ -35,7 +35,7 @@ export interface DaemonConnectionDependencies<TClient extends DaemonProbeClient>
 
 const defaultDaemonConnectionDependencies: DaemonConnectionDependencies<DaemonClient> = {
   getClientId: getOrCreateClientId,
-  resolveAppVersion,
+  resolveDaemonCompatibilityVersion,
   createLocalTransportFactory: createDesktopLocalDaemonTransportFactory,
   buildLocalTransportUrl: buildLocalDaemonTransportUrl,
   createClient: (config) => new DaemonClient(config),
@@ -100,7 +100,10 @@ export async function buildClientConfig(
   options?: { capabilities?: DaemonClientConfig["capabilities"] },
   deps: Pick<
     DaemonConnectionDependencies<DaemonProbeClient>,
-    "getClientId" | "resolveAppVersion" | "createLocalTransportFactory" | "buildLocalTransportUrl"
+    | "getClientId"
+    | "resolveDaemonCompatibilityVersion"
+    | "createLocalTransportFactory"
+    | "buildLocalTransportUrl"
   > = defaultDaemonConnectionDependencies,
 ): Promise<DaemonClientConfig> {
   const clientId = await deps.getClientId();
@@ -108,7 +111,7 @@ export async function buildClientConfig(
   const base = {
     clientId,
     clientType: "mobile" as const,
-    appVersion: deps.resolveAppVersion() ?? undefined,
+    appVersion: deps.resolveDaemonCompatibilityVersion() ?? undefined,
     suppressSendErrors: true,
     reconnect: { enabled: false },
     ...(options?.capabilities ? { capabilities: options.capabilities } : {}),

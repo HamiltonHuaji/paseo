@@ -980,6 +980,8 @@ export const ja: TranslationResources = {
       openAdvancedSettings: "高度なデーモン設定を開く",
       versionMismatch:
         "アプリとデーモンのバージョンが一致しません。最良の体験のために両方を同じバージョンに更新してください。",
+      versionOutdated:
+        "デーモンが、このアプリのアップストリーム互換基準より古いです。最良の体験のためデーモンを更新してください。",
       loadFailed: "デスクトップデーモンのステータスを読み込めません。",
     },
     updates: {
@@ -1612,6 +1614,7 @@ export const ja: TranslationResources = {
       connectedHosts: "接続されているホスト",
       offline: "オフライン",
       versionDiffers: "このデバイスとバージョンが異なります",
+      daemonOutdated: "ホストのバージョンが、このクライアントの必要バージョンより古いです",
       releaseChannel: {
         label: "リリースチャンネル",
         description: "ベータに切り替えると早期に更新を取得してフィードバックを提供できます",

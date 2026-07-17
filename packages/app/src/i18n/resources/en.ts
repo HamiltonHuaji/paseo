@@ -975,6 +975,8 @@ export const en = {
       openAdvancedSettings: "Open advanced daemon settings",
       versionMismatch:
         "App and daemon versions don't match. Update both to the same version for the best experience.",
+      versionOutdated:
+        "The daemon is older than this app's upstream compatibility baseline. Update the daemon for the best experience.",
       loadFailed: "Unable to load desktop daemon status.",
     },
     updates: {
@@ -1603,6 +1605,7 @@ export const en = {
       connectedHosts: "Connected hosts",
       offline: "Offline",
       versionDiffers: "Version differs from this device",
+      daemonOutdated: "Host version is older than this client requires",
       releaseChannel: {
         label: "Release channel",
         description: "Switch to Beta to get updates sooner and help shape them",

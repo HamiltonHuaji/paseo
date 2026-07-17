@@ -986,6 +986,8 @@ export const ptBR: TranslationResources = {
       openAdvancedSettings: "Abrir configurações avançadas do daemon",
       versionMismatch:
         "As versões do app e do daemon não coincidem. Atualize ambos para a mesma versão para a melhor experiência.",
+      versionOutdated:
+        "O daemon é anterior à base de compatibilidade upstream deste app. Atualize o daemon para a melhor experiência.",
       loadFailed: "Não foi possível carregar o status do daemon desktop.",
     },
     updates: {
@@ -1624,6 +1626,7 @@ export const ptBR: TranslationResources = {
       connectedHosts: "Hosts conectados",
       offline: "Offline",
       versionDiffers: "A versão é diferente da deste dispositivo",
+      daemonOutdated: "A versão do host é anterior à exigida por este cliente",
       releaseChannel: {
         label: "Canal de lançamento",
         description: "Troque para Beta para receber atualizações antes e ajudar a moldá-las",

@@ -987,6 +987,8 @@ export const ru: TranslationResources = {
       openAdvancedSettings: "Открыть дополнительные настройки демона",
       versionMismatch:
         "Версии приложения и демона не совпадают. Обновите обе версии до одной и той же версии для лучшего опыта.",
+      versionOutdated:
+        "Версия демона старее базовой upstream-версии совместимости приложения. Обновите демон для лучшей совместимости.",
       loadFailed: "Невозможно загрузить статус демона рабочего стола.",
     },
     updates: {
@@ -1629,6 +1631,7 @@ export const ru: TranslationResources = {
       connectedHosts: "Подключенные хосты",
       offline: "Оффлайн",
       versionDiffers: "Версия отличается от этого устройства",
+      daemonOutdated: "Версия хоста старее минимальной версии для этого клиента",
       releaseChannel: {
         label: "Канал выпуска",
         description:

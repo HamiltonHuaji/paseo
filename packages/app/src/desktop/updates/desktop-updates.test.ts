@@ -21,14 +21,6 @@ describe("desktop-updates helpers", () => {
     expect(normalizeVersionForComparison(null)).toBeNull();
   });
 
-  it("detects version mismatch after normalization", async () => {
-    const { isVersionMismatch } = await loadModuleForPlatform("web");
-
-    expect(isVersionMismatch("v0.1.15", "0.1.15")).toBe(false);
-    expect(isVersionMismatch("0.1.15", "0.1.16")).toBe(true);
-    expect(isVersionMismatch("0.1.15", null)).toBe(false);
-  });
-
   it("formats display versions with v prefix and unavailable fallback", async () => {
     const { formatVersionWithPrefix } = await loadModuleForPlatform("web");
 

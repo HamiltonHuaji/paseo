@@ -968,6 +968,8 @@ export const ar: TranslationResources = {
       openAdvancedSettings: "افتح إعدادات البرنامج الخفي المتقدمة",
       versionMismatch:
         "إصدارا التطبيق والبرنامج الخفي غير متطابقين. قم بتحديث كلاهما إلى نفس الإصدار للحصول على أفضل تجربة.",
+      versionOutdated:
+        "إصدار البرنامج الخفي أقدم من خط التوافق الأساسي لهذا التطبيق. حدّث البرنامج الخفي للحصول على أفضل تجربة.",
       loadFailed: "غير قادر على تحميل حالة البرنامج الخفي لسطح المكتب.",
     },
     updates: {
@@ -1597,6 +1599,7 @@ export const ar: TranslationResources = {
       connectedHosts: "المضيفين المتصلين",
       offline: "غير متصل",
       versionDiffers: "الإصدار يختلف عن هذا الجهاز",
+      daemonOutdated: "إصدار المضيف أقدم من الإصدار المطلوب لهذا العميل",
       releaseChannel: {
         label: "الافراج عن القناة",
         description: "قم بالتبديل إلى Beta للحصول على التحديثات عاجلاً والمساعدة في تشكيلها",

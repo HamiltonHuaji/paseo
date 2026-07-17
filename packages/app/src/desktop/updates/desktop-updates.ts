@@ -233,20 +233,6 @@ export function normalizeVersionForComparison(version: string | null | undefined
   return value.replace(/^v/i, "");
 }
 
-export function isVersionMismatch(
-  appVersion: string | null | undefined,
-  daemonVersion: string | null | undefined,
-): boolean {
-  const app = normalizeVersionForComparison(appVersion);
-  const daemon = normalizeVersionForComparison(daemonVersion);
-
-  if (!app || !daemon) {
-    return false;
-  }
-
-  return app !== daemon;
-}
-
 export function formatVersionWithPrefix(version: string | null | undefined): string {
   const value = version?.trim();
   if (!value) {

@@ -81,7 +81,11 @@ import {
   type OfficialReleaseCheckResult,
 } from "@/desktop/updates/desktop-updates";
 import { openExternalUrl } from "@/utils/open-external-url";
-import { resolveAppVersion } from "@/utils/app-version";
+import {
+  isDaemonVersionBelowBaseline,
+  resolveAppVersion,
+  resolveDaemonCompatibilityVersion,
+} from "@/utils/app-version";
 import { forkBuildInfo, isForkBuild } from "@/constants/build-profile";
 import { checkForkAndroidRelease, type ForkAndroidRelease } from "@/updates/fork-android-release";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
@@ -502,12 +506,11 @@ function DiagnosticsSection({
 }
 
 interface AboutSectionProps {
-  appVersion: string | null;
   appVersionText: string;
   isDesktopApp: boolean;
 }
 
-function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSectionProps) {
+function AboutSection({ appVersionText, isDesktopApp }: AboutSectionProps) {
   const { t } = useTranslation();
   const activeForkBuildInfo = isDesktopApp || isForkBuild ? forkBuildInfo : null;
   const displayedVersion = activeForkBuildInfo
@@ -534,7 +537,7 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
           {isForkBuild && Platform.OS === "android" ? <ForkAndroidUpdateRow /> : null}
         </View>
       </SettingsSection>
-      <ConnectedHostsSection clientVersion={appVersion} />
+      <ConnectedHostsSection compatibilityBaseline={resolveDaemonCompatibilityVersion()} />
       <View style={styles.aboutCommunity}>
         <CommunityLinks />
       </View>
@@ -542,13 +545,11 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
   );
 }
 
-function normalizeVersion(version: string | null | undefined): string | null {
-  const trimmed = version?.trim();
-  if (!trimmed) return null;
-  return trimmed.replace(/^v/i, "");
-}
-
-function ConnectedHostsSection({ clientVersion }: { clientVersion: string | null }) {
+function ConnectedHostsSection({
+  compatibilityBaseline,
+}: {
+  compatibilityBaseline: string | null;
+}) {
   const { t } = useTranslation();
   const hosts = useHosts();
   if (hosts.length === 0) {
@@ -562,7 +563,7 @@ function ConnectedHostsSection({ clientVersion }: { clientVersion: string | null
             key={host.serverId}
             host={host}
             showBorder={index > 0}
-            clientVersion={clientVersion}
+            compatibilityBaseline={compatibilityBaseline}
           />
         ))}
       </View>
@@ -573,40 +574,38 @@ function ConnectedHostsSection({ clientVersion }: { clientVersion: string | null
 function HostVersionRow({
   host,
   showBorder,
-  clientVersion,
+  compatibilityBaseline,
 }: {
   host: HostProfile;
   showBorder: boolean;
-  clientVersion: string | null;
+  compatibilityBaseline: string | null;
 }) {
   const { t } = useTranslation();
   const isConnected = useHostRuntimeIsConnected(host.serverId);
   const daemonVersion = useSessionStore(
     (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
   );
+  const displayedDaemonVersion = daemonVersion?.trim() || null;
 
   const rowStyle = useMemo(
     () => [settingsStyles.row, showBorder && settingsStyles.rowBorder],
     [showBorder],
   );
 
-  const normalizedHost = normalizeVersion(daemonVersion);
-  const normalizedClient = normalizeVersion(clientVersion);
-  const isMismatch =
-    normalizedHost !== null && normalizedClient !== null && normalizedHost !== normalizedClient;
+  const isDaemonOutdated = isDaemonVersionBelowBaseline(compatibilityBaseline, daemonVersion);
 
   let valueText: string;
   if (!isConnected) {
     valueText = t("settings.about.offline");
-  } else if (normalizedHost) {
-    valueText = formatVersionWithPrefix(normalizedHost);
+  } else if (displayedDaemonVersion) {
+    valueText = formatVersionWithPrefix(displayedDaemonVersion);
   } else {
     valueText = "—";
   }
 
   const valueStyle = useMemo(
-    () => [styles.aboutValue, isMismatch && styles.aboutVersionMismatch],
-    [isMismatch],
+    () => [styles.aboutValue, isDaemonOutdated && styles.aboutVersionMismatch],
+    [isDaemonOutdated],
   );
 
   return (
@@ -615,8 +614,8 @@ function HostVersionRow({
         <Text style={settingsStyles.rowTitle} numberOfLines={1}>
           {host.label}
         </Text>
-        {isMismatch ? (
-          <Text style={settingsStyles.rowHint}>{t("settings.about.versionDiffers")}</Text>
+        {isDaemonOutdated ? (
+          <Text style={settingsStyles.rowHint}>{t("settings.about.daemonOutdated")}</Text>
         ) : null}
       </View>
       <Text style={valueStyle}>{valueText}</Text>
@@ -1621,13 +1620,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
             />
           );
         case "about":
-          return (
-            <AboutSection
-              appVersion={appVersion}
-              appVersionText={appVersionText}
-              isDesktopApp={isDesktopApp}
-            />
-          );
+          return <AboutSection appVersionText={appVersionText} isDesktopApp={isDesktopApp} />;
       }
     }
     return null;

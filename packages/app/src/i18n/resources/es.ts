@@ -995,6 +995,8 @@ export const es: TranslationResources = {
       openAdvancedSettings: "Abrir configuración avanzada del demonio",
       versionMismatch:
         "Las versiones de la aplicación y del demonio no coinciden. Actualice ambos a la misma versión para obtener la mejor experiencia.",
+      versionOutdated:
+        "El demonio es anterior a la base de compatibilidad upstream de esta aplicación. Actualice el demonio para obtener la mejor experiencia.",
       loadFailed: "No se puede cargar el estado del demonio del escritorio.",
     },
     updates: {
@@ -1640,6 +1642,7 @@ export const es: TranslationResources = {
       connectedHosts: "Anfitriones conectados",
       offline: "Desconectado",
       versionDiffers: "La versión difiere de este dispositivo.",
+      daemonOutdated: "La versión del host es anterior a la requerida por este cliente",
       releaseChannel: {
         label: "Canal de lanzamiento",
         description: "Cambie aBetapara recibir actualizaciones antes y ayudar a darles forma",

@@ -42,7 +42,7 @@ class FakeDaemonProbe {
       this.clientIdsRequested += 1;
       return "cid_shared_probe_test";
     },
-    resolveAppVersion: () => null,
+    resolveDaemonCompatibilityVersion: () => "0.1.110",
     createLocalTransportFactory: () => null,
     buildLocalTransportUrl: ({ transportType, transportPath }) =>
       `paseo+local://${transportType}?path=${encodeURIComponent(transportPath)}`,
@@ -98,6 +98,8 @@ describe("test-daemon-connection connectToDaemon", () => {
     const [firstConfig, secondConfig] = probe.createdConfigs();
     expect(firstConfig?.clientId).toBe("cid_shared_probe_test");
     expect(secondConfig?.clientId).toBe("cid_shared_probe_test");
+    expect(firstConfig?.appVersion).toBe("0.1.110");
+    expect(secondConfig?.appVersion).toBe("0.1.110");
     expect(probe.clientIdsRequested).toBe(2);
   });
 

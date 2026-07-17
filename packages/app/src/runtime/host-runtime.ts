@@ -22,7 +22,7 @@ import {
   normalizeHostPort,
   shouldUseTlsForDefaultHostedRelay,
 } from "@/utils/daemon-endpoints";
-import { resolveAppVersion } from "@/utils/app-version";
+import { resolveDaemonCompatibilityVersion } from "@/utils/app-version";
 import { ConnectionOfferSchema, type ConnectionOffer } from "@getpaseo/protocol/connection-offer";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { isWeb } from "@/constants/platform";
@@ -546,7 +546,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         suppressSendErrors: true,
         clientId,
         clientType: "mobile" as const,
-        appVersion: resolveAppVersion() ?? undefined,
+        appVersion: resolveDaemonCompatibilityVersion() ?? undefined,
         runtimeGeneration,
         ...(browserAutomationCapabilities ? { capabilities: browserAutomationCapabilities } : {}),
       };
