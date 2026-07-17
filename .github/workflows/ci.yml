@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [overlay]
   pull_request:
-    branches: [main]
+    branches: [overlay]
   merge_group:
   workflow_dispatch:
 
