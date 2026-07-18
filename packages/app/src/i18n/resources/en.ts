@@ -498,6 +498,8 @@ export const en = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Pin",
         unpinTarget: "Unpin",
+        collapseAllGroups: "Collapse all tab groups",
+        expandAllGroups: "Expand all tab groups",
       },
       explorer: {
         open: "Open explorer",

@@ -206,6 +206,36 @@ describe("buildWorkspaceTabMenuEntries", () => {
     expect(onCloseTabsAfter).toHaveBeenCalledWith("agent_123");
   });
 
+  it("separates rail leaf-close, tree-ordering, and pane-wide availability", () => {
+    const entries = buildWorkspaceTabMenuEntries({
+      surface: "desktop-rail",
+      tab: createAgentTab(),
+      index: 0,
+      tabCount: 1,
+      orderingIndex: 1,
+      orderingItemCount: 3,
+      totalTabCount: 4,
+      menuTestIDBase: "workspace-tab-context-agent_123",
+      onCopyResumeCommand: vi.fn(),
+      onCopyAgentId: vi.fn(),
+      onCopyFilePath: vi.fn(),
+      onReloadAgent: vi.fn(),
+      onRenameTab: vi.fn(),
+      onCloseTab: vi.fn(),
+      onCloseTabsBefore: vi.fn(),
+      onCloseTabsAfter: vi.fn(),
+      onCloseOtherTabs: vi.fn(),
+    });
+    const item = (key: string) =>
+      entries.find((entry) => entry.kind === "item" && entry.key === key);
+
+    expect(item("close-before")).toMatchObject({ disabled: true });
+    expect(item("close-after")).toMatchObject({ disabled: true });
+    expect(item("close-others")).toMatchObject({ disabled: false });
+    expect(item("move-to-start")).toMatchObject({ disabled: false });
+    expect(item("move-to-end")).toMatchObject({ disabled: false });
+  });
+
   it("omits agent copy actions and rename for draft tabs", () => {
     const entries = buildWorkspaceTabMenuEntries({
       surface: "mobile",

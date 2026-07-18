@@ -133,6 +133,7 @@ export function SortableInlineList<T>({
   externalDndContext = false,
   activeId: externalActiveId = null,
   getItemData,
+  isItemDisabled,
   orientation = "horizontal",
 }: {
   data: T[];
@@ -146,6 +147,7 @@ export function SortableInlineList<T>({
   externalDndContext?: boolean;
   activeId?: string | null;
   getItemData?: (item: T, index: number) => Record<string, unknown>;
+  isItemDisabled?: (item: T, index: number) => boolean;
   orientation?: DragOrientation;
 }): ReactElement {
   const {
@@ -196,7 +198,7 @@ export function SortableInlineList<T>({
             renderItem={renderItem}
             activeId={activeId}
             useDragHandle={useDragHandle}
-            disabled={disabled}
+            disabled={disabled || Boolean(isItemDisabled?.(item, index))}
             itemData={getItemData?.(item, index)}
             externalDndContext={externalDndContext}
           />

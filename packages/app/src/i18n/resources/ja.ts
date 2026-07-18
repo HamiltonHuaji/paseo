@@ -503,6 +503,8 @@ export const ja: TranslationResources = {
         editTerminalProfiles: "プロファイルを編集…",
         pinTarget: "ピン留め",
         unpinTarget: "ピン留めを解除",
+        collapseAllGroups: "すべてのタブグループを折りたたむ",
+        expandAllGroups: "すべてのタブグループを展開",
       },
       explorer: {
         open: "エクスプローラーを開く",

@@ -503,6 +503,8 @@ export const es: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Fijar",
         unpinTarget: "Desfijar",
+        collapseAllGroups: "Contraer todos los grupos de pestañas",
+        expandAllGroups: "Expandir todos los grupos de pestañas",
       },
       explorer: {
         open: "Explorador abierto",

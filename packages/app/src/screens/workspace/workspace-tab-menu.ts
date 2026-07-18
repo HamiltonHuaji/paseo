@@ -72,6 +72,9 @@ interface BuildWorkspaceTabMenuEntriesInput {
   tab: WorkspaceTabDescriptor;
   index: number;
   tabCount: number;
+  orderingIndex?: number;
+  orderingItemCount?: number;
+  totalTabCount?: number;
   menuTestIDBase: string;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
@@ -92,6 +95,9 @@ interface BuildWorkspaceDesktopTabActionsInput {
   tab: WorkspaceTabDescriptor;
   index: number;
   tabCount: number;
+  orderingIndex?: number;
+  orderingItemCount?: number;
+  totalTabCount?: number;
   onCopyResumeCommand: (agentId: string) => Promise<void> | void;
   onCopyAgentId: (agentId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
@@ -216,7 +222,10 @@ export function buildWorkspaceTabMenuEntries(
   const labels = input.labels ?? DEFAULT_WORKSPACE_TAB_MENU_LABELS;
   const isFirstTab = index === 0;
   const isLastTab = index === tabCount - 1;
-  const isOnlyTab = tabCount <= 1;
+  const isFirstOrderingItem = (input.orderingIndex ?? index) === 0;
+  const isLastOrderingItem =
+    (input.orderingIndex ?? index) === (input.orderingItemCount ?? tabCount) - 1;
+  const isOnlyTab = (input.totalTabCount ?? tabCount) <= 1;
   const entries: WorkspaceTabMenuEntry[] = [];
 
   if (tab.target.kind === "agent") {
@@ -338,7 +347,7 @@ export function buildWorkspaceTabMenuEntries(
     key: "move-to-start",
     label: labels.moveToTop,
     icon: "arrow-up-to-line",
-    disabled: isFirstTab,
+    disabled: isFirstOrderingItem,
     testID: `${menuTestIDBase}-move-to-top`,
     onSelect: () => {
       void onMoveTabToStart?.(tab.tabId);
@@ -349,7 +358,7 @@ export function buildWorkspaceTabMenuEntries(
     key: "move-to-end",
     label: labels.moveToBottom,
     icon: "arrow-down-to-line",
-    disabled: isLastTab,
+    disabled: isLastOrderingItem,
     testID: `${menuTestIDBase}-move-to-bottom`,
     onSelect: () => {
       void onMoveTabToEnd?.(tab.tabId);
@@ -376,6 +385,9 @@ export function buildWorkspaceDesktopTabActions(
       tab: input.tab,
       index: input.index,
       tabCount: input.tabCount,
+      orderingIndex: input.orderingIndex,
+      orderingItemCount: input.orderingItemCount,
+      totalTabCount: input.totalTabCount,
       menuTestIDBase: contextMenuTestId,
       onCopyResumeCommand: input.onCopyResumeCommand,
       onCopyAgentId: input.onCopyAgentId,

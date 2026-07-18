@@ -502,6 +502,8 @@ export const ptBR: TranslationResources = {
         editTerminalProfiles: "Editar perfis…",
         pinTarget: "Fixar",
         unpinTarget: "Desafixar",
+        collapseAllGroups: "Recolher todos os grupos de abas",
+        expandAllGroups: "Expandir todos os grupos de abas",
       },
       explorer: {
         open: "Abrir explorador",

@@ -502,6 +502,8 @@ export const ru: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Закрепить",
         unpinTarget: "Открепить",
+        collapseAllGroups: "Свернуть все группы вкладок",
+        expandAllGroups: "Развернуть все группы вкладок",
       },
       explorer: {
         open: "Открыть проводник",

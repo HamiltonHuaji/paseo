@@ -498,6 +498,8 @@ export const ar: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "تثبيت",
         unpinTarget: "إلغاء التثبيت",
+        collapseAllGroups: "طي جميع مجموعات علامات التبويب",
+        expandAllGroups: "توسيع جميع مجموعات علامات التبويب",
       },
       explorer: {
         open: "افتح المستكشف",

@@ -1,11 +1,33 @@
 import type { DragOrientation } from "@/components/drag-orientation";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 
-export interface TabDropPreview {
+export interface TabTargetDropPreview {
+  kind: "tab";
   paneId: string;
   insertionIndex: number;
   indicatorIndex: number;
+  indicatorTabId: string;
+  indicatorEdge: "before" | "after";
 }
+
+export interface TabTreeGroupDropPreview {
+  kind: "group";
+  paneId: string;
+  groupId: string;
+  indicatorEdge: "before" | "after";
+}
+
+export interface TabTreeLeafDropPreview {
+  kind: "tree-leaf";
+  paneId: string;
+  tabId: string;
+  indicatorEdge: "before" | "after";
+}
+
+export type TabDropPreview =
+  | TabTargetDropPreview
+  | TabTreeGroupDropPreview
+  | TabTreeLeafDropPreview;
 
 interface ComputeTabDropPreviewCommonInput {
   activePaneId: string;
@@ -41,12 +63,7 @@ type ComputeTabDropPreviewInput = ComputeTabDropPreviewCommonInput &
 
 function isAfterDropTarget(input: ComputeTabDropPreviewInput): boolean | null {
   if (input.orientation === "vertical") {
-    if (input.overRect.height <= 0) {
-      return null;
-    }
-    const activeCenterY = input.activeRect.top + input.activeRect.height / 2;
-    const overCenterY = input.overRect.top + input.overRect.height / 2;
-    return activeCenterY >= overCenterY;
+    return isAfterVerticalDropTarget(input.activeRect, input.overRect);
   }
 
   if (input.overRect.width <= 0) {
@@ -57,7 +74,19 @@ function isAfterDropTarget(input: ComputeTabDropPreviewInput): boolean | null {
   return activeCenterX >= overCenterX;
 }
 
-export function computeTabDropPreview(input: ComputeTabDropPreviewInput): TabDropPreview | null {
+function isAfterVerticalDropTarget(
+  activeRect: VerticalTabDropRect,
+  overRect: VerticalTabDropRect,
+): boolean | null {
+  if (overRect.height <= 0) return null;
+  const activeCenterY = activeRect.top + activeRect.height / 2;
+  const overCenterY = overRect.top + overRect.height / 2;
+  return activeCenterY >= overCenterY;
+}
+
+export function computeTabDropPreview(
+  input: ComputeTabDropPreviewInput,
+): TabTargetDropPreview | null {
   const targetIndex = input.targetTabs.findIndex((tab) => tab.tabId === input.overTabId);
   const insertAfterTarget = isAfterDropTarget(input);
   if (targetIndex < 0 || insertAfterTarget === null) {
@@ -78,8 +107,43 @@ export function computeTabDropPreview(input: ComputeTabDropPreviewInput): TabDro
   }
 
   return {
+    kind: "tab",
     paneId: input.overPaneId,
     insertionIndex,
     indicatorIndex,
+    indicatorTabId: input.overTabId,
+    indicatorEdge: insertAfterTarget ? "after" : "before",
+  };
+}
+
+export function computeTabTreeGroupDropPreview(input: {
+  overPaneId: string;
+  overGroupId: string;
+  activeRect: VerticalTabDropRect;
+  overRect: VerticalTabDropRect;
+}): TabTreeGroupDropPreview | null {
+  const insertAfterTarget = isAfterVerticalDropTarget(input.activeRect, input.overRect);
+  if (insertAfterTarget === null) return null;
+  return {
+    kind: "group",
+    paneId: input.overPaneId,
+    groupId: input.overGroupId,
+    indicatorEdge: insertAfterTarget ? "after" : "before",
+  };
+}
+
+export function computeTabTreeLeafDropPreview(input: {
+  overPaneId: string;
+  overTabId: string;
+  activeRect: VerticalTabDropRect;
+  overRect: VerticalTabDropRect;
+}): TabTreeLeafDropPreview | null {
+  const insertAfterTarget = isAfterVerticalDropTarget(input.activeRect, input.overRect);
+  if (insertAfterTarget === null) return null;
+  return {
+    kind: "tree-leaf",
+    paneId: input.overPaneId,
+    tabId: input.overTabId,
+    indicatorEdge: insertAfterTarget ? "after" : "before",
   };
 }

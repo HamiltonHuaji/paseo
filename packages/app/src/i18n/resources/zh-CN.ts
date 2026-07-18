@@ -498,6 +498,8 @@ export const zhCN: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "固定",
         unpinTarget: "取消固定",
+        collapseAllGroups: "折叠所有标签组",
+        expandAllGroups: "展开所有标签组",
       },
       explorer: {
         open: "打开 explorer",

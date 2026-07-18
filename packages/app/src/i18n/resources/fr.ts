@@ -503,6 +503,8 @@ export const fr: TranslationResources = {
         editTerminalProfiles: "Edit profiles…",
         pinTarget: "Épingler",
         unpinTarget: "Détacher",
+        collapseAllGroups: "Réduire tous les groupes d’onglets",
+        expandAllGroups: "Développer tous les groupes d’onglets",
       },
       explorer: {
         open: "Ouvrir l'explorateur",
