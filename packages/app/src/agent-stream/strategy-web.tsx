@@ -35,6 +35,12 @@ const historyStartSlotStyle: CSSProperties = {
   paddingBottom: 8,
 };
 
+const virtualRowStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  width: "100%",
+};
+
 function isScrollContainerNearBottom(
   scrollContainer: Pick<HTMLElement, "scrollTop" | "clientHeight" | "scrollHeight">,
   thresholdPx = AUTO_SCROLL_BOTTOM_THRESHOLD_PX,
@@ -154,7 +160,6 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       return row ? estimateStreamItemHeight(row) : 120;
     },
     measureElement: measureVirtualElement,
-    useAnimationFrameWithResizeObserver: true,
     overscan: 8,
   });
   useEffect(() => {
@@ -170,6 +175,7 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
   }, [rowVirtualizer]);
   const virtualRows = rowVirtualizer.getVirtualItems();
   const virtualTotalSize = rowVirtualizer.getTotalSize();
+  const virtualRowsStart = virtualRows[0]?.start ?? 0;
 
   const cancelPendingStickToBottom = useCallback(() => {
     const pendingFrame = pendingAutoScrollFrameRef.current;
@@ -482,18 +488,15 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       height: virtualTotalSize,
     };
   }, [virtualTotalSize]);
-  const renderVirtualRowStyle = useCallback(
-    (start: number): CSSProperties => ({
+  const virtualRowsBlockStyle = useMemo((): CSSProperties => {
+    return {
       position: "absolute",
       top: 0,
       left: 0,
-      display: "flex",
-      flexDirection: "column",
       width: "100%",
-      transform: `translateY(${start}px)`,
-    }),
-    [],
-  );
+      transform: `translateY(${virtualRowsStart}px)`,
+    };
+  }, [virtualRowsStart]);
   const mountedHistoryRows = useMemo(() => {
     return segments.historyMounted.map((item, index) => (
       <Fragment key={item.id}>
@@ -536,23 +539,29 @@ function WebStreamViewport(props: StreamRenderInput & { isMobileBreakpoint: bool
       <div ref={handleContentRef} style={contentContainerStyle}>
         {historyStartSlot}
         {shouldUseVirtualizer ? (
-          <div style={virtualRowsContainerStyle}>
-            {virtualRows.map((virtualRow) => {
-              const item = segments.historyVirtualized[virtualRow.index];
-              if (!item) {
-                return null;
-              }
-              return (
-                <div
-                  key={virtualRow.key}
-                  data-index={virtualRow.index}
-                  ref={rowVirtualizer.measureElement}
-                  style={renderVirtualRowStyle(virtualRow.start)}
-                >
-                  {renderHistoryVirtualizedRow(item, virtualRow.index, segments.historyVirtualized)}
-                </div>
-              );
-            })}
+          <div data-testid="agent-chat-virtual-history" style={virtualRowsContainerStyle}>
+            <div style={virtualRowsBlockStyle}>
+              {virtualRows.map((virtualRow) => {
+                const item = segments.historyVirtualized[virtualRow.index];
+                if (!item) {
+                  return null;
+                }
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={rowVirtualizer.measureElement}
+                    style={virtualRowStyle}
+                  >
+                    {renderHistoryVirtualizedRow(
+                      item,
+                      virtualRow.index,
+                      segments.historyVirtualized,
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ) : null}
         {mountedHistoryRows}

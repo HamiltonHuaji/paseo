@@ -36,6 +36,51 @@ function userMessage(index: number): StreamItem {
 
 const VIRTUAL_ROW_STYLE = { height: 24 };
 
+const resizeObservers: TestResizeObserver[] = [];
+
+class TestResizeObserver implements ResizeObserver {
+  private readonly callback: ResizeObserverCallback;
+  private readonly observedElements = new Set<Element>();
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    resizeObservers.push(this);
+  }
+
+  observe(target: Element): void {
+    this.observedElements.add(target);
+  }
+
+  unobserve(target: Element): void {
+    this.observedElements.delete(target);
+  }
+
+  disconnect(): void {
+    this.observedElements.clear();
+  }
+
+  emit(target: Element, blockSize: number): void {
+    if (!this.observedElements.has(target)) {
+      return;
+    }
+    const size = { blockSize, inlineSize: 0 };
+    const entry: ResizeObserverEntry = {
+      target,
+      borderBoxSize: [size],
+      contentBoxSize: [size],
+      devicePixelContentBoxSize: [size],
+      contentRect: target.getBoundingClientRect(),
+    };
+    this.callback([entry], this);
+  }
+}
+
+function emitResize(target: Element, blockSize: number): void {
+  for (const observer of resizeObservers) {
+    observer.emit(target, blockSize);
+  }
+}
+
 function createRenderers(onRowRender: () => void): StreamSegmentRenderers {
   return {
     renderHistoryVirtualizedRow: (item) => {
@@ -55,16 +100,13 @@ describe("createWebStreamStrategy", () => {
   let originalOffsetHeight: PropertyDescriptor | undefined;
 
   beforeEach(() => {
+    resizeObservers.length = 0;
     Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
       value: true,
       configurable: true,
     });
     Object.defineProperty(globalThis, "ResizeObserver", {
-      value: class ResizeObserver {
-        observe() {}
-        unobserve() {}
-        disconnect() {}
-      },
+      value: TestResizeObserver,
       configurable: true,
     });
     originalScrollTo = HTMLElement.prototype.scrollTo;
@@ -201,6 +243,76 @@ describe("createWebStreamStrategy", () => {
 
     expect(requestAnimationFrameSpy).toHaveBeenCalled();
     expect(measuredVirtualRows).toBeGreaterThan(0);
+  });
+
+  it("repositions following rows when a mounted row changes height", () => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+    const rowHeights = new Map<number, number>();
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get() {
+        const index = Number(this.getAttribute("data-index"));
+        return rowHeights.get(index) ?? 24;
+      },
+    });
+    const strategy = createWebStreamStrategy({ isMobileBreakpoint: false });
+    const viewportRef = React.createRef<StreamViewportHandle>();
+    const historyVirtualized = Array.from({ length: 16 }, (_, index) => userMessage(index));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        strategy.render({
+          agentId: "agent",
+          segments: {
+            historyVirtualized,
+            historyMounted: [],
+            liveHead: [],
+          },
+          boundary: {
+            hasVirtualizedHistory: true,
+            hasMountedHistory: false,
+            hasLiveHead: false,
+          },
+          renderers: createRenderers(vi.fn()),
+          listEmptyComponent: null,
+          viewportRef,
+          routeBottomAnchorRequest: null,
+          isAuthoritativeHistoryReady: true,
+          onNearBottomChange: vi.fn(),
+          onNearHistoryStart: vi.fn(),
+          isLoadingOlderHistory: false,
+          hasOlderHistory: false,
+          scrollEnabled: true,
+          listStyle: null,
+          baseListContentContainerStyle: null,
+          forwardListContentContainerStyle: null,
+        }),
+      );
+    });
+
+    const firstRow = container.querySelector('[data-index="0"]');
+    const secondRow = container.querySelector('[data-index="1"]');
+    if (!(firstRow instanceof HTMLElement) || !(secondRow instanceof HTMLElement)) {
+      throw new Error("Expected the first two virtualized rows");
+    }
+    const virtualHistory = container.querySelector('[data-testid="agent-chat-virtual-history"]');
+    if (!(virtualHistory instanceof HTMLElement)) {
+      throw new Error("Expected the virtualized history container");
+    }
+    expect(firstRow.style.position).toBe("");
+    expect(firstRow.parentElement).toBe(secondRow.parentElement);
+    expect(secondRow.style.transform).toBe("");
+    const heightBeforeResize = Number.parseFloat(virtualHistory.style.height);
+
+    rowHeights.set(0, 240);
+    act(() => {
+      emitResize(firstRow, 240);
+    });
+
+    expect(Number.parseFloat(virtualHistory.style.height)).toBe(heightBeforeResize + 216);
   });
 
   it("rerenders a stable live-head row when its revision changes", () => {
