@@ -1760,6 +1760,28 @@ describe("Codex app-server provider", () => {
     ]);
   });
 
+  test("does not register the current Codex thread as its own provider subagent", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "collabAgentToolCall",
+        id: "call-list-agents-with-root",
+        tool: "listAgents",
+        status: "completed",
+        receiverThreadIds: ["test-thread"],
+        agentsStates: {
+          "test-thread": { status: "running", message: "Main thread" },
+        },
+      },
+    });
+
+    expect(events.filter((event) => event.type === "provider_subagent")).toEqual([]);
+  });
+
   test("folds child-thread Codex activity into the parent sub-agent tool call", () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
@@ -3118,6 +3140,48 @@ describe("Codex app-server provider", () => {
         detail: { type: "sub_agent", log: "[Assistant] Legacy findings after resume." },
       },
     });
+  });
+
+  test("does not reload the current Codex thread as its own persisted subagent", async () => {
+    const session = createSession();
+    const requestedThreadIds: string[] = [];
+    session.client = {
+      request: vi.fn(async (method: string, params: unknown) => {
+        if (method !== "thread/read") {
+          return {};
+        }
+        const threadId = (params as { threadId?: string }).threadId ?? "";
+        requestedThreadIds.push(threadId);
+        if (threadId !== "test-thread") {
+          return { thread: { turns: [] } };
+        }
+        return {
+          thread: {
+            turns: [
+              {
+                items: [
+                  {
+                    type: "collabAgentToolCall",
+                    id: "list-agents-history",
+                    tool: "listAgents",
+                    status: "completed",
+                    receiverThreadIds: ["test-thread", "child-thread"],
+                    agentsStates: {
+                      "test-thread": { status: "running" },
+                      "child-thread": { status: "completed" },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }),
+    };
+
+    await asInternals(session).loadPersistedHistory();
+
+    expect(requestedThreadIds).toEqual(["test-thread", "child-thread"]);
   });
 
   test("coalesces persisted MultiAgentV2 activity for one child into one terminal card", async () => {

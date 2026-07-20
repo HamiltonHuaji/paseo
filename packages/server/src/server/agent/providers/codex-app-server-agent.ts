@@ -1689,10 +1689,10 @@ function updateHistoricalSubAgentActivity(
   };
 }
 
-function readCodexHistoricalSubAgentThreadIds(item: unknown): string[] {
+function readCodexHistoricalSubAgentThreadIds(item: unknown, parentThreadId: string): string[] {
   const activity = readCodexSubAgentActivity(item);
   if (activity) {
-    return [activity.agentThreadId];
+    return activity.agentThreadId === parentThreadId ? [] : [activity.agentThreadId];
   }
   const record = toObjectRecord(item);
   const normalizedType = normalizeCodexThreadItemType(
@@ -1702,7 +1702,8 @@ function readCodexHistoricalSubAgentThreadIds(item: unknown): string[] {
     return [];
   }
   return record.receiverThreadIds.filter(
-    (threadId): threadId is string => typeof threadId === "string" && threadId.length > 0,
+    (threadId): threadId is string =>
+      typeof threadId === "string" && threadId.length > 0 && threadId !== parentThreadId,
   );
 }
 
@@ -1903,7 +1904,7 @@ async function loadCodexThreadHistoryTimeline(params: {
           item: settledTimelineItem,
           timestamp: timestamp ?? undefined,
         });
-        for (const childThreadId of readCodexHistoricalSubAgentThreadIds(item)) {
+        for (const childThreadId of readCodexHistoricalSubAgentThreadIds(item, params.threadId)) {
           subAgentTimelineIndexByThreadId.set(childThreadId, timeline.length - 1);
         }
       }
@@ -4878,7 +4879,7 @@ export class CodexAppServerAgentSession implements AgentSession {
         : null;
     const childThreadIds = Array.from(
       new Set(agentThreadId ? [...receiverThreadIds, agentThreadId] : receiverThreadIds),
-    );
+    ).filter((threadId) => threadId !== this.currentThreadId);
     for (const receiverThreadId of childThreadIds) {
       this.subAgentCallIdByChildThreadId.set(receiverThreadId, timelineItem.callId);
       state.childThreadIds.add(receiverThreadId);
