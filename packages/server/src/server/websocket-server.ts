@@ -1266,6 +1266,8 @@ export class VoiceAssistantWebSocketServer {
         providerSubagents: true,
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
         workspacePinning: true,
+        // COMPAT(agentTurnSteer): added in fork v0.1.110-fork.3; remove after 2027-01-20.
+        agentTurnSteer: true,
         // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.
         projectGithubClone: true,
         // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.

@@ -287,6 +287,8 @@ const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z
     supportsRewindFiles: z.boolean().optional().default(false),
     // COMPAT(rewind): added in v0.1.X, drop when floor >= v0.1.X.
     supportsRewindBoth: z.boolean().optional().default(false),
+    // COMPAT(agentTurnSteer): added in fork v0.1.110-fork.3, remove after 2027-01-20.
+    supportsSteering: z.boolean().optional(),
   })
   .catchall(z.boolean());
 
@@ -1066,6 +1068,8 @@ export const SendAgentMessageRequestSchema = z.object({
   agentId: z.string(),
   text: z.string(),
   messageId: z.string().optional(), // Client-provided ID for deduplication
+  // COMPAT(agentTurnSteer): added in fork v0.1.110-fork.3, remove after 2027-01-20.
+  delivery: z.enum(["interrupt", "steer"]).optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,
 });
@@ -2463,6 +2467,8 @@ export const ServerInfoStatusPayloadSchema = z
         providerSubagents: z.boolean().optional(),
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.
         workspacePinning: z.boolean().optional(),
+        // COMPAT(agentTurnSteer): added in fork v0.1.110-fork.3; remove after 2027-01-20.
+        agentTurnSteer: z.boolean().optional(),
         // COMPAT(projectGithubClone): added in v0.1.108, remove gate after 2027-01-15.
         projectGithubClone: z.boolean().optional(),
         // COMPAT(workspaceGithubRepositorySearch): added in v0.1.108, remove gate after 2027-01-15.

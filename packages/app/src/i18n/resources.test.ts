@@ -597,7 +597,11 @@ describe("translation resources", () => {
       "Notification status has not been checked yet.",
     );
     expect(en.desktop.permissions.testNotification.title).toBe("Paseo notification test");
+    expect(en.desktop.permissions.testNotification.scheduled).toBe(
+      "Test notification scheduled for 10 seconds from now.",
+    );
     expect(en.desktop.permissions.testNotification.failed).toBe("Failed to send notification.");
+    expect(en.settings.permissions.testDelayed).toBe("Test in 10 seconds");
   });
 
   it("includes desktop daemon settings keys for the Batch 4S migration", () => {

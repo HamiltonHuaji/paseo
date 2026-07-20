@@ -115,6 +115,7 @@ import { useGithubSearchQuery } from "@/git/use-github-search-query";
 import { useCheckoutStatusQuery } from "@/git/use-status-query";
 import { useComposerGithubAutoAttach } from "./github/auto-attach";
 import { resolveClientSlashCommand, type ClientSlashCommand } from "@/client-slash-commands";
+import { useHostFeature } from "@/runtime/host-features";
 
 type QueuedMessage = QueuedComposerMessage;
 
@@ -206,6 +207,7 @@ function buildAgentStateSelector(serverId: string, agentId: string) {
       totalCostUsd: agent?.lastUsage?.totalCostUsd ?? null,
       model: agent?.model ?? null,
       provider: agent?.provider ?? null,
+      supportsSteering: agent?.capabilities.supportsSteering === true,
     };
   };
 }
@@ -1012,6 +1014,7 @@ export function Composer({
   const { settings: appSettings } = useAppSettings();
 
   const agentState = useSessionStore(useShallow(buildAgentStateSelector(serverId, agentId)));
+  const daemonSupportsSteering = useHostFeature(serverId, "agentTurnSteer");
 
   const queuedMessagesRaw = useSessionStore((state) =>
     state.sessions[serverId]?.queuedMessages?.get(agentId),
@@ -1137,7 +1140,13 @@ export function Composer({
   const { pickFiles } = useFilePicker();
   const agentIdRef = useRef(agentId);
   const sendAgentMessageRef = useRef<
-    ((agentId: string, text: string, attachments: ComposerAttachment[]) => Promise<void>) | null
+    | ((
+        agentId: string,
+        text: string,
+        attachments: ComposerAttachment[],
+        delivery?: "interrupt" | "steer",
+      ) => Promise<void>)
+    | null
   >(null);
   const onSubmitMessageRef = useRef(onSubmitMessage);
 
@@ -1174,7 +1183,11 @@ export function Composer({
   }, [focusInput, onFocusInput]);
 
   const submitMessage = useCallback(
-    async (text: string, submitAttachments: ComposerAttachment[]) => {
+    async (
+      text: string,
+      submitAttachments: ComposerAttachment[],
+      delivery?: "interrupt" | "steer",
+    ) => {
       onMessageSent?.();
       if (onSubmitMessageRef.current) {
         await onSubmitMessageRef.current({ text, attachments: submitAttachments, cwd });
@@ -1183,7 +1196,7 @@ export function Composer({
       if (!sendAgentMessageRef.current) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
-      await sendAgentMessageRef.current(agentIdRef.current, text, submitAttachments);
+      await sendAgentMessageRef.current(agentIdRef.current, text, submitAttachments, delivery);
     },
     [cwd, onMessageSent, t],
   );
@@ -1197,6 +1210,7 @@ export function Composer({
       targetAgentId: string,
       text: string,
       sendAttachments: ComposerAttachment[],
+      delivery?: "interrupt" | "steer",
     ) => {
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
@@ -1212,6 +1226,7 @@ export function Composer({
         agentId: targetAgentId,
         text,
         attachments: sendAttachments,
+        delivery,
         encodeImages,
         stream,
       });
@@ -1224,6 +1239,7 @@ export function Composer({
   }, [onSubmitMessage]);
 
   const isAgentRunning = agentState.status === "running";
+  const canSteer = daemonSupportsSteering && agentState.supportsSteering;
   const hasAgent = agentState.status !== null;
 
   const queueWriter = useMemo<QueueWriter>(
@@ -1280,7 +1296,8 @@ export function Composer({
           queueMessage(queuedText, queuedAttachments);
         },
         submitMessage: async ({ message: submitText, attachments: submitAttachments }) => {
-          await submitMessage(submitText, submitAttachments);
+          const delivery = isAgentRunning && canSteer ? "steer" : undefined;
+          await submitMessage(submitText, submitAttachments, delivery);
         },
         clearDraft,
         setUserInput,
@@ -1301,6 +1318,7 @@ export function Composer({
     },
     [
       allowEmptySubmit,
+      canSteer,
       clearDraft,
       completeSubmit,
       hasExternalContent,
@@ -1590,6 +1608,7 @@ export function Composer({
   );
 
   const hasSendableContent = userInput.trim().length > 0 || selectedAttachments.length > 0;
+  const steersCurrentTurn = isAgentRunning && canSteer && appSettings.sendBehavior !== "queue";
 
   // Handle keyboard navigation for command autocomplete.
   const handleCommandKeyPress = useCallback(
@@ -1946,6 +1965,7 @@ export function Composer({
                 submitButtonAccessibilityLabel={submitButtonAccessibilityLabel}
                 submitButtonTestID={submitButtonTestID}
                 submitIcon={submitIcon}
+                steersCurrentTurn={steersCurrentTurn}
                 isSubmitDisabled={isSubmitBusy}
                 isSubmitLoading={isSubmitBusy}
                 preserveHeightOnSubmit={submitBehavior === "preserve-and-lock"}

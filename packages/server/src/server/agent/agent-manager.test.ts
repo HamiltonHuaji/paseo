@@ -4354,6 +4354,26 @@ test("waitForAgentRunStart resolves while a foreground run is still only pending
   expect(manager.getAgent(snapshot.id)?.lifecycle).toBe("idle");
 });
 
+test("steerAgent delegates to the active session without replacing the foreground run", async () => {
+  const agentId = "00000000-0000-4000-8000-000000000224";
+  const steer = vi.fn(async () => {});
+  const agent = {
+    id: agentId,
+    lifecycle: "running",
+    activeForegroundTurnId: "paseo-turn-1",
+    capabilities: { ...TEST_CAPABILITIES, supportsSteering: true },
+    session: { steer },
+  };
+  const manager: AgentManager = Object.create(AgentManager.prototype);
+  Reflect.set(manager, "agents", new Map([[agentId, agent]]));
+
+  await manager.steerAgent(agentId, "Refine the active work.", { messageId: "message-1" });
+
+  expect(steer).toHaveBeenCalledWith("Refine the active work.", { messageId: "message-1" });
+  expect(agent.lifecycle).toBe("running");
+  expect(agent.activeForegroundTurnId).toBe("paseo-turn-1");
+});
+
 test("replaceAgentRun does not emit idle or resolve waiters between interrupted and replacement runs", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-replace-run-"));
   const storagePath = join(workdir, "agents");

@@ -9,6 +9,10 @@ interface OsNotificationPayload {
   data?: Record<string, unknown>;
 }
 
+interface OsNotificationDeliveryOptions {
+  delayMs?: number;
+}
+
 export interface WebNotificationClickDetail {
   data?: Record<string, unknown>;
 }
@@ -23,19 +27,25 @@ let permissionRequest: Promise<boolean> | null = null;
 let notificationIconUrl: string | null | undefined;
 
 function getDesktopNotificationSender():
-  | ((payload: {
-      title: string;
-      body?: string;
-      data?: Record<string, unknown>;
-    }) => Promise<boolean>)
-  | null {
-  const sendNotification = getDesktopHost()?.notification?.sendNotification;
-  return typeof sendNotification === "function"
-    ? (sendNotification as (payload: {
+  | ((
+      payload: {
         title: string;
         body?: string;
         data?: Record<string, unknown>;
-      }) => Promise<boolean>)
+      },
+      options?: OsNotificationDeliveryOptions,
+    ) => Promise<boolean>)
+  | null {
+  const sendNotification = getDesktopHost()?.notification?.sendNotification;
+  return typeof sendNotification === "function"
+    ? (sendNotification as (
+        payload: {
+          title: string;
+          body?: string;
+          data?: Record<string, unknown>;
+        },
+        options?: OsNotificationDeliveryOptions,
+      ) => Promise<boolean>)
     : null;
 }
 
@@ -163,7 +173,10 @@ function attachWebClickHandler(
   });
 }
 
-export async function sendOsNotification(payload: OsNotificationPayload): Promise<boolean> {
+export async function sendOsNotification(
+  payload: OsNotificationPayload,
+  options?: OsNotificationDeliveryOptions,
+): Promise<boolean> {
   // Mobile/native notifications should be remote push only.
   if (isNative) {
     return false;
@@ -171,20 +184,28 @@ export async function sendOsNotification(payload: OsNotificationPayload): Promis
 
   const desktopNotificationSender = getDesktopNotificationSender();
   if (desktopNotificationSender) {
-    return await desktopNotificationSender(payload);
+    return await desktopNotificationSender(payload, options);
   }
 
   const NotificationConstructor = getWebNotificationConstructor();
   if (NotificationConstructor) {
     const granted = await ensureNotificationPermission();
     if (granted) {
-      const notification = new NotificationConstructor(payload.title, {
-        body: payload.body,
-        data: payload.data,
-        icon: getWebNotificationIconUrl(),
-      }) as WebNotificationInstance;
-      if (hasNotificationClickTarget(payload.data)) {
-        attachWebClickHandler(notification, payload.data);
+      const showNotification = () => {
+        const notification = new NotificationConstructor(payload.title, {
+          body: payload.body,
+          data: payload.data,
+          icon: getWebNotificationIconUrl(),
+        }) as WebNotificationInstance;
+        if (hasNotificationClickTarget(payload.data)) {
+          attachWebClickHandler(notification, payload.data);
+        }
+      };
+      const delayMs = options?.delayMs;
+      if (typeof delayMs === "number" && Number.isFinite(delayMs) && delayMs > 0) {
+        setTimeout(showNotification, delayMs);
+      } else {
+        showNotification();
       }
       return true;
     }

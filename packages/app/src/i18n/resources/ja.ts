@@ -77,8 +77,10 @@ export const ja: TranslationResources = {
       interruptAgent: "エージェントを中断",
       queueMessage: "メッセージをキューに追加",
       sendAndInterrupt: "送信して中断",
+      steerCurrentTurn: "現在のターンを誘導",
       sendMessage: "メッセージを送信",
       queue: "キュー",
+      steer: "誘導",
       send: "送信",
     },
     cancel: {
@@ -187,6 +189,11 @@ export const ja: TranslationResources = {
       notFound: "エージェントが見つかりません",
       failedToLoad: "エージェントの読み込みに失敗しました",
       reconnecting: "再接続中...",
+      connectingToHost: "ホストに接続中...",
+      waitingForHost: "接続が中断されました · ホストを待機中...",
+      waitingForHistory: "ホストに接続済み · 会話データを待機中...",
+      receivingHistory: "ホストに接続済み · 会話データを受信中（{{page}}ページ目）...",
+      historyMayBeOutOfDate: "会話履歴が最新でない可能性があります",
       archivingTitle: "エージェントをアーカイブ中...",
       archivingSubtitle: "このエージェントをアーカイブするまでお待ちください。",
     },
@@ -1080,6 +1087,7 @@ export const ja: TranslationResources = {
       testNotification: {
         title: "Paseo通知テスト",
         body: "これが見えれば、デスクトップ通知は機能しています。",
+        scheduled: "テスト通知を10秒後に表示します。",
         notDelivered: "通知が届きませんでした。システム設定 > 通知を確認してください。",
         failed: "通知の送信に失敗しました。",
       },
@@ -1534,11 +1542,12 @@ export const ja: TranslationResources = {
       defaultSend: {
         label: "デフォルトの送信",
         descriptions: {
-          interrupt: "エージェント実行中、Enterで中断します。Command/Ctrl+Enterでキューに追加。",
-          queue: "エージェント実行中、Enterでキューに追加します。Command/Ctrl+Enterで送信。",
+          interrupt:
+            "エージェント実行中、対応していればEnterで現在のターンを誘導し、それ以外は中断します。Command/Ctrl+Enterでキューに追加。",
+          queue: "エージェント実行中、Enterでキューに追加します。Command/Ctrl+Enterですぐ送信。",
         },
         options: {
-          interrupt: "中断",
+          interrupt: "すぐ送信",
           queue: "キュー",
         },
       },
@@ -1812,7 +1821,8 @@ export const ja: TranslationResources = {
       refresh: "更新",
       refreshing: "更新中...",
       refreshAccessibility: "デスクトップの権限を更新",
-      test: "テスト",
+      test: "今すぐテスト",
+      testDelayed: "10秒後にテスト",
       actions: {
         granted: "許可済み",
         request: "許可を求める",

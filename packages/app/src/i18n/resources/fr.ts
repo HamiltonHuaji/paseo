@@ -78,8 +78,10 @@ export const fr: TranslationResources = {
       interruptAgent: "Agent d'interruption",
       queueMessage: "Message de file d'attente",
       sendAndInterrupt: "Envoyer et interrompre",
+      steerCurrentTurn: "Guider le tour en cours",
       sendMessage: "Envoyer un message",
       queue: "File d'attente",
+      steer: "Guider",
       send: "Envoyer",
     },
     cancel: {
@@ -188,6 +190,11 @@ export const fr: TranslationResources = {
       notFound: "Agentintrouvable",
       failedToLoad: "Échec du chargement de l'agent",
       reconnecting: "Reconnexion...",
+      connectingToHost: "Connexion à l'hôte...",
+      waitingForHost: "Connexion interrompue · en attente de l'hôte...",
+      waitingForHistory: "Hôte connecté · en attente des données de conversation...",
+      receivingHistory: "Hôte connecté · réception des données (page {{page}})...",
+      historyMayBeOutOfDate: "L'historique de la conversation peut être obsolète",
       archivingTitle: "Agent d'archivage...",
       archivingSubtitle: "Veuillez patienter pendant que nous archivons cet agent.",
     },
@@ -1103,6 +1110,7 @@ export const fr: TranslationResources = {
       testNotification: {
         title: "Test de notificationPaseo",
         body: "Si vous pouvez voir cela, les notifications sur le bureau fonctionnent.",
+        scheduled: "La notification de test est programmée dans 10 secondes.",
         notDelivered:
           "La notification n'a pas été délivrée. Vérifiez Paramètres système > Notifications.",
         failed: "Échec de l'envoi de la notification.",
@@ -1561,12 +1569,12 @@ export const fr: TranslationResources = {
         label: "Envoi par défaut",
         descriptions: {
           interrupt:
-            "Lorsque l'agent est en cours d'exécution, Entrée interrompt. Commande/Ctrl+Entrée met en file d'attente.",
+            "Pendant l'exécution, Entrée guide le tour si cette fonction est prise en charge, sinon l'interrompt. Commande/Ctrl+Entrée met en file d'attente.",
           queue:
-            "Lorsque l'agent est en cours d'exécution, Entrée met en file d'attente. Commande/Ctrl+Entrée envoie.",
+            "Pendant l'exécution, Entrée met en file d'attente. Commande/Ctrl+Entrée envoie immédiatement.",
         },
         options: {
-          interrupt: "Interrompre",
+          interrupt: "Envoyer maintenant",
           queue: "File d'attente",
         },
       },
@@ -1842,7 +1850,8 @@ export const fr: TranslationResources = {
       refresh: "Rafraîchir",
       refreshing: "Rafraîchissant...",
       refreshAccessibility: "Actualiser les autorisations du bureau",
-      test: "Test",
+      test: "Tester maintenant",
+      testDelayed: "Tester dans 10 secondes",
       actions: {
         granted: "Accordé",
         request: "Demande",

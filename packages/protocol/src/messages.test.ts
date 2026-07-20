@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  AgentSnapshotPayloadSchema,
   FileExplorerRequestSchema,
   PaseoWorktreeArchiveRequestSchema,
   parseServerInfoStatusPayload,
@@ -292,6 +293,57 @@ describe("agent detach RPC", () => {
       throw new Error("Expected server info payload to parse");
     }
     expect(parsed.features?.agentDetach).toBe(true);
+  });
+});
+
+describe("agent turn steering compatibility", () => {
+  test("parses optional steering delivery on the existing send request", () => {
+    const parsed = SessionInboundMessageSchema.parse({
+      type: "send_agent_message_request",
+      requestId: "req-steer",
+      agentId: "agent-1",
+      text: "adjust the active turn",
+      attachments: [],
+      delivery: "steer",
+    });
+
+    expect(parsed.delivery).toBe("steer");
+  });
+
+  test("keeps steering capabilities optional for older peers", () => {
+    const serverInfo = parseServerInfoStatusPayload({
+      status: "server_info",
+      serverId: "srv-test",
+    });
+    const agent = AgentSnapshotPayloadSchema.parse({
+      id: "agent-1",
+      provider: "codex",
+      cwd: "/tmp/project",
+      model: null,
+      thinkingOptionId: null,
+      effectiveThinkingOptionId: null,
+      createdAt: "2026-07-20T00:00:00.000Z",
+      updatedAt: "2026-07-20T00:00:00.000Z",
+      lastUserMessageAt: null,
+      status: "running",
+      capabilities: {
+        supportsStreaming: true,
+        supportsSessionPersistence: true,
+        supportsDynamicModes: false,
+        supportsMcpServers: true,
+        supportsReasoningStream: true,
+        supportsToolInvocations: true,
+      },
+      currentModeId: null,
+      availableModes: [],
+      pendingPermissions: [],
+      persistence: null,
+      title: null,
+      labels: {},
+    });
+
+    expect(serverInfo?.features?.agentTurnSteer).toBeUndefined();
+    expect(agent.capabilities.supportsSteering).toBeUndefined();
   });
 });
 

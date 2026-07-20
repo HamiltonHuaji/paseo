@@ -268,6 +268,7 @@ export interface DaemonClientConfig {
 
 export interface SendMessageOptions {
   messageId?: string;
+  delivery?: "interrupt" | "steer";
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
 }
@@ -2635,6 +2636,7 @@ export class DaemonClient {
       agentId,
       text,
       ...(messageId ? { messageId } : {}),
+      ...(options?.delivery ? { delivery: options.delivery } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),
     });

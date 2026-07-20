@@ -6,18 +6,20 @@ import { RotateCw } from "lucide-react-native";
 import { Button } from "@/components/ui/button";
 import { DesktopPermissionRow } from "@/desktop/components/desktop-permission-row";
 import { useDesktopPermissions } from "@/desktop/permissions/use-desktop-permissions";
+import { useToast } from "@/contexts/toast-context";
 import { settingsStyles } from "@/styles/settings";
 import { SettingsSection } from "@/screens/settings/settings-section";
 
 export function DesktopPermissionsSection() {
   const { t } = useTranslation();
+  const toast = useToast();
   const { theme } = useUnistyles();
   const {
     isDesktopApp,
     snapshot,
     isRefreshing,
     requestingPermission,
-    isSendingTestNotification,
+    sendingTestNotificationDelayMs,
     testNotificationError,
     refreshPermissions,
     requestPermission,
@@ -45,8 +47,43 @@ export function DesktopPermissionsSection() {
     void sendTestNotification();
   }, [sendTestNotification]);
 
+  const handleSendDelayedTestNotification = useCallback(() => {
+    void (async () => {
+      const scheduled = await sendTestNotification(10_000);
+      if (scheduled) {
+        toast.show(t("desktop.permissions.testNotification.scheduled"), { variant: "success" });
+      }
+    })();
+  }, [sendTestNotification, t, toast]);
+
   const isBusy = isRefreshing || requestingPermission !== null;
   const notificationsGranted = snapshot?.notifications.state === "granted";
+  const isSendingTestNotification = sendingTestNotificationDelayMs !== null;
+  const notificationTestActions = useMemo(
+    () => [
+      {
+        label: t("settings.permissions.test"),
+        isBusy: sendingTestNotificationDelayMs === 0,
+        isDisabled: !notificationsGranted || isBusy || isSendingTestNotification,
+        onPress: handleSendTestNotification,
+      },
+      {
+        label: t("settings.permissions.testDelayed"),
+        isBusy: sendingTestNotificationDelayMs === 10_000,
+        isDisabled: !notificationsGranted || isBusy || isSendingTestNotification,
+        onPress: handleSendDelayedTestNotification,
+      },
+    ],
+    [
+      handleSendDelayedTestNotification,
+      handleSendTestNotification,
+      isBusy,
+      isSendingTestNotification,
+      notificationsGranted,
+      sendingTestNotificationDelayMs,
+      t,
+    ],
+  );
 
   const refreshIcon = useMemo(
     () => <RotateCw size={theme.iconSize.md} color={theme.colors.foregroundMuted} />,
@@ -92,10 +129,7 @@ export function DesktopPermissionsSection() {
           isRequesting={requestingPermission === "notifications"}
           onRequest={handleRequestNotifications}
           labels={permissionLabels}
-          extraActionLabel={t("settings.permissions.test")}
-          isExtraActionBusy={isSendingTestNotification}
-          isExtraActionDisabled={!notificationsGranted || isBusy}
-          onExtraAction={handleSendTestNotification}
+          extraActions={notificationTestActions}
         />
         {testNotificationError ? <Text style={errorTextStyle}>{testNotificationError}</Text> : null}
         <DesktopPermissionRow

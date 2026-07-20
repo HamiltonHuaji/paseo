@@ -77,8 +77,10 @@ export const es: TranslationResources = {
       interruptAgent: "agente de interrupción",
       queueMessage: "mensaje de cola",
       sendAndInterrupt: "Enviar e interrumpir",
+      steerCurrentTurn: "Guiar el turno actual",
       sendMessage: "enviar mensaje",
       queue: "Cola",
+      steer: "Guiar",
       send: "Enviar",
     },
     cancel: {
@@ -187,6 +189,11 @@ export const es: TranslationResources = {
       notFound: "Agentno encontrado",
       failedToLoad: "No se pudo cargar el agente",
       reconnecting: "Reconectando...",
+      connectingToHost: "Conectando al host...",
+      waitingForHost: "Conexión interrumpida · esperando al host...",
+      waitingForHistory: "Host conectado · esperando datos de la conversación...",
+      receivingHistory: "Host conectado · recibiendo datos (página {{page}})...",
+      historyMayBeOutOfDate: "El historial de la conversación puede no estar actualizado",
       archivingTitle: "Agente de archivo...",
       archivingSubtitle: "Espere mientras archivamos este agente.",
     },
@@ -1101,6 +1108,7 @@ export const es: TranslationResources = {
       testNotification: {
         title: "Prueba de notificaciónPaseo",
         body: "Si puede ver esto, las notificaciones de escritorio funcionan.",
+        scheduled: "La notificación de prueba está programada para dentro de 10 segundos.",
         notDelivered:
           "La notificación no fue entregada. Verifique Configuración del sistema> Notificaciones.",
         failed: "No se pudo enviar la notificación.",
@@ -1559,12 +1567,11 @@ export const es: TranslationResources = {
         label: "Envío predeterminado",
         descriptions: {
           interrupt:
-            "Cuando el agente se está ejecutando, Enter interrumpe. Command/Ctrl+Enter pone en cola.",
-          queue:
-            "Cuando el agente se está ejecutando, Enter pone en cola. Command/Ctrl+Enter envía.",
+            "Durante la ejecución, Enter guía el turno si es compatible; de lo contrario, lo interrumpe. Command/Ctrl+Enter pone en cola.",
+          queue: "Durante la ejecución, Enter pone en cola. Command/Ctrl+Enter envía ahora.",
         },
         options: {
-          interrupt: "Interrumpir",
+          interrupt: "Enviar ahora",
           queue: "Cola",
         },
       },
@@ -1839,7 +1846,8 @@ export const es: TranslationResources = {
       refresh: "Refrescar",
       refreshing: "Refrescante...",
       refreshAccessibility: "Actualizar permisos de escritorio",
-      test: "Prueba",
+      test: "Probar ahora",
+      testDelayed: "Probar en 10 segundos",
       actions: {
         granted: "Otorgada",
         request: "Pedido",

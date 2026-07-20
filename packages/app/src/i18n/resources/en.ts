@@ -75,8 +75,10 @@ export const en = {
       interruptAgent: "Interrupt agent",
       queueMessage: "Queue message",
       sendAndInterrupt: "Send and interrupt",
+      steerCurrentTurn: "Steer current turn",
       sendMessage: "Send message",
       queue: "Queue",
+      steer: "Steer",
       send: "Send",
     },
     cancel: {
@@ -185,6 +187,11 @@ export const en = {
       notFound: "Agent not found",
       failedToLoad: "Failed to load agent",
       reconnecting: "Reconnecting...",
+      connectingToHost: "Connecting to host...",
+      waitingForHost: "Connection interrupted · waiting for the host...",
+      waitingForHistory: "Host connected · waiting for conversation data...",
+      receivingHistory: "Host connected · receiving conversation data (page {{page}})...",
+      historyMayBeOutOfDate: "Conversation history may be out of date",
       archivingTitle: "Archiving agent...",
       archivingSubtitle: "Please wait while we archive this agent.",
     },
@@ -1073,6 +1080,7 @@ export const en = {
       testNotification: {
         title: "Paseo notification test",
         body: "If you can see this, desktop notifications work.",
+        scheduled: "Test notification scheduled for 10 seconds from now.",
         notDelivered: "Notification was not delivered. Check System Settings > Notifications.",
         failed: "Failed to send notification.",
       },
@@ -1525,11 +1533,12 @@ export const en = {
       defaultSend: {
         label: "Default send",
         descriptions: {
-          interrupt: "When the agent is running, Enter interrupts. Command/Ctrl+Enter queues.",
-          queue: "When the agent is running, Enter queues. Command/Ctrl+Enter submits.",
+          interrupt:
+            "When the agent is running, Enter steers when supported and otherwise interrupts. Command/Ctrl+Enter queues.",
+          queue: "When the agent is running, Enter queues. Command/Ctrl+Enter sends now.",
         },
         options: {
-          interrupt: "Interrupt",
+          interrupt: "Send now",
           queue: "Queue",
         },
       },
@@ -1801,7 +1810,8 @@ export const en = {
       refresh: "Refresh",
       refreshing: "Refreshing...",
       refreshAccessibility: "Refresh desktop permissions",
-      test: "Test",
+      test: "Test now",
+      testDelayed: "Test in 10 seconds",
       actions: {
         granted: "Granted",
         request: "Request",

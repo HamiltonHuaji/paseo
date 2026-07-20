@@ -55,6 +55,7 @@ export interface DesktopNotificationBridge {
   isSupported?: () => Promise<boolean>;
   sendNotification?: (
     payload: string | { title: string; body?: string; data?: Record<string, unknown> },
+    options?: { delayMs?: number },
   ) => Promise<boolean>;
 }
 

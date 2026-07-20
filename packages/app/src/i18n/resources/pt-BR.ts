@@ -77,8 +77,10 @@ export const ptBR: TranslationResources = {
       interruptAgent: "Interromper agente",
       queueMessage: "Enfileirar mensagem",
       sendAndInterrupt: "Enviar e interromper",
+      steerCurrentTurn: "Orientar turno atual",
       sendMessage: "Enviar mensagem",
       queue: "Fila",
+      steer: "Orientar",
       send: "Enviar",
     },
     cancel: {
@@ -187,6 +189,11 @@ export const ptBR: TranslationResources = {
       notFound: "Agente não encontrado",
       failedToLoad: "Falha ao carregar agente",
       reconnecting: "Reconectando...",
+      connectingToHost: "Conectando ao host...",
+      waitingForHost: "Conexão interrompida · aguardando o host...",
+      waitingForHistory: "Host conectado · aguardando dados da conversa...",
+      receivingHistory: "Host conectado · recebendo dados (página {{page}})...",
+      historyMayBeOutOfDate: "O histórico da conversa pode estar desatualizado",
       archivingTitle: "Arquivando agente...",
       archivingSubtitle: "Aguarde enquanto arquivamos este agente.",
     },
@@ -1087,6 +1094,7 @@ export const ptBR: TranslationResources = {
       testNotification: {
         title: "Teste de notificação do Paseo",
         body: "Se você consegue ver isto, as notificações desktop funcionam.",
+        scheduled: "A notificação de teste está agendada para daqui a 10 segundos.",
         notDelivered:
           "A notificação não foi entregue. Verifique Ajustes do Sistema > Notificações.",
         failed: "Falha ao enviar notificação.",
@@ -1544,11 +1552,11 @@ export const ptBR: TranslationResources = {
         label: "Envio padrão",
         descriptions: {
           interrupt:
-            "Quando o agente está em execução, Enter interrompe. Command/Ctrl+Enter enfileira.",
-          queue: "Quando o agente está em execução, Enter enfileira. Command/Ctrl+Enter envia.",
+            "Durante a execução, Enter orienta o turno quando houver suporte; caso contrário, interrompe. Command/Ctrl+Enter enfileira.",
+          queue: "Durante a execução, Enter enfileira. Command/Ctrl+Enter envia agora.",
         },
         options: {
-          interrupt: "Interromper",
+          interrupt: "Enviar agora",
           queue: "Fila",
         },
       },
@@ -1823,7 +1831,8 @@ export const ptBR: TranslationResources = {
       refresh: "Atualizar",
       refreshing: "Atualizando...",
       refreshAccessibility: "Atualizar permissões do desktop",
-      test: "Testar",
+      test: "Testar agora",
+      testDelayed: "Testar em 10 segundos",
       actions: {
         granted: "Concedida",
         request: "Solicitar",

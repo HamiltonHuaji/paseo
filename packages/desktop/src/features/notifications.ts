@@ -8,11 +8,16 @@ interface NotificationInput {
   data?: unknown;
 }
 
+interface NotificationDeliveryOptions {
+  delayMs?: unknown;
+}
+
 interface NotificationClickPayload {
   data?: Record<string, unknown>;
 }
 
 const activeNotifications = new Set<Notification>();
+const MAX_NOTIFICATION_DELAY_MS = 60_000;
 
 function toTrimmedString(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -26,6 +31,13 @@ function toRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function toNotificationDelayMs(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return Math.min(Math.floor(value), MAX_NOTIFICATION_DELAY_MS);
 }
 
 function getNotificationIcon(): Electron.NativeImage | null {
@@ -82,42 +94,57 @@ export function registerNotificationHandlers(): void {
     return Notification.isSupported();
   });
 
-  ipcMain.handle("paseo:notification:send", async (event, rawInput?: NotificationInput) => {
-    if (!Notification.isSupported()) {
-      return false;
-    }
-
-    const title = toTrimmedString(rawInput?.title);
-    if (!title) {
-      return false;
-    }
-
-    const body = toTrimmedString(rawInput?.body) ?? undefined;
-    const data = toRecord(rawInput?.data);
-    const icon = getNotificationIcon();
-    const notification = new Notification({
-      title,
-      ...(body ? { body } : {}),
-      ...(icon ? { icon } : {}),
-      silent: true,
-    });
-
-    activeNotifications.add(notification);
-
-    notification.on("click", () => {
-      const win = focusSenderWindow(event.sender);
-      if (win && data && Object.keys(data).length > 0) {
-        const payload: NotificationClickPayload = { data };
-        win.webContents.send("paseo:event:notification-click", payload);
+  ipcMain.handle(
+    "paseo:notification:send",
+    async (event, rawInput?: NotificationInput, rawOptions?: NotificationDeliveryOptions) => {
+      if (!Notification.isSupported()) {
+        return false;
       }
-      activeNotifications.delete(notification);
-    });
 
-    notification.on("close", () => {
-      activeNotifications.delete(notification);
-    });
+      const title = toTrimmedString(rawInput?.title);
+      if (!title) {
+        return false;
+      }
 
-    notification.show();
-    return true;
-  });
+      const body = toTrimmedString(rawInput?.body) ?? undefined;
+      const data = toRecord(rawInput?.data);
+      const delayMs = toNotificationDelayMs(rawOptions?.delayMs);
+
+      const showNotification = () => {
+        const icon = getNotificationIcon();
+        const notification = new Notification({
+          title,
+          ...(body ? { body } : {}),
+          ...(icon ? { icon } : {}),
+          silent: true,
+        });
+
+        activeNotifications.add(notification);
+
+        notification.on("click", () => {
+          const win = focusSenderWindow(event.sender);
+          if (win && data && Object.keys(data).length > 0) {
+            const payload: NotificationClickPayload = { data };
+            win.webContents.send("paseo:event:notification-click", payload);
+          }
+          activeNotifications.delete(notification);
+        });
+
+        notification.on("close", () => {
+          activeNotifications.delete(notification);
+        });
+
+        notification.show();
+      };
+
+      if (delayMs > 0) {
+        // Keep scheduling in the main process so leaving Settings or backgrounding the renderer
+        // cannot cancel the diagnostic notification.
+        setTimeout(showNotification, delayMs);
+      } else {
+        showNotification();
+      }
+      return true;
+    },
+  );
 }

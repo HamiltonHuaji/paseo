@@ -48,6 +48,7 @@ interface CollaborationModeRecord {
 }
 
 interface CodexSessionTestAccess {
+  currentTurnId: string | null;
   ensureThreadLoaded(): Promise<void>;
   handleToolApprovalRequest(params: unknown): Promise<unknown>;
   handleNotification(method: string, params: unknown): void;
@@ -66,8 +67,10 @@ interface CodexClientLike {
 type CodexTestSession = AgentSession & {
   connected: boolean;
   currentThreadId: string | null;
+  currentTurnId: string | null;
   activeForegroundTurnId: string | null;
   client: CodexClientLike | null;
+  steer: NonNullable<AgentSession["steer"]>;
 };
 
 const ONE_BY_ONE_PNG_BASE64 =
@@ -106,7 +109,7 @@ function createSession(
   return session;
 }
 
-function asInternals(session: CodexTestSession): CodexSessionTestAccess {
+function asInternals(session: AgentSession): CodexSessionTestAccess {
   return castInternals<CodexSessionTestAccess>(session);
 }
 
@@ -2593,6 +2596,59 @@ describe("Codex app-server provider", () => {
     } finally {
       await session.close();
     }
+  });
+
+  test("steers the active native turn without interrupting or starting another turn", async () => {
+    let steerParams: unknown = null;
+    const appServer = createFakeCodexAppServer({
+      "turn/start": () => ({ turn: { id: "native-turn-1" } }),
+      "turn/steer": (params) => {
+        steerParams = params;
+        return { turnId: "native-turn-1" };
+      },
+    });
+    const session = new CodexAppServerAgentSession(
+      createConfig({ cwd: "/workspace/project" }),
+      null,
+      createTestLogger(),
+      async () => appServer.child,
+    );
+
+    try {
+      const resultPromise = session.run("Start the investigation.");
+      await appServer.waitForTurnStart();
+      await vi.waitFor(() => {
+        expect(asInternals(session).currentTurnId).toBe("native-turn-1");
+      });
+
+      await session.steer?.("Focus on the parser.", { messageId: "client-message-1" });
+
+      expect(steerParams).toEqual({
+        threadId: "thread-1",
+        input: [{ type: "text", text: "Focus on the parser.", text_elements: [] }],
+        expectedTurnId: "native-turn-1",
+        clientUserMessageId: "client-message-1",
+      });
+
+      appServer.startsTurn({ threadId: "thread-1", turnId: "native-turn-1" });
+      appServer.completeTurn();
+      await resultPromise;
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("rejects steering when the response identifies a different turn", async () => {
+    const session = createSession();
+    session.currentTurnId = "native-turn-1";
+    session.client = {
+      request: async () => ({ turnId: "native-turn-2" }),
+    };
+
+    await expect(session.steer("Do something else.")).rejects.toThrow(
+      "Codex steered turn native-turn-2, expected active turn native-turn-1",
+    );
   });
 
   test("rejects an interrupt until Codex identifies the accepted turn", async () => {

@@ -5690,10 +5690,45 @@ export class Session {
         {
           agentId,
           messageId: msg.messageId,
+          delivery: msg.delivery ?? "interrupt",
           textPrefix: msg.text.slice(0, 80),
         },
         "agent.session.send_agent_message",
       );
+
+      if (msg.delivery === "steer") {
+        try {
+          const outOfBand = this.agentManager.tryRunOutOfBand(agentId, prompt);
+          if (!outOfBand) {
+            await this.agentManager.steerAgent(
+              agentId,
+              prompt,
+              msg.messageId ? { messageId: msg.messageId } : undefined,
+            );
+          }
+          this.emit({
+            type: "send_agent_message_response",
+            payload: {
+              requestId: msg.requestId,
+              agentId,
+              accepted: true,
+              error: null,
+            },
+          });
+        } catch (error) {
+          this.emit({
+            type: "send_agent_message_response",
+            payload: {
+              requestId: msg.requestId,
+              agentId,
+              accepted: false,
+              error: errorToFriendlyMessage(error),
+            },
+          });
+        }
+        return;
+      }
+
       let dispatchResult: { outOfBand: boolean };
       try {
         dispatchResult = await sendPromptToAgent({

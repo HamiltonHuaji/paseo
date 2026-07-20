@@ -35,11 +35,14 @@ async function loadModuleForPlatform(
   options?: {
     desktopHost?: {
       notification?: {
-        sendNotification?: (payload: {
-          title: string;
-          body?: string;
-          data?: Record<string, unknown>;
-        }) => Promise<boolean>;
+        sendNotification?: (
+          payload: {
+            title: string;
+            body?: string;
+            data?: Record<string, unknown>;
+          },
+          options?: { delayMs?: number },
+        ) => Promise<boolean>;
       };
     } | null;
   },
@@ -275,10 +278,42 @@ describe("sendOsNotification", () => {
     });
 
     expect(sent).toBe(true);
-    expect(sendNotification).toHaveBeenCalledWith({
-      title: "Paseo notification test",
-      body: "If you can see this, desktop notifications work.",
-      data: { serverId: "srv-1" },
+    expect(sendNotification).toHaveBeenCalledWith(
+      {
+        title: "Paseo notification test",
+        body: "If you can see this, desktop notifications work.",
+        data: { serverId: "srv-1" },
+      },
+      undefined,
+    );
+  });
+
+  it("forwards delayed delivery to the desktop notification bridge", async () => {
+    const sendNotification = vi.fn(async () => true);
+
+    const { sendOsNotification } = await loadModuleForPlatform("web", {
+      desktopHost: {
+        notification: {
+          sendNotification,
+        },
+      },
     });
+
+    const scheduled = await sendOsNotification(
+      {
+        title: "Paseo notification test",
+        body: "If you can see this, desktop notifications work.",
+      },
+      { delayMs: 10_000 },
+    );
+
+    expect(scheduled).toBe(true);
+    expect(sendNotification).toHaveBeenCalledWith(
+      {
+        title: "Paseo notification test",
+        body: "If you can see this, desktop notifications work.",
+      },
+      { delayMs: 10_000 },
+    );
   });
 });

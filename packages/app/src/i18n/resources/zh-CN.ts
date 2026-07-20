@@ -77,8 +77,10 @@ export const zhCN: TranslationResources = {
       interruptAgent: "中断 Agent",
       queueMessage: "消息排队",
       sendAndInterrupt: "发送并中断",
+      steerCurrentTurn: "引导当前回合",
       sendMessage: "发送消息",
       queue: "排队",
+      steer: "引导",
       send: "发送",
     },
     cancel: {
@@ -187,6 +189,11 @@ export const zhCN: TranslationResources = {
       notFound: "未找到 Agent",
       failedToLoad: "加载 Agent 失败",
       reconnecting: "正在重连...",
+      connectingToHost: "正在连接 Host...",
+      waitingForHost: "连接已中断 · 正在等待 Host...",
+      waitingForHistory: "Host 已连接 · 正在等待会话数据...",
+      receivingHistory: "Host 已连接 · 正在接收会话数据（第 {{page}} 页）...",
+      historyMayBeOutOfDate: "会话历史可能不是最新的",
       archivingTitle: "正在归档 Agent...",
       archivingSubtitle: "请稍候，我们正在归档这个 Agent。",
     },
@@ -1051,6 +1058,7 @@ export const zhCN: TranslationResources = {
       testNotification: {
         title: "Paseo 通知测试",
         body: "如果你能看到这条通知，说明桌面通知可用。",
+        scheduled: "测试通知将在 10 秒后弹出。",
         notDelivered: "通知未送达。请检查 System Settings > Notifications。",
         failed: "发送通知失败。",
       },
@@ -1499,11 +1507,12 @@ export const zhCN: TranslationResources = {
       defaultSend: {
         label: "默认发送",
         descriptions: {
-          interrupt: "Agent 运行时，Enter 会中断。Command/Ctrl+Enter 会排队。",
-          queue: "Agent 运行时，Enter 会排队。Command/Ctrl+Enter 会提交。",
+          interrupt:
+            "Agent 运行时，若支持则 Enter 会引导当前回合，否则会中断。Command/Ctrl+Enter 会排队。",
+          queue: "Agent 运行时，Enter 会排队。Command/Ctrl+Enter 会立即发送。",
         },
         options: {
-          interrupt: "中断",
+          interrupt: "立即发送",
           queue: "排队",
         },
       },
@@ -1772,7 +1781,8 @@ export const zhCN: TranslationResources = {
       refresh: "刷新",
       refreshing: "正在刷新...",
       refreshAccessibility: "刷新桌面端权限",
-      test: "测试",
+      test: "立即测试",
+      testDelayed: "10 秒后测试",
       actions: {
         granted: "已授权",
         request: "请求",

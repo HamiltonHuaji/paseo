@@ -77,8 +77,10 @@ export const ru: TranslationResources = {
       interruptAgent: "Агент прерываний",
       queueMessage: "Сообщение в очереди",
       sendAndInterrupt: "Отправить и прервать",
+      steerCurrentTurn: "Направить текущий ход",
       sendMessage: "Отправить сообщение",
       queue: "Очередь",
+      steer: "Направить",
       send: "Отправлять",
     },
     cancel: {
@@ -187,6 +189,11 @@ export const ru: TranslationResources = {
       notFound: "Agent не найден",
       failedToLoad: "Не удалось загрузить агент",
       reconnecting: "Повторное подключение...",
+      connectingToHost: "Подключение к хосту...",
+      waitingForHost: "Соединение прервано · ожидание хоста...",
+      waitingForHistory: "Хост подключён · ожидание данных беседы...",
+      receivingHistory: "Хост подключён · получение данных (страница {{page}})...",
+      historyMayBeOutOfDate: "История беседы может быть неактуальной",
       archivingTitle: "Архивный агент...",
       archivingSubtitle: "Пожалуйста, подождите, пока мы архивируем этого агента.",
     },
@@ -1091,6 +1098,7 @@ export const ru: TranslationResources = {
       testNotification: {
         title: "Тест уведомлений Paseo",
         body: "Если вы это видите, уведомления на рабочем столе работают.",
+        scheduled: "Тестовое уведомление запланировано через 10 секунд.",
         notDelivered:
           "Уведомление не было доставлено. Проверьте Системные настройки > Уведомления.",
         failed: "Не удалось отправить уведомление.",
@@ -1549,11 +1557,12 @@ export const ru: TranslationResources = {
       defaultSend: {
         label: "Отправка по умолчанию",
         descriptions: {
-          interrupt: "Когда агент работает, Enter прерывает. Command/Ctrl+Enter ставит в очередь.",
-          queue: "Когда агент работает, Enter ставит в очередь. Command/Ctrl+Enter отправляет.",
+          interrupt:
+            "Во время работы Enter направляет текущий ход, если это поддерживается, иначе прерывает его. Command/Ctrl+Enter ставит в очередь.",
+          queue: "Во время работы Enter ставит в очередь. Command/Ctrl+Enter отправляет сразу.",
         },
         options: {
-          interrupt: "Прерывать",
+          interrupt: "Отправить сейчас",
           queue: "Очередь",
         },
       },
@@ -1829,7 +1838,8 @@ export const ru: TranslationResources = {
       refresh: "Обновить",
       refreshing: "Освежающий...",
       refreshAccessibility: "Обновить разрешения рабочего стола",
-      test: "Тест",
+      test: "Проверить сейчас",
+      testDelayed: "Проверить через 10 секунд",
       actions: {
         granted: "Предоставленный",
         request: "Запрос",

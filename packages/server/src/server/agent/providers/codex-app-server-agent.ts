@@ -113,6 +113,7 @@ function isCodexAlreadyUnarchivedError(error: unknown, threadId: string): boolea
 }
 
 const TURN_START_TIMEOUT_MS = 90 * 1000;
+const TURN_STEER_TIMEOUT_MS = 15_000;
 const INTERRUPT_TIMEOUT_MS = 2_000;
 const CODEX_PROVIDER = "codex" as const;
 // Codex treats most app-server client names as the model-request originator.
@@ -197,6 +198,7 @@ const CODEX_APP_SERVER_CAPABILITIES: AgentCapabilityFlags = {
   supportsRewindConversation: true,
   supportsRewindFiles: false,
   supportsRewindBoth: false,
+  supportsSteering: true,
 };
 
 const CODEX_MODES: AgentMode[] = [
@@ -1970,6 +1972,14 @@ const TurnStartedNotificationSchema = z
     turn: z.object({ id: z.string() }).passthrough(),
   })
   .passthrough();
+
+const TurnStartResponseSchema = z
+  .object({
+    turn: z.object({ id: z.string() }).passthrough(),
+  })
+  .passthrough();
+
+const TurnSteerResponseSchema = z.object({ turnId: z.string() }).passthrough();
 
 const TurnCompletedNotificationSchema = z
   .object({
@@ -3829,7 +3839,15 @@ export class CodexAppServerAgentSession implements AgentSession {
         hasDeveloperInstructions: turnStart.hasDeveloperInstructions,
         hasCodexConfig: turnStart.hasCodexConfig,
       });
-      await this.client.request("turn/start", turnStart.params, TURN_START_TIMEOUT_MS);
+      const response = await this.client.request(
+        "turn/start",
+        turnStart.params,
+        TURN_START_TIMEOUT_MS,
+      );
+      const parsedResponse = TurnStartResponseSchema.safeParse(response);
+      if (parsedResponse.success) {
+        this.currentTurnId = parsedResponse.data.turn.id;
+      }
     } catch (error) {
       this.activeForegroundTurnId = null;
       throw error;
@@ -4206,6 +4224,38 @@ export class CodexAppServerAgentSession implements AgentSession {
         await this.loadPersistedHistory();
       },
     });
+  }
+
+  async steer(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<void> {
+    if (!this.client || !this.currentThreadId) {
+      throw new Error("Cannot steer Codex before the active thread is initialized");
+    }
+    if (!this.activeForegroundTurnId || !this.currentTurnId) {
+      throw new Error("Cannot steer Codex before the active turn is identified");
+    }
+
+    const slashCommand = await this.resolveSlashCommandInvocation(prompt);
+    const effectivePrompt = slashCommand
+      ? await this.buildCommandPromptInput(slashCommand.commandName, slashCommand.args)
+      : prompt;
+    const input = await this.buildUserInput(effectivePrompt);
+    const expectedTurnId = this.currentTurnId;
+    const response = await this.client.request(
+      "turn/steer",
+      {
+        threadId: this.currentThreadId,
+        input,
+        expectedTurnId,
+        ...(options?.messageId ? { clientUserMessageId: options.messageId } : {}),
+      },
+      TURN_STEER_TIMEOUT_MS,
+    );
+    const parsedResponse = TurnSteerResponseSchema.parse(response);
+    if (parsedResponse.turnId !== expectedTurnId) {
+      throw new Error(
+        `Codex steered turn ${parsedResponse.turnId}, expected active turn ${expectedTurnId}`,
+      );
+    }
   }
 
   async interrupt(): Promise<void> {
@@ -5245,6 +5295,11 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (subAgentCallId) {
       this.emitSubAgentActivityUpdate(subAgentCallId, "running");
       return;
+    }
+    if (this.currentTurnId && this.currentTurnId !== parsed.turnId) {
+      throw new Error(
+        `Codex turn/started identified ${parsed.turnId}, expected ${this.currentTurnId}`,
+      );
     }
     this.currentTurnId = parsed.turnId;
     this.resetTurnTrackingState();

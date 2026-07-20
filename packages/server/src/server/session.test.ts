@@ -95,6 +95,44 @@ function createBinaryMessageHandler(
   };
 }
 
+test("send_agent_message_request steers the active run when requested", async () => {
+  const agentId = "11111111-1111-4111-8111-111111111111";
+  const messages: SessionOutboundMessage[] = [];
+  const steerAgent = vi.fn(async () => {});
+  const session = createSessionForTest({
+    messages,
+    agentManager: {
+      listAgents: vi.fn(() => [{ id: agentId }]),
+      tryRunOutOfBand: vi.fn(() => false),
+      steerAgent,
+    },
+  });
+
+  await session.handleMessage({
+    type: "send_agent_message_request",
+    agentId,
+    requestId: "steer-request",
+    messageId: "message-1",
+    text: "Refine the active work.",
+    delivery: "steer",
+  });
+
+  expect(steerAgent).toHaveBeenCalledWith(agentId, "Refine the active work.", {
+    messageId: "message-1",
+  });
+  expect(messages).toEqual([
+    {
+      type: "send_agent_message_response",
+      payload: {
+        requestId: "steer-request",
+        agentId,
+        accepted: true,
+        error: null,
+      },
+    },
+  ]);
+});
+
 test("interruptAgentIfRunning rejects when graceful cancellation is refused", async () => {
   const agentId = "11111111-1111-4111-8111-111111111111";
   const session = createSessionForTest({

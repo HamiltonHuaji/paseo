@@ -18,10 +18,12 @@ export interface DesktopPermissionRowProps {
   };
   showBorder?: boolean;
   onRequest: () => void;
-  extraActionLabel?: string;
-  isExtraActionBusy?: boolean;
-  isExtraActionDisabled?: boolean;
-  onExtraAction?: () => void;
+  extraActions?: ReadonlyArray<{
+    label: string;
+    isBusy?: boolean;
+    isDisabled?: boolean;
+    onPress: () => void;
+  }>;
 }
 
 export function DesktopPermissionRow({
@@ -31,10 +33,7 @@ export function DesktopPermissionRow({
   labels,
   showBorder,
   onRequest,
-  extraActionLabel,
-  isExtraActionBusy = false,
-  isExtraActionDisabled = false,
-  onExtraAction,
+  extraActions,
 }: DesktopPermissionRowProps) {
   const { theme } = useUnistyles();
   const state = status?.state ?? "unknown";
@@ -63,16 +62,17 @@ export function DesktopPermissionRow({
               <Check size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
               <Text style={styles.permissionStatusText}>{labels.granted}</Text>
             </View>
-            {extraActionLabel && onExtraAction ? (
+            {extraActions?.map((action) => (
               <Button
+                key={action.label}
                 variant="outline"
                 size="sm"
-                onPress={onExtraAction}
-                disabled={isExtraActionDisabled || isExtraActionBusy}
+                onPress={action.onPress}
+                disabled={action.isDisabled || action.isBusy}
               >
-                {isExtraActionBusy ? labels.busyExtraAction(extraActionLabel) : extraActionLabel}
+                {action.isBusy ? labels.busyExtraAction(action.label) : action.label}
               </Button>
-            ) : null}
+            ))}
           </View>
         ) : (
           <Button variant="outline" size="sm" onPress={onRequest} disabled={isRequesting}>
@@ -94,7 +94,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   permissionGrantedActions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: theme.spacing[2],
   },
   permissionStatusPill: {

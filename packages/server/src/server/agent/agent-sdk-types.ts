@@ -177,6 +177,7 @@ export interface AgentCapabilityFlags {
   supportsRewindConversation?: boolean;
   supportsRewindFiles?: boolean;
   supportsRewindBoth?: boolean;
+  supportsSteering?: boolean;
 }
 
 export interface AgentPersistenceHandle {
@@ -628,6 +629,7 @@ export interface AgentSession {
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void>;
   describePersistence(): AgentPersistenceHandle | null;
+  steer?(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<void>;
   interrupt(): Promise<void>;
   close(): Promise<void>;
   listCommands?(): Promise<AgentSlashCommand[]>;

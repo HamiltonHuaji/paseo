@@ -24,7 +24,7 @@ import {
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
-import { ArrowUp, Mic, MicOff, CornerDownLeft, Plus, Square } from "lucide-react-native";
+import { ArrowUp, Mic, MicOff, CornerDownLeft, Plus, Square, Wrench } from "lucide-react-native";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from "react-native-reanimated";
 import { useDictation } from "@/hooks/use-dictation";
 import { DictationOverlay } from "@/components/dictation-controls";
@@ -97,6 +97,8 @@ export interface MessageInputProps {
   /** Optional testID for the primary submit button. */
   submitButtonTestID?: string;
   submitIcon?: "arrow" | "return";
+  /** The primary action appends input to the active turn without interrupting it. */
+  steersCurrentTurn?: boolean;
   isSubmitDisabled?: boolean;
   isSubmitLoading?: boolean;
   /** When true, keep the grown input height after submit (text is preserved, not cleared). */
@@ -437,10 +439,12 @@ function SendTooltipBody({
 function SendButtonContent({
   isSubmitLoading,
   submitIcon,
+  steersCurrentTurn,
   buttonIconSize,
 }: {
   isSubmitLoading: boolean;
   submitIcon: "arrow" | "return";
+  steersCurrentTurn: boolean;
   buttonIconSize: number;
 }) {
   if (isSubmitLoading) {
@@ -448,6 +452,9 @@ function SendButtonContent({
   }
   if (submitIcon === "return") {
     return <ThemedCornerDownLeft size={buttonIconSize} uniProps={iconAccentForegroundMapping} />;
+  }
+  if (steersCurrentTurn) {
+    return <ThemedWrench size={buttonIconSize} uniProps={iconAccentForegroundMapping} />;
   }
   return <ThemedArrowUp size={buttonIconSize} uniProps={iconAccentForegroundMapping} />;
 }
@@ -793,6 +800,7 @@ function SendButtonTooltip({
   sendButtonCombinedStyle,
   isSubmitLoading,
   submitIcon,
+  steersCurrentTurn,
   submitButtonTestID,
   buttonIconSize,
   sendKeys,
@@ -807,6 +815,7 @@ function SendButtonTooltip({
   sendButtonCombinedStyle: React.ComponentProps<typeof TooltipTrigger>["style"];
   isSubmitLoading: boolean;
   submitIcon: "arrow" | "return";
+  steersCurrentTurn: boolean;
   submitButtonTestID: string | undefined;
   buttonIconSize: number;
   sendKeys: ShortcutChord | null | undefined;
@@ -826,6 +835,7 @@ function SendButtonTooltip({
         <SendButtonContent
           isSubmitLoading={isSubmitLoading}
           submitIcon={submitIcon}
+          steersCurrentTurn={steersCurrentTurn}
           buttonIconSize={buttonIconSize}
         />
       </TooltipTrigger>
@@ -1126,6 +1136,7 @@ interface ResolvedMessageInputProps {
   submitButtonAccessibilityLabel: string | undefined;
   submitButtonTestID: string | undefined;
   submitIcon: "arrow" | "return";
+  steersCurrentTurn: boolean;
   isSubmitDisabled: boolean;
   isSubmitLoading: boolean;
   preserveHeightOnSubmit: boolean;
@@ -1168,6 +1179,7 @@ function resolveMessageInputProps(props: MessageInputProps): ResolvedMessageInpu
     submitButtonAccessibilityLabel: props.submitButtonAccessibilityLabel,
     submitButtonTestID: props.submitButtonTestID,
     submitIcon: props.submitIcon ?? "arrow",
+    steersCurrentTurn: props.steersCurrentTurn ?? false,
     isSubmitDisabled: props.isSubmitDisabled ?? false,
     isSubmitLoading: props.isSubmitLoading ?? false,
     preserveHeightOnSubmit: props.preserveHeightOnSubmit ?? false,
@@ -1218,6 +1230,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       submitButtonAccessibilityLabel,
       submitButtonTestID,
       submitIcon,
+      steersCurrentTurn,
       isSubmitDisabled,
       isSubmitLoading,
       preserveHeightOnSubmit,
@@ -1694,6 +1707,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       canPressLoadingButton,
       defaultActionQueues,
       isAgentRunning,
+      steersCurrentTurn,
       t,
     });
 
@@ -1713,6 +1727,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     const sendTooltipLabel = resolveSendTooltipLabel({
       submitButtonAccessibilityLabel,
       defaultActionQueues,
+      steersCurrentTurn,
       t,
     });
 
@@ -1874,6 +1889,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
                 sendButtonCombinedStyle={sendButtonCombinedStyle}
                 isSubmitLoading={isSubmitLoading}
                 submitIcon={submitIcon}
+                steersCurrentTurn={steersCurrentTurn}
                 submitButtonTestID={submitButtonTestID}
                 buttonIconSize={buttonIconSize}
                 sendKeys={DEFAULT_SEND_KEYS}
@@ -2070,6 +2086,7 @@ const ThemedMic = withUnistyles(Mic);
 const ThemedMicOff = withUnistyles(MicOff);
 const ThemedArrowUp = withUnistyles(ArrowUp);
 const ThemedCornerDownLeft = withUnistyles(CornerDownLeft);
+const ThemedWrench = withUnistyles(Wrench);
 const ThemedActivityIndicator = withUnistyles(ActivityIndicator);
 const ThemedTextInput = withUnistyles(TextInput);
 

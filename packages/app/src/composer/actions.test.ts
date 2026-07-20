@@ -162,6 +162,7 @@ interface FakeSendCall {
   text: string;
   options: {
     messageId: string;
+    delivery?: "interrupt" | "steer";
     images: Array<{ data: string; mimeType: string }>;
     attachments: AgentAttachment[];
   };
@@ -420,6 +421,23 @@ describe("dispatchComposerAgentMessage", () => {
       images: [],
       attachments: [],
     });
+  });
+
+  it("passes steering delivery only when the caller selected it", async () => {
+    const client = createFakeSendClient();
+    const stream = createFakeStream();
+
+    await dispatchComposerAgentMessage({
+      client,
+      agentId: "agent",
+      text: "adjust the active turn",
+      attachments: [],
+      delivery: "steer",
+      encodeImages: passthroughEncodeImages,
+      stream,
+    });
+
+    expect(client.calls[0]?.options.delivery).toBe("steer");
   });
 
   it("serializes workspace review attachments through the structured attachment path", async () => {

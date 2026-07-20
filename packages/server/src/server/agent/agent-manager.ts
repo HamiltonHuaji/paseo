@@ -2013,6 +2013,21 @@ export class AgentManager {
     }
   }
 
+  async steerAgent(
+    agentId: string,
+    prompt: AgentPromptInput,
+    options?: AgentRunOptions,
+  ): Promise<void> {
+    if (!this.hasInFlightRun(agentId)) {
+      throw new Error(`Agent ${agentId} has no active turn to steer`);
+    }
+    const agent = this.requireSessionAgent(agentId);
+    if (!agent.capabilities.supportsSteering || !agent.session.steer) {
+      throw new Error(`Agent ${agentId} does not support steering`);
+    }
+    await agent.session.steer(prompt, options);
+  }
+
   async waitForAgentRunStart(agentId: string, options?: WaitForAgentStartOptions): Promise<void> {
     const snapshot = this.getAgent(agentId);
     if (!snapshot) {

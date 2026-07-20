@@ -10,8 +10,10 @@ const translations: Record<string, string> = {
   "composer.input.interruptAgent": "Interrupt agent",
   "composer.input.queueMessage": "Queue message",
   "composer.input.sendAndInterrupt": "Send and interrupt",
+  "composer.input.steerCurrentTurn": "Steer current turn",
   "composer.input.sendMessage": "Send message",
   "composer.input.queue": "Queue",
+  "composer.input.steer": "Steer",
   "composer.input.send": "Send",
   "composer.voice.unmuteVoiceMode": "Unmute Voice mode",
   "composer.voice.muteVoiceMode": "Mute Voice mode",
@@ -32,6 +34,7 @@ describe("composer input labels", () => {
         canPressLoadingButton: true,
         defaultActionQueues: false,
         isAgentRunning: true,
+        steersCurrentTurn: false,
         t,
       }),
     ).toBe("Interrupt agent");
@@ -41,6 +44,7 @@ describe("composer input labels", () => {
         canPressLoadingButton: false,
         defaultActionQueues: true,
         isAgentRunning: true,
+        steersCurrentTurn: false,
         t,
       }),
     ).toBe("Queue message");
@@ -50,6 +54,7 @@ describe("composer input labels", () => {
         canPressLoadingButton: false,
         defaultActionQueues: false,
         isAgentRunning: true,
+        steersCurrentTurn: false,
         t,
       }),
     ).toBe("Send and interrupt");
@@ -59,6 +64,7 @@ describe("composer input labels", () => {
         canPressLoadingButton: false,
         defaultActionQueues: false,
         isAgentRunning: false,
+        steersCurrentTurn: false,
         t,
       }),
     ).toBe("Send message");
@@ -71,6 +77,7 @@ describe("composer input labels", () => {
         canPressLoadingButton: false,
         defaultActionQueues: false,
         isAgentRunning: false,
+        steersCurrentTurn: false,
         t,
       }),
     ).toBe("Run now");
@@ -123,6 +130,7 @@ describe("composer input labels", () => {
       resolveSendTooltipLabel({
         submitButtonAccessibilityLabel: undefined,
         defaultActionQueues: true,
+        steersCurrentTurn: false,
         t,
       }),
     ).toBe("Queue");
@@ -130,8 +138,30 @@ describe("composer input labels", () => {
       resolveSendTooltipLabel({
         submitButtonAccessibilityLabel: undefined,
         defaultActionQueues: false,
+        steersCurrentTurn: false,
         t,
       }),
     ).toBe("Send");
+    expect(
+      resolveSendTooltipLabel({
+        submitButtonAccessibilityLabel: undefined,
+        defaultActionQueues: false,
+        steersCurrentTurn: true,
+        t,
+      }),
+    ).toBe("Steer");
+  });
+
+  it("announces steering instead of interruption", () => {
+    expect(
+      resolveSubmitAccessibilityLabel({
+        submitButtonAccessibilityLabel: undefined,
+        canPressLoadingButton: false,
+        defaultActionQueues: false,
+        isAgentRunning: true,
+        steersCurrentTurn: true,
+        t,
+      }),
+    ).toBe("Steer current turn");
   });
 });

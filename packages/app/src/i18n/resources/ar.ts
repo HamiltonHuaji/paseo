@@ -77,8 +77,10 @@ export const ar: TranslationResources = {
       interruptAgent: "عامل المقاطعة",
       queueMessage: "رسالة قائمة الانتظار",
       sendAndInterrupt: "إرسال ومقاطعة",
+      steerCurrentTurn: "توجيه الدور الحالي",
       sendMessage: "أرسل رسالة",
       queue: "طابور",
+      steer: "توجيه",
       send: "يرسل",
     },
     cancel: {
@@ -187,6 +189,11 @@ export const ar: TranslationResources = {
       notFound: "لم يتم العثور على Agent",
       failedToLoad: "فشل تحميل الوكيل",
       reconnecting: "جارٍ إعادة الاتصال...",
+      connectingToHost: "جارٍ الاتصال بالمضيف...",
+      waitingForHost: "انقطع الاتصال · بانتظار المضيف...",
+      waitingForHistory: "تم الاتصال بالمضيف · بانتظار بيانات المحادثة...",
+      receivingHistory: "تم الاتصال بالمضيف · جارٍ استلام البيانات (الصفحة {{page}})...",
+      historyMayBeOutOfDate: "قد لا يكون سجل المحادثة محدثًا",
       archivingTitle: "وكيل الارشيف...",
       archivingSubtitle: "الرجاء الانتظار بينما نقوم بأرشفة هذا الوكيل.",
     },
@@ -1066,6 +1073,7 @@ export const ar: TranslationResources = {
       testNotification: {
         title: "اختبار الإخطار Paseo",
         body: "إذا كان بإمكانك رؤية ذلك، فهذا يعني أن إشعارات سطح المكتب تعمل.",
+        scheduled: "تمت جدولة إشعار اختبار بعد 10 ثوانٍ.",
         notDelivered: "لم يتم تسليم الإخطار. تحقق من إعدادات النظام > الإشعارات.",
         failed: "فشل في إرسال الإخطار.",
       },
@@ -1518,11 +1526,11 @@ export const ar: TranslationResources = {
         label: "إرسال افتراضي",
         descriptions: {
           interrupt:
-            "عند تشغيل الوكيل، يوقف Enter التشغيل. Command/Ctrl+Enter يضيف إلى قائمة الانتظار.",
-          queue: "عند تشغيل الوكيل، يضيف Enter إلى قائمة الانتظار. Command/Ctrl+Enter يرسل.",
+            "أثناء تشغيل الوكيل، يوجّه Enter الدور الحالي عند توفر الدعم، وإلا يوقفه. ويضيف Command/Ctrl+Enter إلى قائمة الانتظار.",
+          queue: "أثناء تشغيل الوكيل، يضيف Enter إلى قائمة الانتظار. ويرسل Command/Ctrl+Enter فورًا.",
         },
         options: {
-          interrupt: "مقاطعة",
+          interrupt: "إرسال الآن",
           queue: "طابور",
         },
       },
@@ -1794,7 +1802,8 @@ export const ar: TranslationResources = {
       refresh: "ينعش",
       refreshing: "منعش...",
       refreshAccessibility: "تحديث أذونات سطح المكتب",
-      test: "امتحان",
+      test: "اختبر الآن",
+      testDelayed: "اختبر بعد 10 ثوانٍ",
       actions: {
         granted: "ممنوح",
         request: "طلب",

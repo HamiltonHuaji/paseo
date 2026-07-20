@@ -1,6 +1,6 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { TFunction } from "i18next";
-import { SquarePen } from "lucide-react-native";
+import { RotateCw, SquarePen } from "lucide-react-native";
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, Text, View } from "react-native";
@@ -12,6 +12,7 @@ import { shallow, useShallow } from "zustand/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { AgentStreamView, type AgentStreamViewHandle } from "@/agent-stream/view";
 import { ArchivedAgentCallout } from "@/components/archived-agent-callout";
+import { Button } from "@/components/ui/button";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
 import { Composer } from "@/composer";
 import { AgentModeControl } from "@/composer/agent-controls/mode-control";
@@ -43,6 +44,7 @@ import { useContainerWidthBelow } from "@/hooks/use-container-width";
 import {
   clearHistorySyncErrorAfterSuccessfulSync,
   reconcileMissingAgentStateWithPresentAgent,
+  resolveAgentHistoryLoadStatus,
 } from "@/panels/agent-panel-load-state";
 import { usePaneContext, usePaneFocus } from "@/panels/pane-context";
 import type { PanelDescriptor, PanelRegistration } from "@/panels/panel-registry";
@@ -183,9 +185,12 @@ function buildChatAgentFromState(
 function renderChatAgentNonReadyView(args: {
   viewState: AgentScreenViewState;
   effectiveAgent: AgentScreenAgent | null;
+  connectionStatus: HostRuntimeConnectionStatus;
+  historyPagesReceived: number;
+  onRetry: () => void;
   t: TFunction;
 }): React.ReactElement | null {
-  const { viewState, effectiveAgent, t } = args;
+  const { viewState, effectiveAgent, connectionStatus, historyPagesReceived, onRetry, t } = args;
   if (viewState.tag === "not_found") {
     return (
       <View style={styles.container} testID="agent-not-found">
@@ -201,6 +206,16 @@ function renderChatAgentNonReadyView(args: {
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{t("agentPanel.states.failedToLoad")}</Text>
           <Text style={styles.statusText}>{viewState.message}</Text>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={RotateCw}
+            onPress={onRetry}
+            style={styles.retryButton}
+            testID="agent-history-retry"
+          >
+            {t("common.actions.retry")}
+          </Button>
         </View>
       </View>
     );
@@ -210,11 +225,36 @@ function renderChatAgentNonReadyView(args: {
       <View style={styles.container} testID="agent-loading">
         <View style={styles.errorContainer}>
           <ThemedActivityIndicator size="large" uniProps={foregroundMutedColorMapping} />
+          <Text style={styles.statusText} testID="agent-history-load-status">
+            {formatAgentHistoryLoadStatus({
+              connectionStatus,
+              pagesReceived: historyPagesReceived,
+              t,
+            })}
+          </Text>
         </View>
       </View>
     );
   }
   return null;
+}
+
+function formatAgentHistoryLoadStatus(input: {
+  connectionStatus: HostRuntimeConnectionStatus;
+  pagesReceived: number;
+  t: TFunction;
+}): string {
+  const status = resolveAgentHistoryLoadStatus(input);
+  if (status === "connecting") {
+    return input.t("agentPanel.states.connectingToHost");
+  }
+  if (status === "reconnecting") {
+    return input.t("agentPanel.states.waitingForHost");
+  }
+  if (status === "receiving_data") {
+    return input.t("agentPanel.states.receivingHistory", { page: input.pagesReceived });
+  }
+  return input.t("agentPanel.states.waitingForHistory");
 }
 
 function formatProviderLabel(provider: Agent["provider"]): string {
@@ -589,7 +629,11 @@ function AgentPanelBody({
     if (!isConnected || !hasSession) {
       return;
     }
-    if (lookupState.tag === "loading" || lookupState.tag === "not_found") {
+    if (
+      lookupState.tag === "loading" ||
+      lookupState.tag === "not_found" ||
+      lookupState.tag === "error"
+    ) {
       return;
     }
 
@@ -627,6 +671,11 @@ function AgentPanelBody({
       });
   }, [agentId, agentState.id, client, hasSession, isConnected, lookupState.tag, serverId]);
 
+  const handleRetryAgentLookup = useCallback(() => {
+    lookupAttemptTokenRef.current += 1;
+    setLookupState({ tag: "idle" });
+  }, []);
+
   if (lookupState.tag === "not_found") {
     return (
       <View style={styles.container} testID="agent-not-found">
@@ -643,6 +692,16 @@ function AgentPanelBody({
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{t("agentPanel.states.failedToLoad")}</Text>
           <Text style={styles.statusText}>{lookupState.message}</Text>
+          <Button
+            size="sm"
+            variant="outline"
+            leftIcon={RotateCw}
+            onPress={handleRetryAgentLookup}
+            style={styles.retryButton}
+            testID="agent-lookup-retry"
+          >
+            {t("common.actions.retry")}
+          </Button>
         </View>
       </View>
     );
@@ -673,6 +732,9 @@ function AgentPanelBody({
       <View style={styles.container} testID="agent-loading">
         <View style={styles.errorContainer}>
           <ThemedActivityIndicator size="large" uniProps={foregroundMutedColorMapping} />
+          <Text style={styles.statusText} testID="agent-load-status">
+            {formatAgentHistoryLoadStatus({ connectionStatus, pagesReceived: 0, t })}
+          </Text>
         </View>
       </View>
     );
@@ -763,6 +825,33 @@ function ChatAgentContent({
   const [missingAgentState, setMissingAgentState] = useState<AgentScreenMissingState>({
     kind: "idle",
   });
+  const [historyLoadProgress, setHistoryLoadProgress] = useState({
+    pagesReceived: 0,
+  });
+
+  useEffect(() => {
+    setHistoryLoadProgress({ pagesReceived: 0 });
+  }, [agentId, serverId]);
+
+  useEffect(() => {
+    if (!agentId) {
+      return;
+    }
+    const initKey = getInitKey(serverId, agentId);
+    return client.on("fetch_agent_timeline_response", (message) => {
+      if (
+        message.type !== "fetch_agent_timeline_response" ||
+        message.payload.agentId !== agentId ||
+        message.payload.error ||
+        !getInitDeferred(initKey)
+      ) {
+        return;
+      }
+      setHistoryLoadProgress((previous) => ({
+        pagesReceived: previous.pagesReceived + 1,
+      }));
+    });
+  }, [agentId, client, serverId]);
 
   const hasHydratedHistoryBefore = hasAppliedAuthoritativeHistory;
 
@@ -783,7 +872,7 @@ function ChatAgentContent({
   });
 
   const handleHistorySyncFailure = useCallback(
-    ({ origin, error }: { origin: "focus" | "entry"; error: unknown }) => {
+    ({ origin, error }: { origin: "focus" | "entry" | "retry"; error: unknown }) => {
       if (agentId) {
         console.warn("[AgentPanel] history sync failed", {
           origin,
@@ -803,9 +892,12 @@ function ChatAgentContent({
   );
 
   const ensureInitializedWithSyncErrorHandling = useCallback(
-    (origin: "focus" | "entry") => {
+    (origin: "focus" | "entry" | "retry") => {
       if (!agentId) {
         return;
+      }
+      if (!getInitDeferred(getInitKey(serverId, agentId))) {
+        setHistoryLoadProgress({ pagesReceived: 0 });
       }
       ensureAgentIsInitialized(agentId)
         .then(() => {
@@ -817,8 +909,18 @@ function ChatAgentContent({
           return undefined;
         });
     },
-    [agentId, ensureAgentIsInitialized, handleHistorySyncFailure],
+    [agentId, ensureAgentIsInitialized, handleHistorySyncFailure, serverId],
   );
+
+  const handleRetryHistorySync = useCallback(() => {
+    if (!agentId) {
+      return;
+    }
+    setMissingAgentState({ kind: "idle" });
+    if (isConnected) {
+      ensureInitializedWithSyncErrorHandling("retry");
+    }
+  }, [agentId, ensureInitializedWithSyncErrorHandling, isConnected]);
 
   useEffect(() => {
     if (connectionStatus === "online") {
@@ -1050,6 +1152,9 @@ function ChatAgentContent({
   const nonReadyView = renderChatAgentNonReadyView({
     viewState,
     effectiveAgent,
+    connectionStatus,
+    historyPagesReceived: historyLoadProgress.pagesReceived,
+    onRetry: handleRetryHistorySync,
     t,
   });
   if (nonReadyView) return nonReadyView;
@@ -1061,6 +1166,18 @@ function ChatAgentContent({
     viewState.tag === "ready" &&
     viewState.sync.status === "catching_up" &&
     viewState.sync.ui === "overlay";
+  let historySyncError: string | null = null;
+  if (viewState.tag === "ready" && viewState.sync.status === "sync_error") {
+    historySyncError =
+      missingAgentState.kind === "error"
+        ? missingAgentState.message
+        : t("agentPanel.states.failedToLoad");
+  }
+  const historyLoadStatus = formatAgentHistoryLoadStatus({
+    connectionStatus,
+    pagesReceived: historyLoadProgress.pagesReceived,
+    t,
+  });
 
   return (
     <ChatAgentReadyContent
@@ -1080,6 +1197,9 @@ function ChatAgentContent({
       handleComposerHeightChange={handleComposerHeightChange}
       handleMessageSent={handleMessageSent}
       showHistorySyncOverlay={showHistorySyncOverlay}
+      historyLoadStatus={historyLoadStatus}
+      historySyncError={historySyncError}
+      onRetryHistorySync={handleRetryHistorySync}
       cwd={agentCwd}
       onAttentionInputFocus={attentionController.clearOnInputFocus}
       onAttentionPromptSend={attentionController.clearOnPromptSend}
@@ -1105,6 +1225,9 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   handleComposerHeightChange,
   handleMessageSent,
   showHistorySyncOverlay,
+  historyLoadStatus,
+  historySyncError,
+  onRetryHistorySync,
   cwd,
   onAttentionInputFocus,
   onAttentionPromptSend,
@@ -1126,6 +1249,9 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
   handleComposerHeightChange: (height: number) => void;
   handleMessageSent: () => void;
   showHistorySyncOverlay: boolean;
+  historyLoadStatus: string;
+  historySyncError: string | null;
+  onRetryHistorySync: () => void;
   cwd: string;
   onAttentionInputFocus: () => void;
   onAttentionPromptSend: () => void;
@@ -1202,6 +1328,31 @@ const ChatAgentReadyContent = memo(function ChatAgentReadyContent({
           {showHistorySyncOverlay ? (
             <View style={styles.historySyncOverlay} testID="agent-history-overlay">
               <ThemedActivityIndicator size="large" uniProps={foregroundMutedColorMapping} />
+              <Text style={styles.statusText} testID="agent-history-overlay-status">
+                {historyLoadStatus}
+              </Text>
+            </View>
+          ) : null}
+
+          {historySyncError ? (
+            <View style={styles.historySyncError} testID="agent-history-sync-error">
+              <View style={styles.historySyncErrorText}>
+                <Text style={styles.historySyncErrorTitle}>
+                  {t("agentPanel.states.historyMayBeOutOfDate")}
+                </Text>
+                <Text style={styles.historySyncErrorDetails} numberOfLines={2}>
+                  {historySyncError}
+                </Text>
+              </View>
+              <Button
+                size="sm"
+                variant="outline"
+                leftIcon={RotateCw}
+                onPress={onRetryHistorySync}
+                testID="agent-history-sync-error-retry"
+              >
+                {t("common.actions.retry")}
+              </Button>
             </View>
           ) : null}
 
@@ -1632,6 +1783,35 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "center",
     zIndex: 40,
   },
+  historySyncError: {
+    position: "absolute",
+    top: theme.spacing[3],
+    right: theme.spacing[3],
+    left: theme.spacing[3],
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    backgroundColor: theme.colors.surface1,
+    borderWidth: 1,
+    borderColor: theme.colors.destructive,
+    borderRadius: theme.borderRadius.lg,
+    zIndex: 45,
+  },
+  historySyncErrorText: {
+    flex: 1,
+    gap: theme.spacing[1],
+  },
+  historySyncErrorTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.semibold,
+  },
+  historySyncErrorDetails: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.xs,
+  },
   archivingOverlay: {
     position: "absolute",
     top: 0,
@@ -1682,6 +1862,9 @@ const styles = StyleSheet.create((theme) => ({
     textAlign: "center",
     fontSize: theme.fontSize.sm,
     color: theme.colors.foregroundMuted,
+  },
+  retryButton: {
+    marginTop: theme.spacing[3],
   },
   offlineTitle: {
     fontSize: theme.fontSize.base,

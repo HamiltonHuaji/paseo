@@ -3,6 +3,7 @@ import type { AgentScreenMissingState } from "@/hooks/use-agent-screen-state-mac
 import {
   clearHistorySyncErrorAfterSuccessfulSync,
   reconcileMissingAgentStateWithPresentAgent,
+  resolveAgentHistoryLoadStatus,
 } from "./agent-panel-load-state";
 
 describe("reconcileMissingAgentStateWithPresentAgent", () => {
@@ -42,5 +43,22 @@ describe("clearHistorySyncErrorAfterSuccessfulSync", () => {
     const state: AgentScreenMissingState = { kind: "resolving" };
 
     expect(clearHistorySyncErrorAfterSuccessfulSync(state)).toBe(state);
+  });
+});
+
+describe("resolveAgentHistoryLoadStatus", () => {
+  it("distinguishes connection setup, waiting for data, and received pages", () => {
+    expect(
+      resolveAgentHistoryLoadStatus({ connectionStatus: "connecting", pagesReceived: 0 }),
+    ).toBe("connecting");
+    expect(resolveAgentHistoryLoadStatus({ connectionStatus: "online", pagesReceived: 0 })).toBe(
+      "waiting_for_data",
+    );
+    expect(resolveAgentHistoryLoadStatus({ connectionStatus: "online", pagesReceived: 2 })).toBe(
+      "receiving_data",
+    );
+    expect(resolveAgentHistoryLoadStatus({ connectionStatus: "offline", pagesReceived: 2 })).toBe(
+      "reconnecting",
+    );
   });
 });
