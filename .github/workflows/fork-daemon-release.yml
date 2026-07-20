@@ -1,0 +1,106 @@
+name: Fork Daemon Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to attach paseo-fork.tgz to."
+        required: true
+        type: string
+      checkout_ref:
+        description: "Branch/ref containing the fork code to build."
+        required: false
+        default: "overlay"
+        type: string
+      publish:
+        description: "Upload paseo-fork.tgz to the GitHub release."
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: fork-daemon-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_TAG: ${{ inputs.tag }}
+  CHECKOUT_REF: ${{ inputs.checkout_ref || 'overlay' }}
+  SHOULD_PUBLISH: ${{ inputs.publish != 'false' }}
+
+jobs:
+  publish-daemon-package:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release metadata
+        shell: bash
+        run: |
+          node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+          node scripts/emit-fork-build-env.mjs >> "$GITHUB_ENV"
+
+      - name: Ensure GitHub release exists
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
+          notes=$(printf 'Fork version: `v%s`\n\nInstaller version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
+            "$FORK_DISPLAY_VERSION" "$RELEASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
+            exit 0
+          fi
+          args=(release create "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes" --draft)
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh "${args[@]}" || {
+            gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null
+            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
+          }
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+
+      - name: Build single-package daemon distribution
+        run: npm run build:fork-daemon-package
+
+      - name: Verify global install isolation
+        run: npm run verify:fork-daemon-package
+
+      - name: Upload daemon package to release
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release upload "$RELEASE_TAG"
+          artifacts/fork-daemon/paseo-fork.tgz
+          --clobber
+          --repo "${{ github.repository }}"
+
+      - name: Upload daemon package to workflow
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: paseo-fork-daemon
+          path: artifacts/fork-daemon/paseo-fork.tgz
+          retention-days: 7

@@ -6,6 +6,7 @@ import {
   type DaemonSelfUpdatePhase,
 } from "./daemon-self-updater.js";
 import type { CommandResult, NpmGlobalPaseoInstall } from "./npm-global-cli.js";
+import type { PaseoDaemonDistribution } from "./distribution.js";
 
 interface TestLogger {
   errors: Array<{ obj: object; msg?: string }>;
@@ -22,6 +23,21 @@ const globalNodeModules = `${globalRoot}/node_modules`;
 const cliPackagePath = `${globalNodeModules}/@getpaseo/cli`;
 const npmServerPackageRoot = `${cliPackagePath}/node_modules/@getpaseo/server`;
 const sourceServerPackageRoot = "/repo/packages/server";
+const forkPackagePath = `${globalNodeModules}/@hamiltonhuaji/paseo-fork`;
+const forkServerPackageRoot = `${forkPackagePath}/node_modules/@getpaseo/server`;
+const officialDistribution: PaseoDaemonDistribution = {
+  kind: "official",
+  packageName: "@getpaseo/cli",
+  installSpec: "@getpaseo/cli@latest",
+};
+const forkDistribution: PaseoDaemonDistribution = {
+  kind: "bundled",
+  packageName: "@hamiltonhuaji/paseo-fork",
+  version: "0.1.110-fork.2",
+  serverVersion: "0.1.110",
+  installSpec: "https://github.com/HamiltonHuaji/paseo/releases/latest/download/paseo-fork.tgz",
+  packageRoot: forkPackagePath,
+};
 
 function npmGlobalPaseoInstall(
   version: string,
@@ -53,6 +69,7 @@ function createRuntime(input: {
   currentServerPackageRoot?: string | null;
   installResult?: CommandResult;
   calls?: RuntimeCall[];
+  distribution?: PaseoDaemonDistribution;
 }): DaemonSelfUpdateRuntime {
   const calls = input.calls ?? [];
   return {
@@ -78,6 +95,7 @@ function createRuntime(input: {
         return input.currentServerPackageRoot ?? npmServerPackageRoot;
       },
     },
+    distribution: input.distribution ?? officialDistribution,
   };
 }
 
@@ -113,6 +131,32 @@ describe("DaemonSelfUpdater", () => {
       newVersion: "0.1.96",
     });
     expect(phases).toEqual(["starting", "downloading", "installing", "complete"]);
+    expect(calls).toEqual(["inspect", "installLatest", "inspect"]);
+  });
+
+  test("updates a bundled fork using its distribution version and upstream daemon version", async () => {
+    const calls: RuntimeCall[] = [];
+    const forkInstall: NpmGlobalPaseoInstall = {
+      version: "0.1.110-fork.2",
+      packagePath: forkPackagePath,
+      globalRootPath: globalRoot,
+      isLinked: false,
+    };
+    const updatedForkInstall = { ...forkInstall, version: "0.1.110-fork.3" };
+    const runtime = createRuntime({
+      calls,
+      inspections: [forkInstall, updatedForkInstall],
+      currentServerPackageRoot: forkServerPackageRoot,
+      distribution: forkDistribution,
+    });
+
+    const { result } = await runUpdate({ runtime, daemonVersion: "0.1.110" });
+
+    expect(result).toEqual({
+      success: true,
+      error: null,
+      newVersion: "0.1.110-fork.3",
+    });
     expect(calls).toEqual(["inspect", "installLatest", "inspect"]);
   });
 
@@ -208,6 +252,7 @@ describe("DaemonSelfUpdater", () => {
           return npmServerPackageRoot;
         },
       },
+      distribution: officialDistribution,
     };
     const logger = createLogger();
     const updater = new DaemonSelfUpdater(runtime);

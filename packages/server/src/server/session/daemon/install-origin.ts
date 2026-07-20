@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { isRealpathInsideRoot } from "../../../utils/path.js";
-import { PASEO_CLI_PACKAGE, type NpmGlobalPaseoInstall } from "./npm-global-cli.js";
+import type { PaseoDaemonDistribution } from "./distribution.js";
+import type { NpmGlobalPaseoInstall } from "./npm-global-cli.js";
 
 const PackageJsonSchema = z.object({ name: z.string().optional() }).passthrough();
 
@@ -18,14 +19,24 @@ export const daemonInstallOriginRuntime: DaemonInstallOriginRuntime = {
 export function validateDaemonInstallOrigin(
   install: NpmGlobalPaseoInstall,
   daemonVersion: string | null,
+  distribution: PaseoDaemonDistribution,
   runtime: DaemonInstallOriginRuntime = daemonInstallOriginRuntime,
 ): string | null {
   if (install.isLinked) {
-    return `The global ${PASEO_CLI_PACKAGE} install is linked; self-update only supports normal npm global installs.`;
+    return `The global ${distribution.packageName} install is linked; self-update only supports normal npm global installs.`;
   }
 
-  if (daemonVersion && install.version !== daemonVersion) {
-    return `This daemon is not running from the npm global ${PASEO_CLI_PACKAGE} install (global npm has ${install.version}, daemon is ${daemonVersion}).`;
+  if (distribution.kind === "bundled" && install.version !== distribution.version) {
+    return `This daemon distribution is ${distribution.version}, but the global ${distribution.packageName} install is ${install.version}.`;
+  }
+
+  const expectedServerVersion =
+    distribution.kind === "bundled" ? distribution.serverVersion : install.version;
+  if (daemonVersion && expectedServerVersion !== daemonVersion) {
+    if (distribution.kind === "official") {
+      return `This daemon is not running from the npm global ${distribution.packageName} install (global npm has ${install.version}, daemon is ${daemonVersion}).`;
+    }
+    return `This daemon is not running from the npm global ${distribution.packageName} install (expected daemon ${expectedServerVersion}, daemon is ${daemonVersion}).`;
   }
 
   const currentServerPackageRoot = runtime.resolveCurrentServerPackageRoot();
@@ -33,8 +44,8 @@ export function validateDaemonInstallOrigin(
     return "Unable to verify that this daemon is running from an npm global install.";
   }
 
-  if (!isCurrentServerUnderNpmInstall(currentServerPackageRoot, install)) {
-    return `This daemon is not running from the npm global ${PASEO_CLI_PACKAGE} install.`;
+  if (!isCurrentServerUnderNpmInstall(currentServerPackageRoot, install, distribution)) {
+    return `This daemon is not running from the npm global ${distribution.packageName} install.`;
   }
 
   return null;
@@ -43,7 +54,19 @@ export function validateDaemonInstallOrigin(
 function isCurrentServerUnderNpmInstall(
   currentServerPackageRoot: string,
   install: NpmGlobalPaseoInstall,
+  distribution: PaseoDaemonDistribution,
 ): boolean {
+  if (distribution.kind === "bundled") {
+    const manifestBelongsToInstall = isRealpathInsideRoot(
+      install.packagePath,
+      distribution.packageRoot,
+    );
+    return (
+      manifestBelongsToInstall &&
+      isRealpathInsideRoot(install.packagePath, currentServerPackageRoot)
+    );
+  }
+
   const roots = install.globalRootPath
     ? [install.packagePath, globalNodeModulesPath(install.globalRootPath)]
     : [install.packagePath];

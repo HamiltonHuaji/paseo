@@ -3,6 +3,9 @@
 Fork-only Windows/Linux desktop builds use the narrower workflow documented in
 [fork-desktop-distribution.md](fork-desktop-distribution.md).
 
+The fork's single-package CLI/daemon tarball and GitHub Release workflow are documented in
+[fork-daemon-distribution.md](fork-daemon-distribution.md).
+
 The fork branch topology and upstream rebase procedure are documented in
 [fork-overlay.md](fork-overlay.md).
 

@@ -1,8 +1,7 @@
 import { getErrorMessage } from "@getpaseo/protocol/error-utils";
 import { z } from "zod";
 import { execCommand } from "../../../utils/spawn.js";
-
-export const PASEO_CLI_PACKAGE = "@getpaseo/cli";
+import { currentDaemonDistribution, type PaseoDaemonDistribution } from "./distribution.js";
 
 const NPM_PROBE_TIMEOUT_MS = 10_000;
 const NPM_INSTALL_TIMEOUT_MS = 300_000;
@@ -85,7 +84,10 @@ async function runExternalCommand(
   }
 }
 
-function parseNpmGlobalPaseoInstall(stdout: string): NpmGlobalPaseoInstall | null {
+function parseNpmGlobalPaseoInstall(
+  stdout: string,
+  packageName: string,
+): NpmGlobalPaseoInstall | null {
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(stdout);
@@ -98,7 +100,7 @@ function parseNpmGlobalPaseoInstall(stdout: string): NpmGlobalPaseoInstall | nul
     return null;
   }
 
-  const rawCliPackage = list.data.dependencies?.[PASEO_CLI_PACKAGE];
+  const rawCliPackage = list.data.dependencies?.[packageName];
   const cliPackage = NpmGlobalCliPackageSchema.safeParse(rawCliPackage);
   if (!cliPackage.success) {
     return null;
@@ -113,12 +115,15 @@ function parseNpmGlobalPaseoInstall(stdout: string): NpmGlobalPaseoInstall | nul
 }
 
 export class DefaultNpmGlobalPaseoCli implements NpmGlobalPaseoCli {
-  constructor(private readonly runCommand: CommandRunner = runExternalCommand) {}
+  constructor(
+    private readonly runCommand: CommandRunner = runExternalCommand,
+    private readonly distribution: PaseoDaemonDistribution = currentDaemonDistribution,
+  ) {}
 
   async inspect(): Promise<NpmGlobalPaseoInstall> {
     const result = await this.runCommand(
       "npm",
-      ["-g", "ls", PASEO_CLI_PACKAGE, "--json", "--depth=0", "--long"],
+      ["-g", "ls", this.distribution.packageName, "--json", "--depth=0", "--long"],
       {
         timeout: NPM_PROBE_TIMEOUT_MS,
         maxBuffer: NPM_MAX_BUFFER_BYTES,
@@ -129,15 +134,15 @@ export class DefaultNpmGlobalPaseoCli implements NpmGlobalPaseoCli {
       throw new Error(result.stderr.trim() || "npm is not available on this host");
     }
 
-    const install = parseNpmGlobalPaseoInstall(result.stdout);
+    const install = parseNpmGlobalPaseoInstall(result.stdout, this.distribution.packageName);
     if (!install) {
-      throw new Error(`${PASEO_CLI_PACKAGE} is not installed with npm -g on this host`);
+      throw new Error(`${this.distribution.packageName} is not installed with npm -g on this host`);
     }
     return install;
   }
 
   installLatest(): Promise<CommandResult> {
-    return this.runCommand("npm", ["install", "-g", `${PASEO_CLI_PACKAGE}@latest`], {
+    return this.runCommand("npm", ["install", "-g", this.distribution.installSpec], {
       timeout: NPM_INSTALL_TIMEOUT_MS,
       maxBuffer: NPM_MAX_BUFFER_BYTES,
     });

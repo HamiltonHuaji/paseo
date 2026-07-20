@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+
+import { readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const packageRoot = realpathSync(path.resolve(import.meta.dirname, ".."));
+const manifest = JSON.parse(
+  readFileSync(path.join(packageRoot, "paseo-distribution.json"), "utf8"),
+);
+
+for (const [packageName, expectedVersion] of Object.entries(manifest.internalPackages)) {
+  const packagePath = path.join(packageRoot, "node_modules", ...packageName.split("/"));
+  const resolvedPackagePath = realpathSync(packagePath);
+  const relativePath = path.relative(packageRoot, resolvedPackagePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    throw new Error(`${packageName} resolves outside ${manifest.packageName}`);
+  }
+
+  const packageJson = JSON.parse(
+    readFileSync(path.join(resolvedPackagePath, "package.json"), "utf8"),
+  );
+  const distribution = packageJson.paseoDistribution;
+  const hasExpectedIdentity =
+    distribution?.packageName === manifest.packageName &&
+    distribution?.version === manifest.version;
+  if (!hasExpectedIdentity || packageJson.version !== expectedVersion) {
+    throw new Error(`${packageName} is not the bundled ${manifest.packageName} build`);
+  }
+}
+
+await import(pathToFileURL(path.join(packageRoot, "dist", "index.js")).href);
