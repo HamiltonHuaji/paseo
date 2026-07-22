@@ -78,6 +78,50 @@ test("session create forwards clientMessageId to the initial prompt run options"
   });
 });
 
+test("session create uses the native conversation fork path when requested", async () => {
+  const snapshot = {
+    id: "forked-agent",
+    provider: "codex",
+    cwd: "/tmp/paseo-fork-target",
+    runtimeInfo: null,
+  } as ManagedAgent;
+  const forkAgentFromConversation = vi.fn(async () => snapshot);
+  const createAgent = vi.fn(async () => snapshot);
+  const dependencies: Parameters<typeof createAgentCommand>[0] = {
+    agentManager: {
+      createAgent,
+      forkAgentFromConversation,
+    } as unknown as Parameters<typeof createAgentCommand>[0]["agentManager"],
+    agentStorage: {} as Parameters<typeof createAgentCommand>[0]["agentStorage"],
+    logger: createTestLogger(),
+    providerSnapshotManager: createProviderSnapshotManagerStub().manager,
+  };
+  const forkFrom = {
+    agentId: "source-agent",
+    boundaryCursor: { epoch: "epoch-1", seq: 4 },
+    boundaryMessageId: "assistant-4",
+  };
+
+  await createAgentCommand(dependencies, {
+    kind: "session",
+    config: { provider: "codex", cwd: "/tmp/paseo-fork-target" },
+    workspaceId: "fork-target-workspace",
+    forkFrom,
+    labels: {},
+    provisionalTitle: null,
+    firstAgentContext: { attachments: [] },
+    buildSessionConfig: async (config) => ({ sessionConfig: config }),
+  });
+
+  expect(forkAgentFromConversation).toHaveBeenCalledWith(
+    forkFrom,
+    expect.objectContaining({ provider: "codex", cwd: "/tmp/paseo-fork-target" }),
+    undefined,
+    expect.objectContaining({ workspaceId: "fork-target-workspace" }),
+  );
+  expect(createAgent).not.toHaveBeenCalled();
+});
+
 test("session create validates the requested mode against the provider's modes", async () => {
   const snapshot = {
     id: "agent-1",

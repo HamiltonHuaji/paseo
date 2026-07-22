@@ -177,6 +177,7 @@ export interface AgentCapabilityFlags {
   supportsRewindConversation?: boolean;
   supportsRewindFiles?: boolean;
   supportsRewindBoth?: boolean;
+  supportsNativeConversationFork?: boolean;
   supportsSteering?: boolean;
 }
 
@@ -610,6 +611,12 @@ export interface AgentPermissionResult {
   followUpPrompt?: AgentPromptInput;
 }
 
+export interface AgentConversationForkInput {
+  boundaryMessageId: string;
+  isLatestCompletedTurn: boolean;
+  targetConfig: AgentSessionConfig;
+}
+
 export interface AgentSession {
   readonly provider: AgentProvider;
   readonly id: string | null;
@@ -629,6 +636,7 @@ export interface AgentSession {
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void>;
   describePersistence(): AgentPersistenceHandle | null;
+  forkConversation?(input: AgentConversationForkInput): Promise<AgentPersistenceHandle>;
   steer?(prompt: AgentPromptInput, options?: AgentRunOptions): Promise<void>;
   interrupt(): Promise<void>;
   close(): Promise<void>;

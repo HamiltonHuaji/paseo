@@ -555,6 +555,7 @@ test("advertises client capabilities in hello", async () => {
     protocolVersion: 1,
     capabilities: {
       custom_mode_icons: true,
+      agent_conversation_fork: true,
       provider_subagents: true,
       reasoning_merge_enum: true,
       terminal_reflowable_snapshot: true,
@@ -1900,6 +1901,56 @@ test("sends create_agent_request with string workspace ids", async () => {
   );
 
   await expect(createPromise).rejects.toThrow("compat test sentinel");
+});
+
+test("sends a native conversation fork boundary with create_agent_request", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "conversation_fork_create_unit_test",
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const createPromise = client.createAgent({
+    provider: "codex",
+    cwd: "/tmp/project",
+    workspaceId: "workspace-2",
+    forkFrom: {
+      agentId: "source-agent",
+      boundaryCursor: { epoch: "epoch-1", seq: 12 },
+      boundaryMessageId: "assistant-12",
+    },
+  });
+
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request).toEqual(
+    expect.objectContaining({
+      type: "create_agent_request",
+      forkFrom: {
+        agentId: "source-agent",
+        boundaryCursor: { epoch: "epoch-1", seq: 12 },
+        boundaryMessageId: "assistant-12",
+      },
+    }),
+  );
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "status",
+      payload: {
+        status: "agent_create_failed",
+        requestId: request.requestId,
+        error: "fork test sentinel",
+      },
+    }),
+  );
+  await expect(createPromise).rejects.toThrow("fork test sentinel");
 });
 
 test("sends worktree target and autoArchive in create_agent_request", async () => {

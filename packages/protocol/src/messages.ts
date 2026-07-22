@@ -287,6 +287,8 @@ const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z
     supportsRewindFiles: z.boolean().optional().default(false),
     // COMPAT(rewind): added in v0.1.X, drop when floor >= v0.1.X.
     supportsRewindBoth: z.boolean().optional().default(false),
+    // COMPAT(agentConversationFork): added in fork v0.1.111, remove after 2027-01-22.
+    supportsNativeConversationFork: z.boolean().optional(),
     // COMPAT(agentTurnSteer): added in fork v0.1.110-fork.3, remove after 2027-01-20.
     supportsSteering: z.boolean().optional(),
   })
@@ -1182,6 +1184,19 @@ export const CreateAgentWorktreeTargetSchema = z.discriminatedUnion("mode", [
 
 export type CreateAgentWorktreeTarget = z.infer<typeof CreateAgentWorktreeTargetSchema>;
 
+export const AgentTimelineCursorSchema = z.object({
+  epoch: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
+export const AgentConversationForkSourceSchema = z.object({
+  agentId: z.string(),
+  boundaryCursor: AgentTimelineCursorSchema.optional(),
+  boundaryMessageId: z.string().optional(),
+});
+
+export type AgentConversationForkSource = z.infer<typeof AgentConversationForkSourceSchema>;
+
 export const CreateAgentRequestMessageSchema = z.object({
   type: z.literal("create_agent_request"),
   config: AgentSessionConfigSchema,
@@ -1195,6 +1210,9 @@ export const CreateAgentRequestMessageSchema = z.object({
   attachments: AgentAttachmentsSchema,
   git: GitSetupOptionsSchema.optional(),
   worktree: CreateAgentWorktreeTargetSchema.optional(),
+  // COMPAT(agentConversationFork): added in fork v0.1.111; remove the optional
+  // gate after 2027-01-22 once the daemon floor supports native conversation forks.
+  forkFrom: AgentConversationForkSourceSchema.optional(),
   autoArchive: z.boolean().optional(),
   labels: z.record(z.string(), z.string()).default({}),
   requestId: z.string(),
@@ -1287,11 +1305,6 @@ export const ShutdownServerRequestMessageSchema = z.object({
 export const DaemonUpdateRequestMessageSchema = z.object({
   type: z.literal("daemon.update.request"),
   requestId: z.string(),
-});
-
-export const AgentTimelineCursorSchema = z.object({
-  epoch: z.string(),
-  seq: z.number().int().nonnegative(),
 });
 
 export const FetchAgentTimelineRequestMessageSchema = z.object({
@@ -2463,6 +2476,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContext: z.boolean().optional(),
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: z.boolean().optional(),
+        // COMPAT(agentConversationFork): added in fork v0.1.111, remove gate after 2027-01-22.
+        agentConversationFork: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
         // COMPAT(workspacePinning): added in v0.1.107, remove gate after 2027-01-12.

@@ -14,6 +14,10 @@ export const CLIENT_CAPS = {
   // COMPAT(providerSubagents): added in v0.1.107. The daemon emits provider-owned
   // child descriptors and timelines only to clients that understand the new messages.
   providerSubagents: "provider_subagents",
+  // COMPAT(agentConversationFork): added in fork v0.1.111. The daemon accepts
+  // native provider fork descriptors only from clients that understand forked-agent creation.
+  // Remove after 2027-01-22 once the client floor includes this capability.
+  agentConversationFork: "agent_conversation_fork",
   browserHost: "browser_host",
 } as const;
 

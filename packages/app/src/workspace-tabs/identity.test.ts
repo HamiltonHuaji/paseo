@@ -43,3 +43,45 @@ describe("provider subagent tab identity", () => {
     expect(first).not.toBe(second);
   });
 });
+
+describe("native conversation fork draft identity", () => {
+  test("normalizes and compares the source host, agent, and timeline boundary", () => {
+    const target = normalizeWorkspaceTabTarget({
+      kind: "draft",
+      draftId: "draft-1",
+      setup: {
+        provider: "codex",
+        cwd: "/repo",
+        modeId: null,
+        model: null,
+        thinkingOptionId: null,
+        featureValues: {},
+        forkFrom: {
+          serverId: " server-1 ",
+          agentId: " agent-1 ",
+          boundaryCursor: { epoch: " epoch-1 ", seq: 7 },
+          boundaryMessageId: " assistant-1 ",
+        },
+      },
+    });
+
+    expect(target).toEqual({
+      kind: "draft",
+      draftId: "draft-1",
+      setup: {
+        provider: "codex",
+        cwd: "/repo",
+        modeId: null,
+        model: null,
+        thinkingOptionId: null,
+        featureValues: {},
+        forkFrom: {
+          serverId: "server-1",
+          agentId: "agent-1",
+          boundaryCursor: { epoch: "epoch-1", seq: 7 },
+          boundaryMessageId: "assistant-1",
+        },
+      },
+    });
+  });
+});

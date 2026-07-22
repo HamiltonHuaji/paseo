@@ -13,6 +13,7 @@ import {
 import type { Logger } from "pino";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
+import type { AgentConversationForkSource } from "@getpaseo/protocol/messages";
 
 import {
   getAgentStreamEventTurnId,
@@ -435,6 +436,40 @@ const AgentIdSchema = z.guid();
 
 function isAgentBusy(status: AgentLifecycleStatus): boolean {
   return BUSY_STATUSES.has(status);
+}
+
+export function resolveConversationForkBoundary(input: {
+  source: AgentConversationForkSource;
+  epoch: string;
+  rows: readonly AgentTimelineRow[];
+}): { boundaryMessageId: string; isLatestCompletedTurn: boolean } {
+  const { source, epoch, rows } = input;
+  if (source.boundaryCursor && source.boundaryCursor.epoch !== epoch) {
+    throw new Error(
+      "The selected conversation boundary is stale; reload the session and try again",
+    );
+  }
+
+  const row = source.boundaryCursor
+    ? rows.find((candidate) => candidate.seq === source.boundaryCursor?.seq)
+    : rows
+        .toReversed()
+        .find(
+          (candidate) =>
+            candidate.item.type === "assistant_message" &&
+            candidate.item.messageId === source.boundaryMessageId,
+        );
+  if (!row || row.item.type !== "assistant_message" || !row.item.messageId) {
+    throw new Error("The selected assistant message is no longer available");
+  }
+  if (source.boundaryMessageId && row.item.messageId !== source.boundaryMessageId) {
+    throw new Error("The selected conversation boundary no longer matches this message");
+  }
+
+  return {
+    boundaryMessageId: row.item.messageId,
+    isLatestCompletedTurn: rows.at(-1)?.seq === row.seq,
+  };
 }
 
 function isTurnTerminalEvent(event: AgentStreamEvent): boolean {
@@ -985,6 +1020,91 @@ export class AgentManager {
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
     return this.trackAgentRegistrationOperation(this.createAgentInternal(config, agentId, options));
+  }
+
+  forkAgentFromConversation(
+    source: AgentConversationForkSource,
+    config: AgentSessionConfig,
+    agentId: string | undefined,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(
+      this.forkAgentFromConversationInternal(source, config, agentId, options),
+    );
+  }
+
+  private async forkAgentFromConversationInternal(
+    source: AgentConversationForkSource,
+    config: AgentSessionConfig,
+    agentId: string | undefined,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
+    const sourceAgent = this.requireSessionAgent(source.agentId);
+    if (sourceAgent.lifecycle === "initializing") {
+      throw new Error("Wait for the current turn to finish before forking this conversation");
+    }
+    if (
+      !sourceAgent.capabilities.supportsNativeConversationFork ||
+      !sourceAgent.session.forkConversation
+    ) {
+      throw new Error(
+        `Provider '${sourceAgent.provider}' does not support native conversation forks`,
+      );
+    }
+    if (sourceAgent.provider !== config.provider) {
+      throw new Error("A native conversation fork must use the same provider as its source");
+    }
+
+    const timeline = this.fetchTimeline(sourceAgent.id, { direction: "tail", limit: 0 });
+    const boundary = resolveConversationForkBoundary({
+      source,
+      epoch: timeline.epoch,
+      rows: timeline.rows,
+    });
+    const sourceHasRun = this.hasInFlightRun(sourceAgent.id) || isAgentBusy(sourceAgent.lifecycle);
+    if (sourceHasRun && boundary.isLatestCompletedTurn) {
+      throw new Error("Wait for the current turn to finish before forking this conversation");
+    }
+    const sourceLock = sourceHasRun ? null : this.runs.createPendingRun(sourceAgent.id);
+    try {
+      const resolvedAgentId = validateAgentId(
+        agentId ?? this.idFactory(),
+        "forkAgentFromConversation",
+      );
+      const { storedConfig, launchConfig } = await this.prepareSessionConfig(
+        config,
+        resolvedAgentId,
+      );
+      const client = await this.requireAvailableClient({ provider: storedConfig.provider });
+      if (!client.capabilities.supportsNativeConversationFork) {
+        throw new Error(
+          `Provider '${storedConfig.provider}' does not support native conversation forks`,
+        );
+      }
+      const launchContext = await this.buildLaunchContext(resolvedAgentId, client, options.env);
+      const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+      const persistence = await sourceAgent.session.forkConversation({
+        ...boundary,
+        targetConfig: storedConfig,
+      });
+      if (persistence.provider !== storedConfig.provider) {
+        throw new Error("The forked provider session does not match the requested provider");
+      }
+      const session = await client.resumeSession(persistence, providerLaunchConfig, launchContext);
+      const registered = await this.registerSession(session, storedConfig, resolvedAgentId, {
+        labels: options.labels,
+        initialTitle: options.initialTitle,
+        workspaceId: options.workspaceId,
+        persistence,
+      });
+      await this.hydrateTimelineFromProvider(registered.id);
+      return this.getAgent(registered.id) ?? registered;
+    } finally {
+      if (sourceLock) {
+        this.runs.settleForegroundRun(sourceAgent.id, sourceLock.token);
+      }
+    }
   }
 
   private async createAgentInternal(

@@ -131,6 +131,35 @@ function resolveDraftModeId(input: {
   return null;
 }
 
+function toNativeConversationForkSource(
+  forkFrom: WorkspaceDraftTabSetup["forkFrom"],
+): NonNullable<Parameters<DaemonClient["createAgent"]>[0]["forkFrom"]> | undefined {
+  if (!forkFrom) return undefined;
+  return {
+    agentId: forkFrom.agentId,
+    ...(forkFrom.boundaryCursor ? { boundaryCursor: forkFrom.boundaryCursor } : {}),
+    ...(forkFrom.boundaryMessageId ? { boundaryMessageId: forkFrom.boundaryMessageId } : {}),
+  };
+}
+
+function requireDraftClient(
+  client: DaemonClient | null,
+  disconnectedMessage: string,
+): DaemonClient {
+  if (!client) throw new Error(disconnectedMessage);
+  return client;
+}
+
+function assertNativeForkHost(input: {
+  forkFrom: WorkspaceDraftTabSetup["forkFrom"];
+  serverId: string;
+  errorMessage: string;
+}): void {
+  if (input.forkFrom && input.forkFrom.serverId !== input.serverId) {
+    throw new Error(input.errorMessage);
+  }
+}
+
 async function submitDraftCreateRequest(input: {
   attempt: { clientMessageId: string };
   text: string;
@@ -140,6 +169,8 @@ async function submitDraftCreateRequest(input: {
   client: DaemonClient | null;
   workspaceDirectory: string | null;
   workspaceId: string | null;
+  serverId: string;
+  forkFrom?: WorkspaceDraftTabSetup["forkFrom"];
   autoSubmitConfig: AutoSubmitConfig | null;
   composerState: {
     selectedProvider: string | null;
@@ -151,6 +182,7 @@ async function submitDraftCreateRequest(input: {
   };
   hostDisconnectedMessage: string;
   selectModelMessage: string;
+  forkSameHostMessage: string;
 }): Promise<{ agentId: string | null; result: AgentSnapshotPayload }> {
   const {
     attempt,
@@ -161,15 +193,16 @@ async function submitDraftCreateRequest(input: {
     client,
     workspaceDirectory,
     workspaceId,
+    serverId,
+    forkFrom,
     autoSubmitConfig,
     composerState,
   } = input;
 
   invariant(workspaceDirectory, "Workspace directory is required");
   invariant(workspaceId, "Workspace id is required");
-  if (!client) {
-    throw new Error(input.hostDisconnectedMessage);
-  }
+  const connectedClient = requireDraftClient(client, input.hostDisconnectedMessage);
+  assertNativeForkHost({ forkFrom, serverId, errorMessage: input.forkSameHostMessage });
 
   const provider = autoSubmitConfig?.provider ?? composerState.selectedProvider;
   if (!provider) {
@@ -192,13 +225,15 @@ async function submitDraftCreateRequest(input: {
 
   const imagesData = await encodeImages(images);
   const attachmentsArray = Array.isArray(attachments) ? attachments : undefined;
-  const result = await client.createAgent({
+  const nativeForkSource = toNativeConversationForkSource(forkFrom);
+  const result = await connectedClient.createAgent({
     config,
     workspaceId,
     ...(text ? { initialPrompt: text } : {}),
     clientMessageId: attempt.clientMessageId,
     ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
     ...(attachmentsArray && attachmentsArray.length > 0 ? { attachments: attachmentsArray } : {}),
+    ...(nativeForkSource ? { forkFrom: nativeForkSource } : {}),
   });
 
   return {
@@ -409,7 +444,8 @@ export function WorkspaceDraftAgentTab({
         : {}),
     };
   }, [pendingAutoSubmit, pendingCreateAttempt]);
-  const allowsEmptyAutoSubmit = pendingAutoSubmit?.allowEmptyText === true;
+  const allowsEmptyAutoSubmit =
+    pendingAutoSubmit?.allowEmptyText === true || Boolean(draftSetup?.forkFrom);
   const isCompactFormFactor = useIsCompactFormFactor();
   const { onLayout: onInputAreaLayout, isBelow: isCompactComposerLayout } = useContainerWidthBelow(
     COMPACT_FORM_FACTOR_WIDTH,
@@ -505,10 +541,13 @@ export function WorkspaceDraftAgentTab({
         client,
         workspaceDirectory: draftWorkingDirectory,
         workspaceId: workspaceFields?.id ?? null,
+        serverId,
+        forkFrom: draftSetup?.forkFrom,
         autoSubmitConfig,
         composerState,
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
         selectModelMessage: t("workspaceSetup.errors.selectModel"),
+        forkSameHostMessage: t("message.actions.forkSameHost"),
       }),
     onCreateSuccess: ({ result }) => {
       clearDraftInput("sent");

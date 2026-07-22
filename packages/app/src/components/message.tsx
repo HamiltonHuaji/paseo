@@ -121,7 +121,11 @@ import { isWeb, isNative } from "@/constants/platform";
 import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
 import { RewindMenu, type RewindMode } from "@/components/rewind/rewind-menu";
 import { useRewindAgentMutation } from "@/components/rewind/use-rewind-agent-mutation";
-import { AssistantForkMenu, type AssistantForkTarget } from "@/components/assistant-fork-menu";
+import {
+  AssistantForkMenu,
+  type AssistantForkImplementation,
+  type AssistantForkTarget,
+} from "@/components/assistant-fork-menu";
 import { useRetainedPanelActive } from "@/components/retained-panel";
 export type { InlinePathTarget } from "@/assistant-file-links";
 export type { AssistantForkTarget };
@@ -570,6 +574,7 @@ interface AssistantTurnFooterProps {
   getContent: () => string;
   completedAt?: Date;
   durationMs?: number;
+  forkImplementation: AssistantForkImplementation;
   onFork?: (target: AssistantForkTarget) => Promise<void> | void;
 }
 
@@ -615,6 +620,7 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   getContent,
   completedAt,
   durationMs,
+  forkImplementation,
   onFork,
 }: AssistantTurnFooterProps) {
   const [hovered, setHovered] = useState(false);
@@ -669,7 +675,9 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
         getContent={getContent}
         containerStyle={assistantTurnFooterStylesheet.copyButton}
       />
-      {canFork ? <AssistantForkMenu onFork={handleFork} /> : null}
+      {canFork ? (
+        <AssistantForkMenu implementation={forkImplementation} onFork={handleFork} />
+      ) : null}
       {durationLabel ? (
         <Pressable
           onPress={handlePress}

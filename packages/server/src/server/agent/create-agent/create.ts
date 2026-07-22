@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 
 import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import type { AgentConversationForkSource } from "@getpaseo/protocol/messages";
 import type { TerminalManager } from "../../../terminal/terminal-manager.js";
 import type { CreatePaseoWorktreeInput } from "../../paseo-worktree-service.js";
 import { expandUserPath, resolvePathFromBase } from "../../path-utils.js";
@@ -65,6 +66,7 @@ export interface CreateAgentFromSessionInput {
   git?: GitSetupOptions;
   labels: Record<string, string>;
   env?: Record<string, string>;
+  forkFrom?: AgentConversationForkSource;
   provisionalTitle: string | null;
   firstAgentContext: FirstAgentContext;
   buildSessionConfig: (
@@ -158,6 +160,7 @@ interface ResolvedCreateAgent {
   background: boolean;
   promptFailure: CreateAgentPromptFailureMode;
   promptLogger?: Logger;
+  forkFrom?: AgentConversationForkSource;
 }
 
 export async function createAgentCommand(
@@ -169,11 +172,18 @@ export async function createAgentCommand(
       ? await resolveSessionCreateAgent(dependencies, input)
       : await resolveMcpCreateAgent(dependencies, input);
 
-  const snapshot = await dependencies.agentManager.createAgent(
-    resolved.config,
-    undefined,
-    resolved.createOptions,
-  );
+  const snapshot = resolved.forkFrom
+    ? await dependencies.agentManager.forkAgentFromConversation(
+        resolved.forkFrom,
+        resolved.config,
+        undefined,
+        resolved.createOptions,
+      )
+    : await dependencies.agentManager.createAgent(
+        resolved.config,
+        undefined,
+        resolved.createOptions,
+      );
 
   resolved.setupContinuation?.startAfterAgentCreate({
     agentId: snapshot.id,
@@ -281,6 +291,7 @@ async function resolveSessionCreateAgent(
     promptLogger: dependencies.logger.child({
       clientMessageId: resolveClientMessageId(input.clientMessageId),
     }),
+    forkFrom: input.forkFrom,
   };
 }
 

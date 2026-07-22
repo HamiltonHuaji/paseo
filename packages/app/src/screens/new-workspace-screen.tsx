@@ -952,7 +952,7 @@ function buildWorkspaceDraftSetupForCreatedWorkspace(input: {
   if (!input.forkDraftSetup) {
     return undefined;
   }
-  return buildWorkspaceDraftSetupFromComposer({
+  const setup = buildWorkspaceDraftSetupFromComposer({
     cwd: remapDraftCwdToWorkspace({
       cwd: input.forkDraftSetup.setup.cwd,
       sourceDirectory: input.forkDraftSetup.sourceDirectory,
@@ -961,6 +961,9 @@ function buildWorkspaceDraftSetupForCreatedWorkspace(input: {
     provider: input.provider,
     composerState: input.composerState,
   });
+  return input.forkDraftSetup.setup.forkFrom
+    ? { ...setup, forkFrom: input.forkDraftSetup.setup.forkFrom }
+    : setup;
 }
 
 function buildComposerInitialValues(input: {
@@ -2038,7 +2041,11 @@ export function NewWorkspaceScreen({
       try {
         setErrorMessage(null);
         await composerState?.persistFormPreferences();
-        if (isEmptyWorkspaceSubmission(payload)) {
+        const forkFrom = forkDraftSetup?.setup.forkFrom;
+        if (forkFrom && forkFrom.serverId !== selectedServerId) {
+          throw new Error(t("message.actions.forkSameHost"));
+        }
+        if (!forkFrom && isEmptyWorkspaceSubmission(payload)) {
           setPendingAction("empty");
           await runCreateEmptyWorkspace({
             payload,

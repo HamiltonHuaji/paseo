@@ -102,6 +102,12 @@ import type { WorkspaceComposerAttachment } from "@/attachments/types";
 import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/stores/workspace-tabs-store";
 import { toErrorMessage } from "@/utils/error-messages";
 import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submission-store";
+import type { AssistantForkImplementation } from "@/components/assistant-fork-menu";
+import {
+  getAssistantForkImplementation,
+  resolveForkPreparation,
+  type ForkPreparationMode,
+} from "./fork-preparation";
 
 function renderLiveAuxiliaryNode(input: {
   pendingPermissions: ReactNode;
@@ -143,6 +149,7 @@ function renderStreamItemWithTurnFooter(input: {
   layoutItem: StreamLayoutItem;
   strategy: TurnContentStrategy;
   supportsTimelineCursor: boolean;
+  forkImplementation: AssistantForkImplementation;
   onForkAssistantTurn?: AssistantTurnForkHandler;
 }): ReactNode {
   if (!input.content) {
@@ -157,6 +164,7 @@ function renderStreamItemWithTurnFooter(input: {
       timing={footerHost.timing}
       startIndex={footerHost.startIndex}
       supportsTimelineCursor={input.supportsTimelineCursor}
+      forkImplementation={input.forkImplementation}
       onForkAssistantTurn={input.onForkAssistantTurn}
     />
   ) : null;
@@ -261,6 +269,7 @@ const AGENT_CAPABILITY_FLAG_KEYS: (keyof AgentCapabilityFlags)[] = [
   "supportsRewindConversation",
   "supportsRewindFiles",
   "supportsRewindBoth",
+  "supportsNativeConversationFork",
 ];
 
 const EMPTY_STREAM_HEAD: StreamItem[] = [];
@@ -290,7 +299,10 @@ function buildChatHistoryAttachment(input: {
   };
 }
 
-function buildForkDraftSetup(agent: AgentScreenAgent): WorkspaceDraftTabSetup | undefined {
+function buildForkDraftSetup(
+  agent: AgentScreenAgent,
+  forkFrom?: WorkspaceDraftTabSetup["forkFrom"],
+): WorkspaceDraftTabSetup | undefined {
   if (!agent.provider) {
     return undefined;
   }
@@ -307,6 +319,7 @@ function buildForkDraftSetup(agent: AgentScreenAgent): WorkspaceDraftTabSetup | 
     model: agent.model ?? agent.runtimeInfo?.model ?? null,
     thinkingOptionId: agent.thinkingOptionId ?? agent.runtimeInfo?.thinkingOptionId ?? null,
     featureValues,
+    ...(forkFrom ? { forkFrom } : {}),
   };
 }
 
@@ -315,6 +328,41 @@ function buildForkDraftTabTarget(
   draftId: string,
 ): WorkspaceTabTarget {
   return setup ? { kind: "draft", draftId, setup } : { kind: "draft", draftId };
+}
+
+async function prepareAssistantTurnForkDraft(input: {
+  mode: ForkPreparationMode;
+  context: AgentScreenAgent;
+  serverId: string;
+  agentId: string;
+  boundary: Parameters<AssistantTurnForkHandler>[0]["boundary"];
+  client: DaemonClient;
+  missingAttachmentMessage: string;
+}): Promise<{ draftId: string; draftSetup: WorkspaceDraftTabSetup | undefined }> {
+  const draftId = generateDraftId();
+  if (input.mode === "native") {
+    return {
+      draftId,
+      draftSetup: buildForkDraftSetup(input.context, {
+        serverId: input.serverId,
+        agentId: input.agentId,
+        ...input.boundary,
+      }),
+    };
+  }
+  const payload = await input.client.buildAgentForkContext(input.agentId, input.boundary);
+  const attachment = buildChatHistoryAttachment({
+    draftId,
+    serverId: input.serverId,
+    agentId: input.agentId,
+    payload,
+    missingAttachmentMessage: input.missingAttachmentMessage,
+  });
+  useWorkspaceAttachmentsStore.getState().setWorkspaceAttachments({
+    scopeKey: buildDraftWorkspaceAttachmentScopeKey(draftId),
+    attachments: [attachment],
+  });
+  return { draftId, draftSetup: buildForkDraftSetup(input.context) };
 }
 
 const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamViewProps>(
@@ -376,6 +424,20 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       (state) =>
         state.sessions[resolvedServerId]?.serverInfo?.features?.agentForkContextCursor === true,
     );
+    const daemonSupportsNativeConversationFork = useSessionStore(
+      (state) =>
+        !readOnly &&
+        state.sessions[resolvedServerId]?.serverInfo?.features?.agentConversationFork === true,
+    );
+    const sourceSupportsNativeConversationFork =
+      context.capabilities?.supportsNativeConversationFork === true;
+    const forkPreparation = resolveForkPreparation({
+      provider: context.provider,
+      sourceSupportsNative: sourceSupportsNativeConversationFork,
+      daemonSupportsNative: daemonSupportsNativeConversationFork,
+      daemonSupportsContext: supportsAgentForkContext,
+    });
+    const forkImplementation = getAssistantForkImplementation(forkPreparation);
 
     const workspaceRoot = context.cwd?.trim() || "";
     const { requestDirectoryListing } = useFileExplorerActions({
@@ -475,37 +537,30 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const handleForkAssistantTurn: AssistantTurnForkHandler = useStableEvent(
       async ({ target, boundary }) => {
         try {
-          if (!supportsAgentForkContext) {
-            toast?.error(t("message.actions.forkUnavailable"));
+          if (forkPreparation.errorKey) {
+            toast?.error(t(forkPreparation.errorKey));
             return;
           }
           if (!client) {
             throw new Error(t("workspace.terminal.hostDisconnected"));
           }
-          const draftSetup = buildForkDraftSetup(context);
-          const prepareForkDraft = async () => {
-            const draftId = generateDraftId();
-            const payload = await client.buildAgentForkContext(agentId, boundary);
-            const attachment = buildChatHistoryAttachment({
-              draftId,
+          const prepareForkDraft = () =>
+            prepareAssistantTurnForkDraft({
+              mode: forkPreparation.mode,
+              context,
               serverId: resolvedServerId,
               agentId,
-              payload,
+              boundary,
+              client,
               missingAttachmentMessage: t("message.actions.forkFailed"),
             });
-            useWorkspaceAttachmentsStore.getState().setWorkspaceAttachments({
-              scopeKey: buildDraftWorkspaceAttachmentScopeKey(draftId),
-              attachments: [attachment],
-            });
-            return draftId;
-          };
 
           if (target === "tab") {
             const workspaceId = context.workspaceId;
             if (!workspaceId) {
               throw new Error(t("message.actions.forkMissingWorkspace"));
             }
-            const draftId = await prepareForkDraft();
+            const { draftId, draftSetup } = await prepareForkDraft();
             navigateToWorkspace({
               serverId: resolvedServerId,
               workspaceId,
@@ -514,7 +569,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             return;
           }
 
-          const draftId = await prepareForkDraft();
+          const { draftId, draftSetup } = await prepareForkDraft();
           const sourceDirectory =
             context.projectPlacement?.checkout?.cwd?.trim() || context.cwd.trim() || undefined;
           if (draftSetup) {
@@ -859,11 +914,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           layoutItem,
           strategy: streamRenderStrategy,
           supportsTimelineCursor: supportsAgentForkContextCursor,
+          forkImplementation,
           onForkAssistantTurn: readOnly ? undefined : handleForkAssistantTurn,
         });
       },
       [
         handleForkAssistantTurn,
+        forkImplementation,
         readOnly,
         renderStreamItemContent,
         streamRenderStrategy,
@@ -894,11 +951,13 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             host={bottomTurnFooterHost}
             strategy={streamRenderStrategy}
             supportsTimelineCursor={supportsAgentForkContextCursor}
+            forkImplementation={forkImplementation}
             onForkAssistantTurn={readOnly ? undefined : handleForkAssistantTurn}
           />
         ) : null,
       [
         handleForkAssistantTurn,
+        forkImplementation,
         readOnly,
         showRunningTurnFooter,
         baseRenderModel.turnTiming.runningStartedAt,

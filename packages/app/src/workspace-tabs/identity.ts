@@ -58,6 +58,7 @@ export function normalizeWorkspaceDraftTabSetup(
   if (!provider || !cwd) {
     return undefined;
   }
+  const forkFrom = normalizeWorkspaceDraftForkSource(record.forkFrom);
   return {
     provider,
     cwd,
@@ -67,7 +68,45 @@ export function normalizeWorkspaceDraftTabSetup(
       typeof record.thinkingOptionId === "string" ? record.thinkingOptionId : null,
     ),
     featureValues: isPlainRecord(record.featureValues) ? { ...record.featureValues } : {},
+    ...(forkFrom ? { forkFrom } : {}),
   };
+}
+
+function normalizeWorkspaceDraftForkSource(
+  value: unknown,
+): WorkspaceDraftTabSetup["forkFrom"] | undefined {
+  const record = isPlainRecord(value) ? value : null;
+  if (!record) return undefined;
+  const serverId = trimNonEmpty(typeof record.serverId === "string" ? record.serverId : null);
+  const agentId = trimNonEmpty(typeof record.agentId === "string" ? record.agentId : null);
+  const boundaryMessageId = trimRecordString(record, "boundaryMessageId");
+  const boundaryCursor = normalizeWorkspaceDraftForkCursor(record.boundaryCursor);
+  if (!serverId || !agentId || (!boundaryMessageId && !boundaryCursor)) {
+    return undefined;
+  }
+  return {
+    serverId,
+    agentId,
+    ...(boundaryMessageId ? { boundaryMessageId } : {}),
+    ...(boundaryCursor ? { boundaryCursor } : {}),
+  };
+}
+
+function normalizeWorkspaceDraftForkCursor(
+  value: unknown,
+): NonNullable<WorkspaceDraftTabSetup["forkFrom"]>["boundaryCursor"] | undefined {
+  const record = isPlainRecord(value) ? value : null;
+  if (!record) return undefined;
+  const epoch = trimRecordString(record, "epoch");
+  const seq = record.seq;
+  return epoch && typeof seq === "number" && Number.isInteger(seq) && seq >= 0
+    ? { epoch, seq }
+    : undefined;
+}
+
+function trimRecordString(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return trimNonEmpty(typeof value === "string" ? value : null);
 }
 
 export function workspaceTabTargetsEqual(
@@ -114,7 +153,22 @@ function workspaceDraftTabSetupsEqual(
     left.modeId === right.modeId &&
     left.model === right.model &&
     left.thinkingOptionId === right.thinkingOptionId &&
-    recordsShallowEqual(left.featureValues, right.featureValues)
+    recordsShallowEqual(left.featureValues, right.featureValues) &&
+    workspaceDraftForkSourcesEqual(left.forkFrom, right.forkFrom)
+  );
+}
+
+function workspaceDraftForkSourcesEqual(
+  left: WorkspaceDraftTabSetup["forkFrom"],
+  right: WorkspaceDraftTabSetup["forkFrom"],
+): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.serverId === right.serverId &&
+    left.agentId === right.agentId &&
+    left.boundaryMessageId === right.boundaryMessageId &&
+    left.boundaryCursor?.epoch === right.boundaryCursor?.epoch &&
+    left.boundaryCursor?.seq === right.boundaryCursor?.seq
   );
 }
 

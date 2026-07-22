@@ -38,6 +38,7 @@ type NotificationHandler = (method: string, params: unknown) => void;
 
 export interface CodexThreadForkParams {
   threadId: string;
+  lastTurnId?: string | null;
   path?: string | null;
   model?: string | null;
   modelProvider?: string | null;
@@ -54,7 +55,6 @@ export interface CodexThreadForkParams {
   ephemeral?: boolean;
   threadSource?: unknown;
   excludeTurns?: boolean;
-  persistExtendedHistory?: boolean;
 }
 
 const CodexThreadForkResponseSchema = z

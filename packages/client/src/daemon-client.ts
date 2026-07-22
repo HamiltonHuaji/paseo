@@ -288,6 +288,7 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   attachments?: CreateAgentRequestMessage["attachments"];
   git?: GitSetupOptions;
   worktree?: CreateAgentRequestMessage["worktree"];
+  forkFrom?: CreateAgentRequestMessage["forkFrom"];
   autoArchive?: CreateAgentRequestMessage["autoArchive"];
   worktreeName?: string;
   requestId?: string;
@@ -2188,6 +2189,7 @@ export class DaemonClient {
         : {}),
       ...(options.git ? { git: options.git } : {}),
       ...(options.worktree ? { worktree: options.worktree } : {}),
+      ...(options.forkFrom ? { forkFrom: options.forkFrom } : {}),
       ...(options.autoArchive !== undefined ? { autoArchive: options.autoArchive } : {}),
       ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
       ...(options.labels && Object.keys(options.labels).length > 0
@@ -4839,6 +4841,7 @@ export class DaemonClient {
             [CLIENT_CAPS.reasoningMergeEnum]: true,
             [CLIENT_CAPS.terminalReflowableSnapshot]: true,
             [CLIENT_CAPS.providerSubagents]: true,
+            [CLIENT_CAPS.agentConversationFork]: true,
             ...this.config.capabilities,
           },
           ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),

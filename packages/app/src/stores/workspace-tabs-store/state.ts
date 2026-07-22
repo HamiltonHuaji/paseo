@@ -1,4 +1,5 @@
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
+import type { AgentConversationForkSource } from "@getpaseo/protocol/messages";
 import {
   buildDeterministicWorkspaceTabId,
   normalizeWorkspaceDraftTabSetup,
@@ -14,6 +15,7 @@ export interface WorkspaceDraftTabSetup {
   model: string | null;
   thinkingOptionId: string | null;
   featureValues: Record<string, unknown>;
+  forkFrom?: AgentConversationForkSource & { serverId: string };
 }
 
 export type WorkspaceTabTarget =

@@ -73,7 +73,6 @@ export async function revertCodexConversation(input: {
     model: input.model ?? null,
     serviceTier: input.serviceTier ?? null,
     excludeTurns: false,
-    persistExtendedHistory: true,
   });
   const forkedThreadId = forked.thread.id;
 

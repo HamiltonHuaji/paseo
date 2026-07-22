@@ -99,7 +99,6 @@ describe("Codex Rewind", () => {
         model: "gpt-5.4-mini",
         serviceTier: null,
         excludeTurns: false,
-        persistExtendedHistory: true,
       },
     ]);
     expect(codex.recordedRollbacks).toEqual([{ threadId: "forked-thread", numTurns: 2 }]);

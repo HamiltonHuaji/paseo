@@ -19,6 +19,7 @@ import {
 import type { TurnFooterHost } from "./layout";
 import { SyncedLoader } from "@/components/synced-loader";
 import { useRetainedPanelActive } from "@/components/retained-panel";
+import type { AssistantForkImplementation } from "@/components/assistant-fork-menu";
 
 const ThemedSyncedLoader = withUnistyles(SyncedLoader);
 const workingIndicatorColorMapping = (theme: Theme) => ({
@@ -40,6 +41,7 @@ export const TurnFooter = memo(function TurnFooter({
   host,
   strategy,
   supportsTimelineCursor,
+  forkImplementation,
   onForkAssistantTurn,
 }: {
   isRunning: boolean;
@@ -47,6 +49,7 @@ export const TurnFooter = memo(function TurnFooter({
   host: TurnFooterHost | null;
   strategy: TurnContentStrategy;
   supportsTimelineCursor: boolean;
+  forkImplementation: AssistantForkImplementation;
   onForkAssistantTurn?: AssistantTurnForkHandler;
 }) {
   if (isRunning) {
@@ -66,6 +69,7 @@ export const TurnFooter = memo(function TurnFooter({
       timing={host.timing}
       startIndex={host.startIndex}
       supportsTimelineCursor={supportsTimelineCursor}
+      forkImplementation={forkImplementation}
       onForkAssistantTurn={onForkAssistantTurn}
     />
   );
@@ -77,6 +81,7 @@ export const CompletedTurnFooterRow = memo(function CompletedTurnFooterRow({
   timing,
   startIndex,
   supportsTimelineCursor,
+  forkImplementation,
   onForkAssistantTurn,
 }: {
   strategy: TurnContentStrategy;
@@ -84,6 +89,7 @@ export const CompletedTurnFooterRow = memo(function CompletedTurnFooterRow({
   timing?: TurnTiming;
   startIndex: number;
   supportsTimelineCursor: boolean;
+  forkImplementation: AssistantForkImplementation;
   onForkAssistantTurn?: AssistantTurnForkHandler;
 }) {
   return (
@@ -94,6 +100,7 @@ export const CompletedTurnFooterRow = memo(function CompletedTurnFooterRow({
         timing={timing}
         startIndex={startIndex}
         supportsTimelineCursor={supportsTimelineCursor}
+        forkImplementation={forkImplementation}
         onForkAssistantTurn={onForkAssistantTurn}
       />
     </TurnFooterRow>
@@ -137,6 +144,7 @@ function CompletedTurnFooter({
   timing,
   startIndex,
   supportsTimelineCursor,
+  forkImplementation,
   onForkAssistantTurn,
 }: {
   strategy: TurnContentStrategy;
@@ -144,6 +152,7 @@ function CompletedTurnFooter({
   timing?: TurnTiming;
   startIndex: number;
   supportsTimelineCursor: boolean;
+  forkImplementation: AssistantForkImplementation;
   onForkAssistantTurn?: AssistantTurnForkHandler;
 }) {
   const getContent = useCallback(
@@ -175,6 +184,7 @@ function CompletedTurnFooter({
         getContent={getContent}
         completedAt={timing?.completedAt}
         durationMs={timing?.durationMs}
+        forkImplementation={forkImplementation}
         onFork={boundary && onForkAssistantTurn ? handleFork : undefined}
       />
     </View>

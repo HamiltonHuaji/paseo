@@ -2471,6 +2471,7 @@ export class Session {
       attachments,
       labels,
       env,
+      forkFrom,
     } = msg;
     this.sessionLogger.info(
       { cwd: config.cwd, provider: config.provider, worktreeName },
@@ -2482,6 +2483,21 @@ export class Session {
     let createdWorktreeForCleanup: CreatePaseoWorktreeWorkflowResult | null = null;
     let createdAgentId: string | null = null;
     try {
+      if (forkFrom) {
+        // COMPAT(agentConversationFork): added in fork v0.1.111; remove after
+        // 2027-01-22 once all supported clients advertise this capability.
+        if (!this.supports(CLIENT_CAPS.agentConversationFork)) {
+          throw new Error("Update the Paseo client to fork Codex conversations natively");
+        }
+        if (!forkFrom.boundaryCursor && !forkFrom.boundaryMessageId) {
+          throw new Error("A native conversation fork requires a selected assistant message");
+        }
+        await ensureAgentLoaded(forkFrom.agentId, {
+          agentManager: this.agentManager,
+          agentStorage: this.agentStorage,
+          logger: this.sessionLogger,
+        });
+      }
       const trimmedPrompt = initialPrompt?.trim();
       const { provisionalTitle } = resolveCreateAgentTitles({
         configTitle: config.title,
@@ -2535,6 +2551,7 @@ export class Session {
           git,
           labels,
           env,
+          forkFrom,
           provisionalTitle,
           firstAgentContext,
           buildSessionConfig: (sessionConfig, gitOptions, legacyWorktreeName, ctx) =>

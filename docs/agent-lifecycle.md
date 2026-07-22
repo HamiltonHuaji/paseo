@@ -16,6 +16,31 @@ Each agent in `AgentManager` carries a `lastStatus` of `initializing`, `idle`, `
 
 Cancellation changes lifecycle state only after the provider acknowledges the interrupt or emits a terminal turn event. If the interrupt is rejected or times out, the agent remains `running` with its active foreground turn intact. Follow-up actions such as replacement, reload, rewind, and Stop must report that failure instead of accepting work they cannot perform. Synthesizing a local cancellation without provider acknowledgment creates a split-brain session: Paseo accepts a new prompt while the provider still owns the previous foreground turn.
 
+### Conversation forks
+
+Codex conversation forks use Codex's native `thread/fork`; they are not implemented by copying
+rendered Paseo timeline text into a new prompt. The existing `create_agent_request` carries an
+optional source agent plus an authoritative timeline boundary, so the normal workspace/worktree
+creation transaction completes before Codex receives the final target cwd.
+
+Paseo and Codex describe the boundary at different layers. Paseo identifies the selected assistant
+timeline row by `{ epoch, seq }` plus its provider message/item id. Codex `thread/fork` accepts a
+`lastTurnId`, where one turn contains user, assistant, reasoning, and tool items. For a historical
+fork the daemon therefore reads the native thread, finds the turn containing the selected assistant
+item id, and passes that turn id. Treating the Paseo cursor or assistant item id as a Codex turn id
+would either fail or fork at the wrong boundary.
+
+The common latest-turn case avoids that lookup. When the source has no active turn and the selected
+assistant row is the final row in Paseo's authoritative timeline, the daemon omits `lastTurnId` and
+Codex forks its latest completed history directly. The check is intentionally conservative; a
+message in the currently running Codex turn must wait for that turn to finish, while an earlier
+completed turn can still be forked by its mapped `lastTurnId`.
+
+Native fork behavior is enabled only when all three surfaces agree: the client hello advertises
+`agent_conversation_fork`, `server_info.features.agentConversationFork` is true, and the source
+provider capabilities include `supportsNativeConversationFork`. Missing capability gates produce an
+upgrade error instead of silently falling back to a copied chat-history prompt.
+
 ## Relationships
 
 Agents can launch other agents via the agent-scoped `create_agent` MCP tool. Agent-scoped creation is always asynchronous. `relationship` and `workspace` are separate decisions:

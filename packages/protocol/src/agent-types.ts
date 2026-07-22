@@ -148,6 +148,7 @@ export interface AgentCapabilityFlags {
   supportsRewindConversation?: boolean;
   supportsRewindFiles?: boolean;
   supportsRewindBoth?: boolean;
+  supportsNativeConversationFork?: boolean;
   supportsSteering?: boolean;
 }
 
