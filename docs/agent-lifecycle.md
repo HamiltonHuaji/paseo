@@ -112,6 +112,13 @@ parentAgentId === thisAgent.id  AND  !archivedAt
 
 Provider adapters must never emit the current provider thread as its own child. Codex collaboration results such as `list_agents` may include the root thread in `receiverThreadIds`; both live event routing and persisted-history discovery exclude the thread being projected before creating provider-subagent descriptors. Otherwise the track counts the parent as an extra running subagent.
 
+Codex provider-subagent liveness follows app-server's authoritative thread status, not a silence
+timeout and not the success or failure of an individual child tool call. Live
+`thread/status/changed` notifications settle a child even if its `turn/completed` notification is
+missing. When the provider reconnects, `thread/read` restores the same status so a cached `running`
+descriptor cannot survive an idle, unloaded, or failed child thread. A later idle notification must
+not overwrite an already failed or canceled terminal status.
+
 Clicking either kind opens a workspace tab. A Paseo subagent tab is a normal interactive agent pane. A provider subagent tab is a read-only timeline pane with no composer, archive, detach, rewind, or fork actions. Both panes use `AgentStreamView`, so message, reasoning, tool-call, and layout rendering stay identical.
 
 Provider timelines use the same structural timeline item format but deliberately have a separate lifecycle and transport. A provider thread/session identifier is not a Paseo agent identifier, and closing its tab is always layout-only.

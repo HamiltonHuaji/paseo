@@ -2872,6 +2872,129 @@ describe("Codex app-server provider", () => {
     });
   });
 
+  test("settles a child when Codex reports its thread idle without turn completion", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "collabAgentToolCall",
+        id: "call-sub-agent-missing-turn-completion",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: "Wait for the remote job, then report.",
+        receiverThreadIds: ["child-thread-1"],
+        agentsStates: {
+          "child-thread-1": { status: "running", message: null },
+        },
+      },
+    });
+    asInternals(session).handleNotification("thread/status/changed", {
+      threadId: "child-thread-1",
+      status: { type: "idle" },
+    });
+
+    expect(events.at(-1)).toMatchObject({
+      type: "timeline",
+      item: {
+        type: "tool_call",
+        callId: "call-sub-agent-missing-turn-completion",
+        status: "completed",
+      },
+    });
+    expect(
+      events.findLast(
+        (event) =>
+          event.type === "provider_subagent" &&
+          event.event.type === "upsert" &&
+          event.event.id === "child-thread-1",
+      ),
+    ).toMatchObject({
+      type: "provider_subagent",
+      event: { status: "completed" },
+    });
+  });
+
+  test("replays an authoritative child thread status received before child registration", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("thread/status/changed", {
+      threadId: "child-thread-early-status",
+      status: { type: "idle" },
+    });
+    asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "collabAgentToolCall",
+        id: "call-sub-agent-early-status",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: "Finish before the spawn event is projected.",
+        receiverThreadIds: ["child-thread-early-status"],
+        agentsStates: {
+          "child-thread-early-status": { status: "running", message: null },
+        },
+      },
+    });
+
+    expect(
+      events.findLast(
+        (event) =>
+          event.type === "provider_subagent" &&
+          event.event.type === "upsert" &&
+          event.event.id === "child-thread-early-status",
+      ),
+    ).toMatchObject({
+      type: "provider_subagent",
+      event: { status: "completed" },
+    });
+  });
+
+  test("preserves a terminal child failure when Codex later reports its thread idle", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "collabAgentToolCall",
+        id: "call-sub-agent-failed-turn",
+        tool: "spawnAgent",
+        status: "inProgress",
+        prompt: "Run the validation.",
+        receiverThreadIds: ["child-thread-1"],
+        agentsStates: {
+          "child-thread-1": { status: "running", message: null },
+        },
+      },
+    });
+    asInternals(session).handleNotification("turn/completed", {
+      threadId: "child-thread-1",
+      turn: { status: "failed", error: { message: "Provider failed" } },
+    });
+    asInternals(session).handleNotification("thread/status/changed", {
+      threadId: "child-thread-1",
+      status: { type: "idle" },
+    });
+
+    expect(
+      events.findLast(
+        (event) =>
+          event.type === "provider_subagent" &&
+          event.event.type === "upsert" &&
+          event.event.id === "child-thread-1",
+      ),
+    ).toMatchObject({
+      type: "provider_subagent",
+      event: { status: "failed" },
+    });
+  });
+
   test("does not synthesize a parent sub-agent failure from child error state alone", () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];
@@ -3139,6 +3262,63 @@ describe("Codex app-server provider", () => {
         status: "running",
         detail: { type: "sub_agent", log: "[Assistant] Legacy findings after resume." },
       },
+    });
+  });
+
+  test("restores an active persisted child from Codex thread status", async () => {
+    const session = createSession();
+    session.client = {
+      request: vi.fn(async (method: string, params: unknown) => {
+        if (method !== "thread/read") {
+          return {};
+        }
+        const threadId = (params as { threadId?: string }).threadId;
+        if (threadId === "active-history-child") {
+          return {
+            thread: {
+              status: { type: "active", activeFlags: [] },
+              turns: [{ status: "inProgress", items: [] }],
+            },
+          };
+        }
+        return {
+          thread: {
+            status: { type: "active", activeFlags: [] },
+            turns: [
+              {
+                status: "inProgress",
+                items: [
+                  {
+                    type: "subAgentActivity",
+                    id: "active-history-child-call",
+                    kind: "started",
+                    agentThreadId: "active-history-child",
+                    agentPath: "/root/active-child",
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      }),
+    };
+
+    await asInternals(session).loadPersistedHistory();
+
+    const history: AgentStreamEvent[] = [];
+    for await (const event of session.streamHistory()) {
+      history.push(event);
+    }
+    expect(
+      history.findLast(
+        (event) =>
+          event.type === "provider_subagent" &&
+          event.event.type === "upsert" &&
+          event.event.id === "active-history-child",
+      ),
+    ).toMatchObject({
+      type: "provider_subagent",
+      event: { status: "running" },
     });
   });
 

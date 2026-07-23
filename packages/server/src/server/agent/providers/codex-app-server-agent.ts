@@ -419,6 +419,8 @@ interface PersistedSubAgentRoute {
 interface CodexThreadHistoryProjection {
   timeline: PersistedTimelineEntry[];
   subAgentRoutes: PersistedSubAgentRoute[];
+  threadStatus: CodexThreadStatus | null;
+  lastTurnStatus: CodexTurnStatus | null;
 }
 
 function mergeCodexConfiguredDefaults(
@@ -1836,6 +1838,21 @@ function threadItemToTimelineEntries(
   return [timelineItem, ...mcpToolResultImagesToTimeline(item)];
 }
 
+const CodexThreadStatusSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("notLoaded") }).passthrough(),
+  z.object({ type: z.literal("idle") }).passthrough(),
+  z.object({ type: z.literal("systemError") }).passthrough(),
+  z
+    .object({
+      type: z.literal("active"),
+      activeFlags: z.array(z.string()),
+    })
+    .passthrough(),
+]);
+
+type CodexThreadStatus = z.infer<typeof CodexThreadStatusSchema>;
+type CodexTurnStatus = "completed" | "interrupted" | "failed" | "inProgress";
+
 const CodexThreadReadResponseSchema = z
   .object({
     thread: z
@@ -1845,11 +1862,13 @@ const CodexThreadReadResponseSchema = z
             z
               .object({
                 id: z.string().optional(),
+                status: z.enum(["completed", "interrupted", "failed", "inProgress"]).optional(),
                 items: z.array(z.unknown()).default([]),
               })
               .passthrough(),
           )
           .default([]),
+        status: CodexThreadStatusSchema.optional(),
       })
       .passthrough()
       .default({ turns: [] }),
@@ -1955,7 +1974,12 @@ async function loadCodexThreadHistoryTimeline(params: {
         : [];
     },
   );
-  return { timeline, subAgentRoutes };
+  return {
+    timeline,
+    subAgentRoutes,
+    threadStatus: response.thread.status ?? null,
+    lastTurnStatus: response.thread.turns.at(-1)?.status ?? null,
+  };
 }
 
 function readCodexThread(client: CodexAppServerClientLike, threadId: string): Promise<unknown> {
@@ -2001,6 +2025,13 @@ function toSandboxPolicy(type: string, networkAccess?: boolean): Record<string, 
 const ThreadStartedNotificationSchema = z
   .object({
     thread: z.object({ id: z.string() }).passthrough(),
+  })
+  .passthrough();
+
+const ThreadStatusChangedNotificationSchema = z
+  .object({
+    threadId: z.string(),
+    status: CodexThreadStatusSchema,
   })
   .passthrough();
 
@@ -2296,6 +2327,7 @@ const CodexEventThreadRolledBackNotificationSchema = z
 
 type ParsedCodexNotification =
   | { kind: "thread_started"; threadId: string }
+  | { kind: "thread_status_changed"; threadId: string; status: CodexThreadStatus }
   | { kind: "turn_started"; turnId: string; threadId: string | null }
   | {
       kind: "turn_completed";
@@ -2424,6 +2456,25 @@ const CodexNotificationSchema = z.union([
       }),
     ),
   z.object({ method: z.literal("thread/started"), params: z.unknown() }).transform(
+    ({ method, params }): ParsedCodexNotification => ({
+      kind: "invalid_payload",
+      method,
+      params,
+    }),
+  ),
+  z
+    .object({
+      method: z.literal("thread/status/changed"),
+      params: ThreadStatusChangedNotificationSchema,
+    })
+    .transform(
+      ({ params }): ParsedCodexNotification => ({
+        kind: "thread_status_changed",
+        threadId: params.threadId,
+        status: params.status,
+      }),
+    ),
+  z.object({ method: z.literal("thread/status/changed"), params: z.unknown() }).transform(
     ({ method, params }): ParsedCodexNotification => ({
       kind: "invalid_payload",
       method,
@@ -3569,6 +3620,11 @@ export class CodexAppServerAgentSession implements AgentSession {
         for (const entry of childHistory.timeline) {
           this.emitProviderSubagentTimeline(next.route.childThreadId, entry.item, entry.timestamp);
         }
+        this.reconcileSubAgentThreadStatus(
+          next.route.toolCall.callId,
+          childHistory.threadStatus,
+          childHistory.lastTurnStatus,
+        );
         for (const route of childHistory.subAgentRoutes) {
           queue.push({ route, parentCallId: next.route.toolCall.callId });
         }
@@ -4747,6 +4803,9 @@ export class CodexAppServerAgentSession implements AgentSession {
       case "thread_started":
         this.emitSubAgentActivityUpdate(callId, "running");
         return;
+      case "thread_status_changed":
+        this.reconcileSubAgentThreadStatus(callId, parsed.status);
+        return;
       case "turn_started":
       case "turn_completed":
       case "agent_message_delta":
@@ -4790,6 +4849,10 @@ export class CodexAppServerAgentSession implements AgentSession {
     switch (parsed.kind) {
       case "thread_started":
         this.handleThreadStartedNotification(parsed);
+        return;
+      case "thread_status_changed":
+        // Root lifecycle is tracked by turn notifications. Thread status is
+        // authoritative here only for provider-owned child threads.
         return;
       case "turn_started":
         this.handleTurnStartedNotification(parsed);
@@ -5145,6 +5208,36 @@ export class CodexAppServerAgentSession implements AgentSession {
       return;
     }
     this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: nextToolCall });
+  }
+
+  private reconcileSubAgentThreadStatus(
+    callId: string,
+    status: CodexThreadStatus | null,
+    lastTurnStatus: CodexTurnStatus | null = null,
+  ): void {
+    const state = this.subAgentCallsByCallId.get(callId);
+    if (!state || !status) {
+      return;
+    }
+    if (status.type === "active") {
+      this.emitSubAgentActivityUpdate(callId, "running");
+      return;
+    }
+    if (status.type === "systemError") {
+      this.emitSubAgentActivityUpdate(callId, "failed");
+      return;
+    }
+    if (lastTurnStatus === "failed" || lastTurnStatus === "inProgress") {
+      this.emitSubAgentActivityUpdate(callId, "failed");
+      return;
+    }
+    if (lastTurnStatus === "interrupted") {
+      this.emitSubAgentActivityUpdate(callId, "canceled");
+      return;
+    }
+    if (state.toolCall.status === "running") {
+      this.emitSubAgentActivityUpdate(callId, "completed");
+    }
   }
 
   private emitProviderSubagentUpsert(
