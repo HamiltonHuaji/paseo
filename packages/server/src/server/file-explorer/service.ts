@@ -794,14 +794,12 @@ async function resolveScopedPath({
     throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
   }
 
-  const realRoot = await fs.realpath(normalizedRoot);
-
   try {
     const realPath = await fs.realpath(requestedPath);
-    const realRelative = path.relative(realRoot, realPath);
-    if (realRelative !== "" && (realRelative.startsWith("..") || path.isAbsolute(realRelative))) {
-      throw new Error(ACCESS_OUTSIDE_WORKSPACE_MESSAGE);
-    }
+    // The request path remains scoped to root, but a trusted daemon client may
+    // follow a workspace symlink to any file the daemon user can read. The
+    // canonical path is still used for the actual open so the final component
+    // retains O_NOFOLLOW protection on POSIX.
     return { requestedPath, resolvedPath: realPath };
   } catch (error) {
     if (isMissingEntryError(error)) {

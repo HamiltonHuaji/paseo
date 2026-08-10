@@ -35,28 +35,34 @@ describe.skipIf(isPlatform("win32"))("service POSIX-only", () => {
     }
   });
 
-  it("rejects symlinked files that resolve outside the workspace", async () => {
+  it("reads an image through a workspace symlink to an external directory", async () => {
     const root = await createTempDir("paseo-file-explorer-");
     const outsideRoot = await createTempDir("paseo-file-explorer-outside-");
 
     try {
-      const externalFile = path.join(outsideRoot, "secret.txt");
-      await writeFile(externalFile, "top secret\n", "utf-8");
-      await symlink(externalFile, path.join(root, "secret-link.txt"));
+      const imageBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+      await writeFile(path.join(outsideRoot, "preview.png"), imageBytes);
+      await symlink(outsideRoot, path.join(root, "training-results"));
 
-      await expect(
-        readExplorerFile({
-          root,
-          relativePath: "secret-link.txt",
-        }),
-      ).rejects.toThrow("Access outside of workspace is not allowed");
+      const result = await readExplorerFile({
+        root,
+        relativePath: "training-results/preview.png",
+      });
+
+      expect(result).toMatchObject({
+        path: "training-results/preview.png",
+        kind: "image",
+        encoding: "base64",
+        mimeType: "image/png",
+      });
+      expect(result.content).toBe(imageBytes.toString("base64"));
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outsideRoot, { recursive: true, force: true });
     }
   });
 
-  it("skips listed symlink entries that resolve outside the workspace", async () => {
+  it("lists symlinked files that resolve outside the workspace", async () => {
     const root = await createTempDir("paseo-file-explorer-");
     const outsideRoot = await createTempDir("paseo-file-explorer-outside-");
 
@@ -70,7 +76,7 @@ describe.skipIf(isPlatform("win32"))("service POSIX-only", () => {
 
       const names = result.entries.map((entry) => entry.name);
       expect(names).toContain("visible.txt");
-      expect(names).not.toContain("secret-link.txt");
+      expect(names).toContain("secret-link.txt");
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outsideRoot, { recursive: true, force: true });
