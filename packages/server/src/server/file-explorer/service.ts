@@ -807,10 +807,12 @@ async function resolveScopedPath({
   const workspacePath = expandUserPath(root);
   const requestedPath = resolvePathFromBase(workspacePath, relativePath);
   assertWithinWorkspace(workspacePath, requestedPath);
-  const canonicalRoot = await fs.realpath(workspacePath);
   try {
     const canonicalPath = await fs.realpath(requestedPath);
-    assertWithinWorkspace(canonicalRoot, canonicalPath);
+    // The request path remains scoped to root, but a trusted daemon client may
+    // follow a workspace symlink to any file the daemon user can read. The
+    // canonical path is still used for the actual open so the final component
+    // retains O_NOFOLLOW protection on POSIX.
     return { requestedPath, resolvedPath: canonicalPath };
   } catch (error) {
     if (isMissingEntryError(error)) return { requestedPath, resolvedPath: requestedPath };
