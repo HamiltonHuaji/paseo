@@ -24,6 +24,7 @@ import { useAppActivelyVisible } from "@/hooks/use-app-visible";
 import { isFileQueryEnabled } from "@/components/file-pane-enabled";
 import { isWeb } from "@/constants/platform";
 import { useAppSettings } from "@/hooks/use-settings";
+import { useFileDownload } from "@/hooks/use-file-download";
 import { useLiveFile } from "./live-file/hook";
 import { useFilePreview } from "./preview-lifecycle/hook";
 import { resolveFilePreviewLifecycle } from "./preview-lifecycle/model";
@@ -270,6 +271,17 @@ export function FilePane({
         : null,
     [normalizedFilePath, normalizedWorkspaceRoot],
   );
+  const downloadFile = useFileDownload({
+    serverId,
+    workspaceRoot: readTarget?.cwd ?? normalizedWorkspaceRoot,
+  });
+  const handleDownload = useCallback(() => {
+    if (!normalizedFilePath || !readTarget) return;
+    downloadFile({
+      fileName: getFileNameFromPath(normalizedFilePath) ?? normalizedFilePath,
+      path: readTarget.path,
+    });
+  }, [downloadFile, normalizedFilePath, readTarget]);
 
   // Re-read the file when this pane becomes visible again (#445). `isActive`
   // covers tab switches; active app visibility covers backgrounding and returning
@@ -335,6 +347,7 @@ export function FilePane({
       location={location}
       navigationRevision={navigationRevision}
       imagePreviewUri={imagePreviewUri}
+      onDownload={readTarget ? handleDownload : undefined}
     />
   );
 }
@@ -376,6 +389,7 @@ function FilePanePresentation({
   location,
   navigationRevision,
   imagePreviewUri,
+  onDownload,
 }: {
   serverId: string;
   client: DaemonClient | null;
@@ -397,6 +411,7 @@ function FilePanePresentation({
   location: WorkspaceFileLocation;
   navigationRevision: number;
   imagePreviewUri: string | null;
+  onDownload?: () => void;
 }) {
   if (!client && readTarget) {
     return (
@@ -426,6 +441,7 @@ function FilePanePresentation({
         isMobile={isMobile}
         location={location}
         navigationRevision={navigationRevision}
+        onDownload={onDownload}
       />
     );
   }
@@ -458,6 +474,7 @@ function FilePanePresentation({
           lineCount={lineCount}
           mode={previewMode}
           onModeChange={onPreviewModeChange}
+          onDownload={onDownload}
         />
       ) : null}
       <FilePreviewBody
@@ -488,6 +505,7 @@ function EditableFilePane({
   isMobile,
   location,
   navigationRevision,
+  onDownload,
 }: {
   client: DaemonClient;
   cwd: string;
@@ -503,6 +521,7 @@ function EditableFilePane({
   isMobile: boolean;
   location: WorkspaceFileLocation;
   navigationRevision: number;
+  onDownload?: () => void;
 }) {
   const { settings } = useAppSettings();
   const { t } = useTranslation();
@@ -620,6 +639,7 @@ function EditableFilePane({
         conflict={conflict}
         mode={mode}
         onModeChange={onModeChange}
+        onDownload={onDownload}
       />
       {showSource ? (
         <FileEditorView

@@ -1,7 +1,8 @@
 import { useCallback, useMemo } from "react";
-import { useHosts } from "@/runtime/host-runtime";
+import { useHostRuntimeSnapshot, useHosts } from "@/runtime/host-runtime";
 import { useDownloadStore } from "@/stores/download-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
+import { resolveActiveDirectDownloadConnection } from "@/downloads/route";
 
 interface UseFileDownloadParams {
   serverId: string;
@@ -21,6 +22,7 @@ export function useFileDownload({
   workspaceRoot,
 }: UseFileDownloadParams): (input: { fileName: string; path: string }) => void {
   const daemons = useHosts();
+  const runtime = useHostRuntimeSnapshot(serverId);
   const daemonProfile = useMemo(
     () => daemons.find((daemon) => daemon.serverId === serverId),
     [daemons, serverId],
@@ -36,6 +38,14 @@ export function useFileDownload({
     workspaceRoot: normalizedWorkspaceRoot,
   });
   const startDownload = useDownloadStore((state) => state.startDownload);
+  const directConnection = useMemo(
+    () =>
+      resolveActiveDirectDownloadConnection({
+        host: daemonProfile,
+        activeConnectionId: runtime?.activeConnectionId ?? null,
+      }),
+    [daemonProfile, runtime?.activeConnectionId],
+  );
 
   return useCallback(
     ({ fileName, path }) => {
@@ -47,10 +57,24 @@ export function useFileDownload({
         scopeId: workspaceScopeId,
         fileName,
         path,
-        daemonProfile,
+        directConnection,
+        readFile: async (targetPath) => {
+          if (!runtime?.client) {
+            throw new Error("Host is disconnected.");
+          }
+          return runtime.client.readFile(normalizedWorkspaceRoot, targetPath);
+        },
         requestFileDownloadToken: (targetPath) => requestFileDownloadToken(targetPath),
       });
     },
-    [daemonProfile, requestFileDownloadToken, serverId, startDownload, workspaceScopeId],
+    [
+      directConnection,
+      normalizedWorkspaceRoot,
+      requestFileDownloadToken,
+      runtime?.client,
+      serverId,
+      startDownload,
+      workspaceScopeId,
+    ],
   );
 }

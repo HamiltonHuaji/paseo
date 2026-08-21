@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { PaneContentToolbar } from "@/components/ui/pane-content-toolbar";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Button } from "@/components/ui/button";
+import { Download } from "lucide-react-native";
 import type { Theme } from "@/styles/theme";
 import { FileConflictAlert, type FileConflictAlertState } from "./conflict-alert";
 import type { FileEditorStatus } from "./editor/model";
@@ -20,6 +22,7 @@ export function FilePanelBar({
   cursor,
   vimMode,
   conflict,
+  onDownload,
 }: {
   size: number;
   lineCount?: number;
@@ -29,6 +32,7 @@ export function FilePanelBar({
   cursor?: { line: number; column: number };
   vimMode?: string | null;
   conflict?: FileConflictAlertState;
+  onDownload?: () => void;
 }) {
   const { t } = useTranslation();
   const previewModes = [
@@ -107,6 +111,19 @@ export function FilePanelBar({
               testID="file-preview-mode"
               options={previewModes}
             />
+          ) : null}
+          {onDownload ? (
+            <Button
+              variant="ghost"
+              size="xs"
+              leftIcon={Download}
+              onPress={onDownload}
+              disabled={editorStatus === "dirty" || editorStatus === "saving"}
+              accessibilityLabel={t("workspace.fileActions.download")}
+              testID="file-panel-download"
+            >
+              {t("workspace.fileActions.download")}
+            </Button>
           ) : null}
         </View>
       </PaneContentToolbar>
