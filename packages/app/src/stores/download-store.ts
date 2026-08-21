@@ -2,11 +2,14 @@ import { create } from "zustand";
 import { File as FSFile, Paths } from "expo-file-system";
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import type { HostProfile } from "@/types/host-connection";
+import type { DirectTcpHostConnection } from "@/types/host-connection";
+import type { FileReadResult } from "@getpaseo/client/internal/daemon-client";
 import { buildDaemonWebSocketUrl } from "@/utils/daemon-endpoints";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { isWeb } from "@/constants/platform";
 import { i18n } from "@/i18n/i18next";
+import { saveDownloadedFile } from "@/downloads/save-downloaded-file";
+import { downloadFileThroughDaemon } from "@/downloads/transfer";
 
 interface DownloadProgress {
   percent: number;
@@ -36,7 +39,8 @@ interface DownloadState {
     scopeId: string;
     fileName: string;
     path: string;
-    daemonProfile: HostProfile | undefined;
+    directConnection: DirectTcpHostConnection | null;
+    readFile: (path: string) => Promise<FileReadResult>;
     requestFileDownloadToken: (path: string) => Promise<{
       token: string | null;
       fileName: string | null;
@@ -65,7 +69,8 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
     scopeId,
     fileName,
     path,
-    daemonProfile,
+    directConnection,
+    readFile,
     requestFileDownloadToken,
   }) => {
     const id = generateDownloadId();
@@ -84,16 +89,32 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
     }));
 
     try {
+      if (!directConnection) {
+        await downloadFileThroughDaemon({
+          path,
+          requestedFileName: fileName,
+          readFile,
+          saveFile: saveDownloadedFile,
+          onReadComplete: ({ bytesWritten, totalBytes }) => {
+            get().updateProgress(id, {
+              percent: 1,
+              bytesWritten,
+              totalBytes,
+              speed: 0,
+              eta: 0,
+            });
+          },
+        });
+        get().completeDownload(id);
+        return;
+      }
+
       const tokenResponse = await requestFileDownloadToken(path);
       if (tokenResponse.error || !tokenResponse.token) {
         throw new Error(tokenResponse.error ?? i18n.t("downloads.requestTokenFailed"));
       }
 
-      const downloadTarget = resolveDaemonDownloadTarget(daemonProfile);
-      if (!downloadTarget.baseUrl) {
-        throw new Error(i18n.t("downloads.hostUnavailable"));
-      }
-
+      const downloadTarget = resolveDaemonDownloadTarget(directConnection);
       const resolvedFileName = tokenResponse.fileName ?? fileName;
       const downloadUrl = buildDownloadUrl(
         downloadTarget.baseUrl,
@@ -239,24 +260,19 @@ function findMostRecentDownloadId(downloads: Map<string, Download>): string | nu
 }
 
 interface DownloadTarget {
-  baseUrl: string | null;
+  baseUrl: string;
   authHeader: string | null;
   authCredentials: { username: string; password: string } | null;
 }
 
-function resolveDaemonDownloadTarget(daemon?: HostProfile): DownloadTarget {
-  const connection = daemon?.connections.find((conn) => conn.type === "directTcp") ?? null;
-  if (!connection) {
-    return { baseUrl: null, authHeader: null, authCredentials: null };
-  }
-
+function resolveDaemonDownloadTarget(connection: DirectTcpHostConnection): DownloadTarget {
   let parsed: URL;
   try {
     parsed = new URL(
       buildDaemonWebSocketUrl(connection.endpoint, { useTls: connection.useTls ?? false }),
     );
   } catch {
-    return { baseUrl: null, authHeader: null, authCredentials: null };
+    throw new Error(i18n.t("downloads.hostUnavailable"));
   }
 
   if (parsed.protocol === "ws:") {
@@ -337,21 +353,14 @@ function resolveDownloadTargetFile(fileName: string): FSFile {
 
 function sanitizeDownloadFileName(fileName: string): string {
   const trimmed = fileName.trim();
-  if (!trimmed) {
-    return "download";
-  }
+  if (!trimmed) return "download";
   return trimmed.replace(/[\\/:*?"<>|]+/g, "_");
 }
 
 function splitFileName(fileName: string): { base: string; ext: string } {
   const lastDot = fileName.lastIndexOf(".");
-  if (lastDot <= 0) {
-    return { base: fileName, ext: "" };
-  }
-  return {
-    base: fileName.slice(0, lastDot),
-    ext: fileName.slice(lastDot),
-  };
+  if (lastDot <= 0) return { base: fileName, ext: "" };
+  return { base: fileName.slice(0, lastDot), ext: fileName.slice(lastDot) };
 }
 
 export function formatSpeed(bytesPerSecond: number): string {
