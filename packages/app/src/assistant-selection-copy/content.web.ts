@@ -11,6 +11,7 @@ import {
   MARKDOWN_COPY_LANGUAGE_ATTRIBUTE,
   MARKDOWN_COPY_LIST_MARKER_ATTRIBUTE,
   MARKDOWN_COPY_LIST_START_ATTRIBUTE,
+  MARKDOWN_COPY_MATH_SOURCE_ATTRIBUTE,
   MARKDOWN_COPY_TAG_ATTRIBUTE,
   MARKDOWN_COPY_UNWRAP_ATTRIBUTE,
   TRAILING_CODE_LINE_BREAKS,
@@ -55,6 +56,10 @@ turndown.addRule("compactListItem", {
     return `${start + index}. ${item}\n`;
   },
 });
+turndown.addRule("mathSource", {
+  filter: (node) => node.hasAttribute(MARKDOWN_COPY_MATH_SOURCE_ATTRIBUTE),
+  replacement: (_content, node) => node.getAttribute(MARKDOWN_COPY_MATH_SOURCE_ATTRIBUTE) ?? "",
+});
 
 export function createAssistantSelectionClipboardContent(
   selection: Selection | null,
@@ -63,12 +68,15 @@ export function createAssistantSelectionClipboardContent(
     return null;
   }
 
-  const range = selection.getRangeAt(0);
+  const originalRange = selection.getRangeAt(0);
+  const range = originalRange.cloneRange();
   const startMessage = closestAssistantMessage(range.startContainer);
   const endMessage = closestAssistantMessage(range.endContainer);
   if (!startMessage || startMessage !== endMessage) {
     return null;
   }
+
+  expandMathSelection(range, startMessage);
 
   const partialCode = createPartialCodeContent(range, startMessage);
   if (partialCode) {
@@ -86,6 +94,24 @@ export function createAssistantSelectionClipboardContent(
   }
   const content = createMarkdownClipboardContent(markdown);
   return { ...content, html: flattenClipboardListMarkup(content.html) };
+}
+
+function expandMathSelection(range: Range, message: Element): void {
+  const startMath = closestMathSource(range.startContainer, message);
+  const endMath = closestMathSource(range.endContainer, message);
+
+  if (startMath) {
+    range.setStartBefore(startMath);
+  }
+  if (endMath) {
+    range.setEndAfter(endMath);
+  }
+}
+
+function closestMathSource(node: Node, message: Element): Element | null {
+  const element = node instanceof Element ? node : node.parentElement;
+  const math = element?.closest(`[${MARKDOWN_COPY_MATH_SOURCE_ATTRIBUTE}]`) ?? null;
+  return math && message.contains(math) ? math : null;
 }
 
 /**
@@ -455,6 +481,9 @@ function restoreMarkdownElements(container: HTMLElement): void {
 
   const presentational = Array.from(container.querySelectorAll("div, span"));
   for (const element of presentational.toReversed()) {
+    if (element.hasAttribute(MARKDOWN_COPY_MATH_SOURCE_ATTRIBUTE)) {
+      continue;
+    }
     element.replaceWith(...element.childNodes);
   }
 }

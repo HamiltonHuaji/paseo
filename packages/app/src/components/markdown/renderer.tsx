@@ -43,6 +43,8 @@ import { resolveInlineImageSize, type InlineImageDimensions } from "./inline-ima
 import { groupMarkdownParts, type MarkdownPartGroup } from "./part-groups";
 import { colorMarkdownLinkChildren } from "./link-children";
 import { MarkdownLinkText } from "./link-text";
+import { configureMarkdownMath } from "./configure-markdown-math";
+import { createMarkdownMathRules } from "./math-rules";
 
 export type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
 
@@ -69,7 +71,7 @@ function compactMarkdownStyleMapping(theme: Theme): Partial<MarkdownWithStableRe
 
 // Serves PR comment bodies and the markdown file preview; agent chat passes its
 // own parser. The preview has to show the bytes on disk, so no typographer.
-const defaultMarkdownParser = createMarkdownParser({ linkify: true });
+const defaultMarkdownParser = configureMarkdownMath(createMarkdownParser({ linkify: true }));
 const EMPTY_TEXT_STYLE: TextStyle = {};
 const MARKDOWN_LIST_ITEM_CONTENT_FLEX: ViewStyle = { flex: 1, flexShrink: 1, minWidth: 0 };
 export interface MarkdownRendererProps {
@@ -497,6 +499,7 @@ function getMarkdownLinkHref(node: ASTNode): string {
 
 export function createSharedMarkdownRules(): RenderRules {
   return {
+    ...createMarkdownMathRules(),
     text: (
       node: ASTNode,
       _children: ReactNode[],
@@ -696,6 +699,10 @@ export function createSharedMarkdownRules(): RenderRules {
         key={node.key}
         paragraphStyle={styles.paragraph}
         containsImage={markdownNodeContainsType(node, "image")}
+        containsMath={
+          markdownNodeContainsType(node, "math_inline") ||
+          markdownNodeContainsType(node, "math_block")
+        }
       >
         {children}
       </MarkdownParagraphView>
