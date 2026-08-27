@@ -96,6 +96,10 @@ import {
 } from "@/components/ui/horizontal-scroll-boundary";
 import { getWorkspaceTabRevealOffset } from "@/screens/workspace/workspace-tab-scroll";
 import { WORKSPACE_TAB_RAIL_WIDTH } from "@/screens/workspace/workspace-tab-placement";
+import {
+  buildVerticalTabLabelPresentations,
+  type VerticalTabLabelPresentation,
+} from "@/screens/workspace/workspace-vertical-tab-presentation";
 
 const DROPDOWN_WIDTH = 220;
 const DEFAULT_INLINE_ADD_BUTTON_RESERVED_WIDTH = 36;
@@ -630,6 +634,7 @@ function resolveChipBackdrop({
 
 function TabHandleContent({
   presentation,
+  verticalLabel,
   isHighlighted,
   showLabel,
   backdrop,
@@ -638,6 +643,7 @@ function TabHandleContent({
   modifiedTestId,
 }: {
   presentation: WorkspaceTabPresentation;
+  verticalLabel?: VerticalTabLabelPresentation;
   isHighlighted: boolean;
   showLabel: boolean;
   backdrop: SurfaceBackdrop;
@@ -659,7 +665,22 @@ function TabHandleContent({
       {showLabel && presentation.titleState === "loading" ? (
         <View style={tabLabelSkeletonStyle} />
       ) : null}
-      {showLabel && presentation.titleState !== "loading" ? (
+      {showLabel && presentation.titleState !== "loading" && verticalLabel ? (
+        <View style={styles.railPathLabel}>
+          <Text
+            style={styles.railPathPrefix}
+            selectable={false}
+            numberOfLines={1}
+            ellipsizeMode="head"
+          >
+            {verticalLabel.pathPrefix}
+          </Text>
+          <Text style={tabLabelStyle} selectable={false} numberOfLines={1} ellipsizeMode="tail">
+            {verticalLabel.label}
+          </Text>
+        </View>
+      ) : null}
+      {showLabel && presentation.titleState !== "loading" && !verticalLabel ? (
         <Text style={tabLabelStyle} selectable={false} numberOfLines={1} ellipsizeMode="tail">
           {presentation.label}
         </Text>
@@ -688,6 +709,7 @@ function TabChip({
   isCloseHovered,
   isClosingTab,
   presentation,
+  verticalLabel,
   tooltipLabel,
   resolvedTab,
   setHoveredCloseTabKey,
@@ -706,6 +728,7 @@ function TabChip({
   isCloseHovered: boolean;
   isClosingTab: boolean;
   presentation: WorkspaceTabPresentation;
+  verticalLabel?: VerticalTabLabelPresentation;
   tooltipLabel: string;
   resolvedTab: WorkspaceDesktopTabActions;
   setHoveredCloseTabKey: Dispatch<SetStateAction<string | null>>;
@@ -825,6 +848,7 @@ function TabChip({
             >
               <TabHandleContent
                 presentation={presentation}
+                verticalLabel={verticalLabel}
                 isHighlighted={isHighlighted}
                 showLabel={showLabel}
                 backdrop={chipBackdrop}
@@ -1545,6 +1569,18 @@ function ResolvedWorkspaceDesktopTabsRail({
     [t],
   );
   const orderedTabs = useMemo(() => tabs.map((item) => item.tab), [tabs]);
+  const verticalLabels = useMemo(
+    () =>
+      buildVerticalTabLabelPresentations(
+        tabs.map((item) => ({
+          key: item.tab.key,
+          kind: item.presentation.kind,
+          label: item.presentation.label,
+          ready: item.presentation.titleState === "ready",
+        })),
+      ),
+    [tabs],
+  );
   const handleMoveTabToStart = useCallback(
     (tabId: string) => {
       const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "start");
@@ -1638,6 +1674,7 @@ function ResolvedWorkspaceDesktopTabsRail({
           showDropIndicatorBefore={showDropIndicatorBefore}
           showDropIndicatorAfter={showDropIndicatorAfter}
           orientation="vertical"
+          verticalLabel={verticalLabels.get(item.tab.key)}
         />
       );
     },
@@ -1661,6 +1698,7 @@ function ResolvedWorkspaceDesktopTabsRail({
       tabDropPreviewIndex,
       tabMenuLabels,
       tabs.length,
+      verticalLabels,
     ],
   );
   const ignoreLayout = useCallback((_event: LayoutChangeEvent) => {}, []);
@@ -1744,6 +1782,7 @@ function ResolvedDesktopTabChip({
   showDropIndicatorBefore,
   showDropIndicatorAfter,
   orientation = "horizontal",
+  verticalLabel,
 }: {
   item: ResolvedWorkspaceDesktopTabRowItem;
   isFocused: boolean;
@@ -1772,6 +1811,7 @@ function ResolvedDesktopTabChip({
   showDropIndicatorBefore: boolean;
   showDropIndicatorAfter: boolean;
   orientation?: DragOrientation;
+  verticalLabel?: VerticalTabLabelPresentation;
 }) {
   const { t } = useTranslation();
   const presentation = item.presentation;
@@ -1844,6 +1884,7 @@ function ResolvedDesktopTabChip({
         isCloseHovered={item.isCloseHovered}
         isClosingTab={item.isClosingTab}
         presentation={presentation}
+        verticalLabel={verticalLabel}
         tooltipLabel={tooltipLabel}
         resolvedTab={resolvedTab}
         setHoveredCloseTabKey={setHoveredCloseTabKey}
@@ -1990,6 +2031,20 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[1],
     flex: 1,
     minWidth: 0,
+    userSelect: "none",
+  },
+  railPathLabel: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  railPathPrefix: {
+    flexShrink: 1,
+    minWidth: 0,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.normal,
     userSelect: "none",
   },
   tabIcon: {
