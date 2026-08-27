@@ -1341,6 +1341,7 @@ export const fr: TranslationResources = {
         idle: "L'état de la mise à jour n'a pas encore été vérifié.",
       },
       installError: "Impossible d'installer la mise à jour de l'application de bureau.",
+      official: { switchFailed: "Unable to switch to the official Paseo build." },
       callout: {
         installingTitle: "Installation de la mise à jour",
         failedTitle: "La mise à jour a échoué",
@@ -2084,6 +2085,7 @@ export const fr: TranslationResources = {
       },
       updates: {
         label: "Mises à jour de l'application",
+        forkLabel: "Fork updates",
         readyToInstall: "Prêt à installer:{{version}}",
         installTitle: "Installer la mise à jour du bureau",
         installMessage: "Cela met à jourPaseosur cet ordinateur",
@@ -2095,6 +2097,22 @@ export const fr: TranslationResources = {
         checking: "Vérification...",
         alertTitle: "Erreur",
         alertMessage: "Impossible d'ouvrir la boîte de dialogue de confirmation de mise à jour.",
+        official: {
+          label: "Official Paseo",
+          checking: "Checking official releases...",
+          newerAvailable:
+            "This fork is based on {{baseVersion}}; official {{latestVersion}} is available.",
+          latest: "This fork is based on the latest official release, {{version}}.",
+          unavailable: "Official release status is unavailable.",
+          check: "Check official",
+          viewRelease: "View release",
+          switchTo: "Switch to {{version}}",
+          switching: "Switching...",
+          switchTitle: "Switch to official Paseo?",
+          switchMessage:
+            "This will stop running agents and terminal sessions, then replace this fork with the official build. Returning to the fork requires manually installing it from HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Switch to official",
+        },
       },
     },
     appearance: {

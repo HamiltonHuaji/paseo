@@ -100,14 +100,61 @@ describe("desktop-updates helpers", () => {
       parseDesktopRuntimeInfo({
         appVersion: " 0.1.64 ",
         runningUnderARM64Translation: true,
+        distribution: "fork",
+        upstreamBaseVersion: " 0.6.1 ",
       }),
     ).toEqual({
       appVersion: "0.1.64",
       runningUnderARM64Translation: true,
+      distribution: "fork",
+      upstreamBaseVersion: "0.6.1",
     });
     expect(parseDesktopRuntimeInfo(null)).toEqual({
       appVersion: null,
       runningUnderARM64Translation: false,
+      distribution: null,
+      upstreamBaseVersion: null,
+    });
+  });
+
+  it("parses official release checks defensively", async () => {
+    const { parseOfficialReleaseCheckResult } = await loadModuleForPlatform("web");
+
+    expect(
+      parseOfficialReleaseCheckResult({
+        upstreamBaseVersion: " 0.6.1 ",
+        latestVersion: "0.6.2",
+        hasNewerUpstream: true,
+        releaseUrl: "https://github.com/getpaseo/paseo/releases/tag/v0.6.2",
+        canSwitch: true,
+        assetName: "Paseo-Setup-0.6.2-x64.exe",
+      }),
+    ).toMatchObject({
+      upstreamBaseVersion: "0.6.1",
+      latestVersion: "0.6.2",
+      hasNewerUpstream: true,
+      canSwitch: true,
+      assetName: "Paseo-Setup-0.6.2-x64.exe",
+      errorMessage: null,
+    });
+    expect(parseOfficialReleaseCheckResult(null)).toMatchObject({
+      upstreamBaseVersion: null,
+      latestVersion: null,
+      hasNewerUpstream: false,
+      canSwitch: false,
+    });
+  });
+
+  it("parses official switch results", async () => {
+    const { parseOfficialSwitchResult } = await loadModuleForPlatform("web");
+
+    expect(
+      parseOfficialSwitchResult({ started: true, version: "0.6.2", message: "Started" }),
+    ).toEqual({ started: true, version: "0.6.2", message: "Started" });
+    expect(parseOfficialSwitchResult(undefined)).toEqual({
+      started: false,
+      version: null,
+      message: "The official Paseo installer could not be started.",
     });
   });
 

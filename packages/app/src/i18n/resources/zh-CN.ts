@@ -1290,6 +1290,7 @@ export const zhCN: TranslationResources = {
         idle: "尚未检查更新状态。",
       },
       installError: "无法安装 desktop app 更新。",
+      official: { switchFailed: "无法切换到 Paseo 官方版本。" },
       callout: {
         installingTitle: "正在安装更新",
         failedTitle: "更新失败",
@@ -2005,6 +2006,7 @@ export const zhCN: TranslationResources = {
       },
       updates: {
         label: "应用更新",
+        forkLabel: "Fork 更新",
         readyToInstall: "可安装：{{version}}",
         installTitle: "安装桌面版更新",
         installMessage: "这会更新此电脑上的 Paseo",
@@ -2016,6 +2018,21 @@ export const zhCN: TranslationResources = {
         checking: "正在检查...",
         alertTitle: "错误",
         alertMessage: "无法打开更新确认对话框。",
+        official: {
+          label: "官方 Paseo",
+          checking: "正在检查官方版本...",
+          newerAvailable: "此 Fork 基于 {{baseVersion}}；官方 {{latestVersion}} 已发布。",
+          latest: "此 Fork 已基于最新官方版本 {{version}}。",
+          unavailable: "无法获取官方版本状态。",
+          check: "检查官方版本",
+          viewRelease: "查看版本",
+          switchTo: "切换到 {{version}}",
+          switching: "正在切换...",
+          switchTitle: "切换到官方 Paseo？",
+          switchMessage:
+            "这会停止正在运行的 Agent 和终端会话，然后用官方版本替换此 Fork。若要返回 Fork，需要从 HamiltonHuaji/paseo Releases 手动安装。",
+          switchConfirm: "切换到官方版本",
+        },
       },
     },
     appearance: {

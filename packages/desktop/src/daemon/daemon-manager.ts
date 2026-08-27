@@ -18,6 +18,9 @@ import {
   type AppUpdateCheckIntent,
   type AppReleaseChannel,
 } from "../features/auto-updater.js";
+import { FORK_UPSTREAM_BASE_VERSION } from "../features/fork-build-info.js";
+import { forkDebUpdateService } from "../features/fork-deb-update-electron.js";
+import { officialReleaseService } from "../features/official-release-electron.js";
 import {
   getBundledCliShimPath,
   getCliInstallStatus,
@@ -521,6 +524,8 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     desktop_get_runtime_info: () => ({
       appVersion: resolveDesktopAppVersion(),
       runningUnderARM64Translation: isRunningUnderARM64Translation(),
+      distribution: "fork",
+      upstreamBaseVersion: FORK_UPSTREAM_BASE_VERSION,
     }),
     desktop_daemon_status: () => resolveDesktopDaemonStatus(),
     start_desktop_daemon: () => startDaemon(),
@@ -554,21 +559,45 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     },
     check_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
+      const releaseChannel = await resolveRequestedReleaseChannel(args);
+      if (process.platform === "linux") {
+        return forkDebUpdateService.checkForAppUpdate({
+          currentVersion,
+          releaseChannel,
+          intent: parseAppUpdateCheckIntent(args),
+        });
+      }
       return checkForAppUpdate({
         currentVersion,
-        releaseChannel: await resolveRequestedReleaseChannel(args),
+        releaseChannel,
         intent: parseAppUpdateCheckIntent(args),
       });
     },
     install_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
-      return downloadAndInstallUpdate(
-        { currentVersion, releaseChannel: await resolveRequestedReleaseChannel(args) },
+      const releaseChannel = await resolveRequestedReleaseChannel(args);
+      const beforeInstall = async () => {
+        await stopDesktopDaemon("app_update");
+      };
+      if (process.platform === "linux") {
+        return forkDebUpdateService.downloadAndInstallUpdate(
+          { currentVersion, releaseChannel },
+          beforeInstall,
+        );
+      }
+      return downloadAndInstallUpdate({ currentVersion, releaseChannel }, beforeInstall);
+    },
+    check_official_app_release: (args) =>
+      officialReleaseService.check({
+        releaseChannel: parseReleaseChannel(args) ?? "stable",
+      }),
+    switch_to_official_app: (args) =>
+      officialReleaseService.switchToOfficial(
+        { releaseChannel: parseReleaseChannel(args) ?? "stable" },
         async () => {
           await stopDesktopDaemon("app_update");
         },
-      );
-    },
+      ),
     get_local_daemon_version: () => getLocalDaemonVersion(),
     install_cli: () => installCli(),
     get_cli_install_status: () => getCliInstallStatus(),

@@ -1325,6 +1325,7 @@ export const ru: TranslationResources = {
         idle: "Статус обновления ещё не проверен.",
       },
       installError: "Не удалось установить обновление настольного приложения.",
+      official: { switchFailed: "Unable to switch to the official Paseo build." },
       callout: {
         installingTitle: "Установка обновления",
         failedTitle: "Обновление не выполнено",
@@ -2066,6 +2067,7 @@ export const ru: TranslationResources = {
       },
       updates: {
         label: "Обновления приложения",
+        forkLabel: "Fork updates",
         readyToInstall: "Версия {{version}} готова к установке",
         installTitle: "Установить обновление настольного приложения",
         installMessage: "Это обновит Paseo на этом компьютере.",
@@ -2077,6 +2079,22 @@ export const ru: TranslationResources = {
         checking: "Проверка...",
         alertTitle: "Ошибка",
         alertMessage: "Не удалось открыть диалог подтверждения обновления.",
+        official: {
+          label: "Official Paseo",
+          checking: "Checking official releases...",
+          newerAvailable:
+            "This fork is based on {{baseVersion}}; official {{latestVersion}} is available.",
+          latest: "This fork is based on the latest official release, {{version}}.",
+          unavailable: "Official release status is unavailable.",
+          check: "Check official",
+          viewRelease: "View release",
+          switchTo: "Switch to {{version}}",
+          switching: "Switching...",
+          switchTitle: "Switch to official Paseo?",
+          switchMessage:
+            "This will stop running agents and terminal sessions, then replace this fork with the official build. Returning to the fork requires manually installing it from HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Switch to official",
+        },
       },
     },
     appearance: {

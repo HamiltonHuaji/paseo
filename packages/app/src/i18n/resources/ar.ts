@@ -1303,6 +1303,7 @@ export const ar: TranslationResources = {
         idle: "لم يتم التحقق من حالة التحديث بعد.",
       },
       installError: "غير قادر على تثبيت تحديث تطبيق سطح المكتب.",
+      official: { switchFailed: "Unable to switch to the official Paseo build." },
       callout: {
         installingTitle: "تثبيت التحديث",
         failedTitle: "فشل التحديث",
@@ -2029,6 +2030,7 @@ export const ar: TranslationResources = {
       },
       updates: {
         label: "تحديثات التطبيق",
+        forkLabel: "Fork updates",
         readyToInstall: "جاهز للتثبيت:{{version}}",
         installTitle: "تثبيت تحديث سطح المكتب",
         installMessage: "يؤدي هذا إلى تحديث Paseo على هذا الكمبيوتر",
@@ -2040,6 +2042,22 @@ export const ar: TranslationResources = {
         checking: "جارٍ التحقق...",
         alertTitle: "خطأ",
         alertMessage: "غير قادر على فتح مربع حوار تأكيد التحديث.",
+        official: {
+          label: "Official Paseo",
+          checking: "Checking official releases...",
+          newerAvailable:
+            "This fork is based on {{baseVersion}}; official {{latestVersion}} is available.",
+          latest: "This fork is based on the latest official release, {{version}}.",
+          unavailable: "Official release status is unavailable.",
+          check: "Check official",
+          viewRelease: "View release",
+          switchTo: "Switch to {{version}}",
+          switching: "Switching...",
+          switchTitle: "Switch to official Paseo?",
+          switchMessage:
+            "This will stop running agents and terminal sessions, then replace this fork with the official build. Returning to the fork requires manually installing it from HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Switch to official",
+        },
       },
     },
     appearance: {

@@ -76,3 +76,14 @@ The fork repository keeps the upstream Cloudflare website deployment and Nix bot
 workflows disabled in GitHub Actions. They depend on upstream-owned credentials and must not run
 when `main` is refreshed as a mirror. Re-enable them only after replacing their deployment target
 and credentials with fork-owned infrastructure.
+
+The desktop workflow publishes only a Windows x64 NSIS installer and a Linux x64 Debian package.
+Keep the upstream application identity so an installed fork retains the Electron user-data and
+daemon directories. Windows uses the upstream updater state machine with its generated feed
+pointing at `HamiltonHuaji/paseo`; Linux verifies the fork release digest and installs the `.deb`
+through `pkexec` and `dpkg`.
+
+Official `getpaseo/paseo` releases are read-only metadata in a fork build. The Settings switch to
+an official build downloads and verifies a complete official installer, so it also works for an
+equal or lower version. Installing the official binary removes the fork update UI; returning to
+the fork requires running a fork installer manually.
