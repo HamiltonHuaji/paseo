@@ -4,6 +4,7 @@ const pkg = require("./package.json");
 const withAndroidAsyncStorageSize = require("./plugins/with-android-async-storage-size");
 const withAndroidProfileable = require("./plugins/with-android-profileable");
 const withFdroidAutolinking = require("./plugins/with-fdroid-autolinking");
+const withForkHermesFlags = require("./plugins/with-fork-hermes-flags");
 const withPasteInput = require("./plugins/with-paste-input");
 const withAndroidScroll = require("./modules/paseo-scroll/app.plugin");
 const forkBuildMetadata = require("../desktop/src/features/fork-build-info.json");
@@ -197,6 +198,7 @@ export default {
         },
       ],
       ...buildProfile.fdroidPlugins,
+      ...(isForkBuild ? [withForkHermesFlags] : []),
       ...(isProfileBuild ? [withAndroidProfileable] : []),
     ],
     experiments: {

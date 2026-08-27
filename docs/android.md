@@ -14,8 +14,9 @@ EAS profiles: `development`, `production`, `production-apk`, and `fork-apk` in
 `packages/app/eas.json`. The fork profile uses its own EAS project and remotely managed signing
 credentials, disables official Expo Updates, and can coexist with the official app. It builds an
 arm64-only APK on the standard EAS resource class. Its serial Gradle command bundles Hermes first
-and leaves most worker memory outside Gradle; compiling every ABI or retaining the default 4 GB
-Gradle heap exhausts that worker's memory.
+and leaves most worker memory outside Gradle. The fork build also uses Hermes `-O0` while retaining
+source maps because the optimized compiler exceeds the standard worker's memory on the production
+bundle. Official and F-Droid builds keep the React Native defaults.
 
 `development` uses Android `debug`.
 
