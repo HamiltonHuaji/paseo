@@ -64,6 +64,8 @@ import { replicaCacheStorage } from "@/runtime/replica-cache/storage";
 import { projectIconCache } from "@/projects/icon-cache";
 import { nativePerformanceTrace } from "@/performance/native-trace";
 import { revokePushNotifications } from "@/push-notifications";
+import { getPaseoVscodeEmbedConfig } from "@/vscode-embed/bridge";
+import { getPaseoVscodeDaemonTransportFactory } from "@/vscode-embed/transport";
 import { createAppWebSocketFactory } from "./websocket-factory";
 
 export type HostRuntimeConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
@@ -482,9 +484,47 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
     [CLIENT_CAPS.selectiveAgentTimeline]: true,
     ...browserAutomationCapabilities,
   };
+  const vscodeTransportFactory = getPaseoVscodeDaemonTransportFactory();
+
+  const createVscodeClient = async (input: {
+    serverId: string;
+    runtimeGeneration?: number;
+    reconnect: boolean;
+  }): Promise<DaemonClient> => {
+    if (!vscodeTransportFactory) {
+      throw new Error("VS Code daemon transport is unavailable");
+    }
+    return new DaemonClient({
+      url: `vscode://workspace/${encodeURIComponent(input.serverId)}`,
+      transportFactory: vscodeTransportFactory,
+      suppressSendErrors: true,
+      clientId: await getOrCreateClientId(),
+      clientType: "mobile",
+      appVersion: resolveAppVersion() ?? undefined,
+      capabilities: appCapabilities,
+      trace: nativePerformanceTrace,
+      ...(input.runtimeGeneration !== undefined
+        ? { runtimeGeneration: input.runtimeGeneration }
+        : {}),
+      reconnect: { enabled: input.reconnect },
+    });
+  };
 
   return {
     createClient: ({ host, connection, clientId, runtimeGeneration }) => {
+      if (vscodeTransportFactory) {
+        return new DaemonClient({
+          url: `vscode://workspace/${encodeURIComponent(host.serverId)}`,
+          transportFactory: vscodeTransportFactory,
+          suppressSendErrors: true,
+          clientId,
+          clientType: "mobile",
+          appVersion: resolveAppVersion() ?? undefined,
+          runtimeGeneration,
+          capabilities: appCapabilities,
+          trace: nativePerformanceTrace,
+        });
+      }
       const localTransportFactory = createDesktopLocalDaemonTransportFactory();
       const webSocketConfig = { webSocketFactory: createAppWebSocketFactory() };
       const base = {
@@ -530,13 +570,28 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         },
       });
     },
-    connectToDaemon: ({ host, connection, timeoutMs }) =>
-      connectToDaemon(connection, {
+    connectToDaemon: async ({ host, connection, timeoutMs }) => {
+      if (vscodeTransportFactory) {
+        const client = await createVscodeClient({ serverId: host.serverId, reconnect: false });
+        await client.connect();
+        const serverInfo = client.getLastServerInfoMessage();
+        if (!serverInfo) {
+          await client.close();
+          throw new Error("VS Code daemon transport did not provide server info");
+        }
+        return {
+          client,
+          serverId: serverInfo.serverId,
+          hostname: serverInfo.hostname ?? null,
+        };
+      }
+      return connectToDaemon(connection, {
         ...(host.serverId ? { serverId: host.serverId } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         capabilities: appCapabilities,
         trace: nativePerformanceTrace,
-      }),
+      });
+    },
     getClientId: () => getOrCreateClientId(),
     mountClientHandlers: ({ client, host }) => {
       const unmountServerData = mountServerDataPushRouter({
@@ -1417,6 +1472,11 @@ export class HostRuntimeStore {
   }
 
   private async runBoot(): Promise<void> {
+    if (getPaseoVscodeEmbedConfig()) {
+      this.hostRegistryStatus = "ready";
+      this.markHostRegistryLoaded();
+      return;
+    }
     const override = readConfiguredLocalDaemonOverride();
     await this.loadFromStorage();
     this.markHostRegistryLoaded();

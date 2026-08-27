@@ -1,0 +1,100 @@
+name: Fork VS Code Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to attach paseo-fork.vsix to."
+        required: true
+        type: string
+      checkout_ref:
+        description: "Branch/ref containing the fork code to build."
+        required: false
+        default: "overlay"
+        type: string
+      publish:
+        description: "Upload paseo-fork.vsix to the GitHub release."
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+concurrency:
+  group: fork-vscode-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_TAG: ${{ inputs.tag }}
+  CHECKOUT_REF: ${{ inputs.checkout_ref || 'overlay' }}
+  SHOULD_PUBLISH: ${{ inputs.publish != 'false' }}
+
+jobs:
+  publish-vsix:
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release metadata
+        shell: bash
+        run: |
+          node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+          node scripts/emit-fork-build-env.mjs >> "$GITHUB_ENV"
+
+      - name: Ensure GitHub release exists
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
+          notes=$(printf 'Fork version: `v%s`\n\nInstaller version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
+            "$FORK_DISPLAY_VERSION" "$RELEASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
+            exit 0
+          fi
+          args=(release create "$RELEASE_TAG" --repo "${{ github.repository }}" --target "$CHECKOUT_REF" --title "$title" --notes "$notes" --draft)
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh "${args[@]}"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci
+
+      - name: Build VSIX
+        run: npm run package:vscode
+
+      - name: Upload VSIX to release
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release upload "$RELEASE_TAG"
+          artifacts/vscode/paseo-fork.vsix
+          --clobber
+          --repo "${{ github.repository }}"
+
+      - name: Upload VSIX to workflow
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: paseo-fork-vscode
+          path: artifacts/vscode/paseo-fork.vsix
+          retention-days: 7

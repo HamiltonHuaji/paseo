@@ -24,6 +24,10 @@
     "./internal/daemon-client-websocket-transport": {
       "types": "./dist/daemon-client-websocket-transport.d.ts",
       "default": "./dist/daemon-client-websocket-transport.js"
+    },
+    "./internal/daemon-transport-bridge": {
+      "types": "./dist/daemon-transport-bridge.d.ts",
+      "default": "./dist/daemon-transport-bridge.js"
     }
   },
   "publishConfig": {

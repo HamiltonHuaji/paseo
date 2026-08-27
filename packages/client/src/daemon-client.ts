@@ -303,6 +303,7 @@ export type DaemonEvent =
 export type DaemonEventHandler = (event: DaemonEvent) => void;
 export type BrowserAutomationExecuteRequestMessage = BrowserAutomationExecuteRequest;
 export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteResponse;
+export type DaemonTransportFrame = string | Uint8Array | ArrayBuffer;
 
 export interface DaemonClientConfig {
   url: string;
@@ -1062,6 +1063,7 @@ interface PingProbe {
 export class DaemonClient {
   private transport: DaemonTransport | null = null;
   private transportCleanup: Array<() => void> = [];
+  private rawTransportMessageListeners = new Set<(frame: DaemonTransportFrame) => void>();
   private rawMessageListeners: Set<(message: SessionOutboundMessage) => void> = new Set();
   private messageHandlers: Map<
     SessionOutboundMessage["type"],
@@ -1445,6 +1447,20 @@ export class DaemonClient {
     return () => {
       this.rawMessageListeners.delete(handler);
     };
+  }
+
+  /** Internal client-surface hook for trusted local transport multiplexers. */
+  onRawTransportMessage(handler: (frame: DaemonTransportFrame) => void): () => void {
+    this.rawTransportMessageListeners.add(handler);
+    return () => this.rawTransportMessageListeners.delete(handler);
+  }
+
+  /** Internal client-surface hook for trusted local transport multiplexers. */
+  sendRawTransportMessage(frame: DaemonTransportFrame): void {
+    if (!this.transport || this.connectionState.status !== "connected") {
+      throw new Error(`Transport not connected (status: ${this.connectionState.status})`);
+    }
+    this.transport.send(frame);
   }
 
   on<TType extends SessionOutboundMessage["type"]>(
@@ -5632,6 +5648,20 @@ export class DaemonClient {
           // Ignore failed blob decoding and allow reconnect logic to recover.
         });
       return;
+    }
+
+    if (
+      typeof rawData === "string" ||
+      rawData instanceof Uint8Array ||
+      (typeof ArrayBuffer !== "undefined" && rawData instanceof ArrayBuffer)
+    ) {
+      for (const listener of this.rawTransportMessageListeners) {
+        try {
+          listener(rawData);
+        } catch {
+          // A transport observer must not interfere with the owning client.
+        }
+      }
     }
 
     const rawBytes = asUint8Array(rawData);

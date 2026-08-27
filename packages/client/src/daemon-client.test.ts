@@ -294,6 +294,30 @@ test("advertises consumer-provided browser automation capabilities", async () =>
   });
 });
 
+test("exposes authenticated transport frames for an in-process broker", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "transport_broker_unit_test",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const received: unknown[] = [];
+  client.onRawTransportMessage((frame) => received.push(frame));
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+  received.length = 0;
+
+  mock.triggerMessage(JSON.stringify({ type: "pong" }));
+  client.sendRawTransportMessage(JSON.stringify({ type: "virtual-request" }));
+
+  expect(received).toEqual([JSON.stringify({ type: "pong" })]);
+  expect(mock.sent.at(-1)).toBe(JSON.stringify({ type: "virtual-request" }));
+});
+
 test("Hub management requires daemon support before dispatching requests", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({
@@ -737,6 +761,7 @@ test("advertises client capabilities in hello", async () => {
     clientType: "cli",
     protocolVersion: 1,
     capabilities: {
+      agent_conversation_fork: true,
       compact_provider_snapshots: true,
       custom_mode_icons: true,
       project_updates: true,

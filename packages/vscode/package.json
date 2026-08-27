@@ -1,0 +1,250 @@
+{
+  "name": "paseo-vscode",
+  "displayName": "Paseo Fork",
+  "version": "0.6.1",
+  "private": true,
+  "description": "Native VS Code client for Paseo sessions, remote workspace files, and terminals.",
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "agent",
+    "ai",
+    "codex",
+    "paseo",
+    "terminal",
+    "virtual workspace"
+  ],
+  "homepage": "https://github.com/HamiltonHuaji/paseo",
+  "bugs": {
+    "url": "https://github.com/HamiltonHuaji/paseo/issues"
+  },
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HamiltonHuaji/paseo.git",
+    "directory": "packages/vscode"
+  },
+  "publisher": "hamiltonhuaji",
+  "type": "module",
+  "main": "dist/extension.cjs",
+  "scripts": {
+    "build:webview-app": "node scripts/build-webview-app.mjs",
+    "build:bundle": "node esbuild.mjs",
+    "build": "npm run build:webview-app && npm run build:bundle",
+    "package": "npm run build && mkdir -p ../../artifacts/vscode && vsce package --no-dependencies -o ../../artifacts/vscode/paseo-fork.vsix",
+    "typecheck": "tsgo --noEmit -p tsconfig.json",
+    "test": "vitest run src/**/*.test.ts --bail=1"
+  },
+  "dependencies": {
+    "@getpaseo/client": "*",
+    "@getpaseo/protocol": "*",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "@types/vscode": "^1.96.0",
+    "@types/ws": "^8.18.1",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  },
+  "contributes": {
+    "resourceLabelFormatters": [
+      {
+        "scheme": "paseo-fs",
+        "formatting": {
+          "label": "${path}",
+          "separator": "/",
+          "workspaceSuffix": "Paseo"
+        }
+      }
+    ],
+    "terminal": {
+      "profiles": [
+        {
+          "id": "paseo.terminalProfile",
+          "title": "Paseo Daemon"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "paseo",
+          "title": "Paseo",
+          "icon": "media/paseo.svg"
+        }
+      ]
+    },
+    "views": {
+      "paseo": [
+        {
+          "id": "paseo.sessions",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "paseo.sessions",
+        "contents": "No Paseo workspace is open.\n[Open a Paseo Workspace](command:paseo.workspace.open)\n[Add Relay Host](command:paseo.host.addRelay)",
+        "when": "!paseo.workspaceActive"
+      }
+    ],
+    "commands": [
+      {
+        "command": "paseo.workspace.open",
+        "title": "Paseo: Open Workspace"
+      },
+      {
+        "command": "paseo.host.addRelay",
+        "title": "Paseo: Add Relay Host from Pairing Link"
+      },
+      {
+        "command": "paseo.sessions.refresh",
+        "title": "Paseo: Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "paseo.daemon.reconnect",
+        "title": "Paseo: Reconnect to Daemon"
+      },
+      {
+        "command": "paseo.daemon.setPassword",
+        "title": "Paseo: Set Daemon Password"
+      },
+      {
+        "command": "paseo.daemon.clearPassword",
+        "title": "Paseo: Clear Daemon Password"
+      },
+      {
+        "command": "paseo.agent.archive",
+        "title": "Archive Agent",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "paseo.agent.open",
+        "title": "Open Agent Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "paseo.agent.resume",
+        "title": "Resume Agent Session",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "paseo.terminal.create",
+        "title": "Paseo: New Terminal",
+        "icon": "$(add)"
+      },
+      {
+        "command": "paseo.terminal.open",
+        "title": "Open Terminal"
+      },
+      {
+        "command": "paseo.terminal.kill",
+        "title": "Kill Terminal",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "paseo.agent.archive",
+          "when": "false"
+        },
+        {
+          "command": "paseo.agent.open",
+          "when": "false"
+        },
+        {
+          "command": "paseo.agent.resume",
+          "when": "false"
+        },
+        {
+          "command": "paseo.terminal.open",
+          "when": "false"
+        },
+        {
+          "command": "paseo.terminal.kill",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "paseo.terminal.create",
+          "when": "view == paseo.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "paseo.sessions.refresh",
+          "when": "view == paseo.sessions",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "paseo.agent.open",
+          "when": "view == paseo.sessions && viewItem =~ /^paseo\\.agent/",
+          "group": "inline@1"
+        },
+        {
+          "command": "paseo.agent.resume",
+          "when": "view == paseo.sessions && viewItem == paseo.agent.closed.resumable",
+          "group": "session@1"
+        },
+        {
+          "command": "paseo.terminal.open",
+          "when": "view == paseo.sessions && viewItem == paseo.terminal",
+          "group": "inline@1"
+        },
+        {
+          "command": "paseo.agent.archive",
+          "when": "view == paseo.sessions && viewItem =~ /^paseo\\.agent/",
+          "group": "danger@1"
+        },
+        {
+          "command": "paseo.terminal.kill",
+          "when": "view == paseo.sessions && viewItem == paseo.terminal",
+          "group": "danger@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Paseo",
+      "properties": {
+        "paseo.endpoint": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional direct Paseo daemon endpoint. Example: `127.0.0.1:6767`. Relay hosts are added with **Paseo: Add Relay Host from Pairing Link**. The extension also checks `PASEO_VSCODE_ENDPOINT` and `~/.paseo/config.json` for direct connections."
+        }
+      }
+    }
+  },
+  "activationEvents": [
+    "onCommand:paseo.agent.open",
+    "onCommand:paseo.agent.resume",
+    "onCommand:paseo.daemon.clearPassword",
+    "onCommand:paseo.daemon.reconnect",
+    "onCommand:paseo.daemon.setPassword",
+    "onCommand:paseo.host.addRelay",
+    "onCommand:paseo.workspace.open",
+    "onFileSystem:paseo-fs",
+    "onTerminalProfile:paseo.terminalProfile",
+    "onView:paseo.sessions"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": true
+    }
+  }
+}
