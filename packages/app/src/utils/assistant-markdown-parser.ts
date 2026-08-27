@@ -1,11 +1,14 @@
 import MarkdownIt from "markdown-it";
+import { configureMarkdownMath } from "@/components/markdown/configure-markdown-math";
 
 export function createAssistantMarkdownParser(): MarkdownIt {
-  const parser = new MarkdownIt({
-    html: false,
-    linkify: true,
-    typographer: true,
-  });
+  const parser = configureMarkdownMath(
+    new MarkdownIt({
+      html: false,
+      linkify: true,
+      typographer: true,
+    }),
+  );
   const defaultValidateLink = parser.validateLink.bind(parser);
 
   parser.validateLink = (url: string) =>

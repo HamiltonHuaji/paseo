@@ -42,6 +42,8 @@ import { resolveInlineImageSize, type InlineImageDimensions } from "./inline-ima
 import { groupMarkdownParts, type MarkdownPartGroup } from "./part-groups";
 import { colorMarkdownLinkChildren } from "./link-children";
 import { MarkdownLinkText } from "./link-text";
+import { configureMarkdownMath } from "./configure-markdown-math";
+import { createMarkdownMathRules } from "./math-rules";
 
 export type MarkdownStyles = Record<string, TextStyle & ViewStyle & { [key: string]: unknown }>;
 
@@ -66,7 +68,9 @@ function compactMarkdownStyleMapping(theme: Theme): Partial<MarkdownWithStableRe
   return { style: createCompactMarkdownStyles(theme) };
 }
 
-const defaultMarkdownParser = MarkdownIt({ typographer: true, linkify: true });
+const defaultMarkdownParser = configureMarkdownMath(
+  MarkdownIt({ typographer: true, linkify: true }),
+);
 const EMPTY_TEXT_STYLE: TextStyle = {};
 const MARKDOWN_LIST_ITEM_CONTENT_FLEX: ViewStyle = { flex: 1, flexShrink: 1, minWidth: 0 };
 export interface MarkdownRendererProps {
@@ -513,6 +517,7 @@ function getMarkdownLinkHref(node: ASTNode): string {
 
 export function createSharedMarkdownRules(): RenderRules {
   return {
+    ...createMarkdownMathRules(),
     text: (
       node: ASTNode,
       _children: ReactNode[],
@@ -712,6 +717,10 @@ export function createSharedMarkdownRules(): RenderRules {
         key={node.key}
         paragraphStyle={styles.paragraph}
         containsImage={markdownNodeContainsType(node, "image")}
+        containsMath={
+          markdownNodeContainsType(node, "math_inline") ||
+          markdownNodeContainsType(node, "math_block")
+        }
       >
         {children}
       </MarkdownParagraphView>

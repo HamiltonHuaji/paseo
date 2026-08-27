@@ -179,6 +179,55 @@ describe("assistant selection copy ranges", () => {
     expect(content?.html).not.toContain("<code>");
   });
 
+  it("restores TeX source when prose and an inline formula are selected together", () => {
+    const host = document.createElement("div");
+    host.innerHTML = [
+      '<div data-testid="assistant-message">',
+      '<div data-paseo-markdown-tag="p">',
+      "<span>Before </span>",
+      '<span data-paseo-markdown-math-source="$x^2$"><span>x</span><span>2</span></span>',
+      "<span> after</span>",
+      "</div>",
+      "</div>",
+    ].join("");
+    document.body.append(host);
+    const message = fixtureElement(host, '[data-testid="assistant-message"]');
+
+    expect(copiedMarkdown(selectNodeContents(message))).toBe("Before $x^2$ after");
+  });
+
+  it("expands a partial formula selection to the complete TeX source", () => {
+    const host = document.createElement("div");
+    host.innerHTML = [
+      '<div data-testid="assistant-message">',
+      '<span data-paseo-markdown-math-source="$x^2$"><span>x squared</span></span>',
+      "</div>",
+    ].join("");
+    document.body.append(host);
+    const formulaText = tokenText(host, "x squared");
+    const range = document.createRange();
+    range.setStart(formulaText, 2);
+    range.setEnd(formulaText, 5);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    expect(createAssistantSelectionClipboardContent(selection)?.plainText).toBe("$x^2$");
+  });
+
+  it("restores display formulas with display delimiters", () => {
+    const host = document.createElement("div");
+    host.innerHTML = [
+      '<div data-testid="assistant-message">',
+      '<div data-paseo-markdown-math-source="$$\\int_0^1 x\\,dx$$"><span>integral</span></div>',
+      "</div>",
+    ].join("");
+    document.body.append(host);
+    const formula = fixtureElement(host, "[data-paseo-markdown-math-source]");
+
+    expect(copiedMarkdown(selectNodeContents(formula))).toBe(String.raw`$$\int_0^1 x\,dx$$`);
+  });
+
   it("keeps a complete inline node but drops formatting from a partial node at the other edge", () => {
     const message = mountFixture();
     const strong = fixtureElement(message, '[data-paseo-markdown-tag="strong"]');

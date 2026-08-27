@@ -63,6 +63,7 @@ import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from "reac
 import { CODE_SURFACE_DATASET } from "@/styles/code-surface";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { MarkdownRenderer, type MarkdownStyles } from "@/components/markdown/renderer";
+import { createMarkdownMathRules } from "@/components/markdown/math-rules";
 import type { TaskActivity, TodoEntry, UserMessageImageAttachment } from "@/types/stream";
 import type { AgentAttachment } from "@getpaseo/protocol/messages";
 import type { ToolCallDetail } from "@getpaseo/protocol/agent-types";
@@ -1470,6 +1471,7 @@ export const AssistantMessage = memo(function AssistantMessage({
 
   const markdownRules = useMemo<RenderRules>(() => {
     return {
+      ...createMarkdownMathRules(),
       heading1: (
         node: ASTNode,
         children: ReactNode[],
@@ -1853,6 +1855,10 @@ export const AssistantMessage = memo(function AssistantMessage({
           key={node.key}
           paragraphStyle={styles.paragraph}
           containsImage={markdownNodeContainsType(node, "image")}
+          containsMath={
+            markdownNodeContainsType(node, "math_inline") ||
+            markdownNodeContainsType(node, "math_block")
+          }
         >
           {children}
         </MarkdownParagraphView>
