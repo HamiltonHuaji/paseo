@@ -1981,11 +1981,11 @@ export const es: TranslationResources = {
         label: "Envío predeterminado",
         descriptions: {
           interrupt:
-            "Cuando el agente se está ejecutando, Enter interrumpe. Command/Ctrl+Enter pone en cola.",
+            "Enter inserta una línea nueva. La acción principal y Command/Ctrl+Enter interrumpen el turno activo; Tab pone en cola.",
           steer:
-            "Cuando el agente se está ejecutando, Enter dirige el turno activo. Command/Ctrl+Enter pone en cola.",
+            "Enter inserta una línea nueva. La acción principal y Command/Ctrl+Enter dirigen el turno activo; Tab pone en cola.",
           queue:
-            "Cuando el agente se está ejecutando, Enter pone en cola. Command/Ctrl+Enter envía.",
+            "Enter inserta una línea nueva. La acción principal y Tab ponen en cola; Command/Ctrl+Enter interrumpe el turno activo.",
         },
         options: {
           interrupt: "Interrumpir",

@@ -1943,11 +1943,11 @@ export const ko: TranslationResources = {
         label: "기본 전송",
         descriptions: {
           interrupt:
-            "에이전트가 실행 중일 때 Enter는 중단합니다. Command/Ctrl+Enter는 대기열에 추가합니다.",
+            "Enter는 줄을 바꿉니다. 기본 동작과 Command/Ctrl+Enter는 현재 턴을 중단하고 Tab은 대기열에 추가합니다.",
           steer:
-            "에이전트가 실행 중일 때 Enter는 현재 턴에 지시합니다. Command/Ctrl+Enter는 대기열에 추가합니다.",
+            "Enter는 줄을 바꿉니다. 기본 동작과 Command/Ctrl+Enter는 현재 턴을 조정하고 Tab은 대기열에 추가합니다.",
           queue:
-            "에이전트가 실행 중일 때 Enter는 대기열에 추가합니다. Command/Ctrl+Enter는 제출합니다.",
+            "Enter는 줄을 바꿉니다. 기본 동작과 Tab은 대기열에 추가하고 Command/Ctrl+Enter는 현재 턴을 중단합니다.",
         },
         options: {
           interrupt: "중단",

@@ -2036,10 +2036,12 @@ export const en = {
       defaultSend: {
         label: "Default send",
         descriptions: {
-          interrupt: "When the agent is running, Enter interrupts. Command/Ctrl+Enter queues.",
+          interrupt:
+            "Enter inserts a newline. The primary action and Command/Ctrl+Enter interrupt the active turn; Tab queues.",
           steer:
-            "When the agent is running, Enter steers the active turn. Command/Ctrl+Enter queues.",
-          queue: "When the agent is running, Enter queues. Command/Ctrl+Enter submits.",
+            "Enter inserts a newline. The primary action and Command/Ctrl+Enter steer the active turn; Tab queues.",
+          queue:
+            "Enter inserts a newline. The primary action and Tab queue; Command/Ctrl+Enter interrupts the active turn.",
         },
         options: {
           interrupt: "Interrupt",

@@ -1909,9 +1909,9 @@ export const zhCN: TranslationResources = {
       defaultSend: {
         label: "默认发送",
         descriptions: {
-          interrupt: "Agent 运行时，Enter 会中断。Command/Ctrl+Enter 会排队。",
-          steer: "Agent 运行时，Enter 会引导当前回合。Command/Ctrl+Enter 会排队。",
-          queue: "Agent 运行时，Enter 会排队。Command/Ctrl+Enter 会提交。",
+          interrupt: "Enter 换行。主操作与 Command/Ctrl+Enter 中断当前回合；Tab 始终排队。",
+          steer: "Enter 换行。主操作与 Command/Ctrl+Enter 引导当前回合；Tab 始终排队。",
+          queue: "Enter 换行。主操作与 Tab 排队；Command/Ctrl+Enter 中断当前回合。",
         },
         options: {
           interrupt: "中断",

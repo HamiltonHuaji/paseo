@@ -1932,10 +1932,11 @@ export const ar: TranslationResources = {
         label: "إرسال افتراضي",
         descriptions: {
           interrupt:
-            "عند تشغيل الوكيل، يوقف Enter التشغيل. Command/Ctrl+Enter يضيف إلى قائمة الانتظار.",
+            "يدرج Enter سطرًا جديدًا. الإجراء الرئيسي وCommand/Ctrl+Enter يقطعان الجولة النشطة؛ ويضيف Tab إلى قائمة الانتظار.",
           steer:
-            "عند تشغيل الوكيل، يوجّه Enter الجولة النشطة. يضيف Command/Ctrl+Enter إلى قائمة الانتظار.",
-          queue: "عند تشغيل الوكيل، يضيف Enter إلى قائمة الانتظار. Command/Ctrl+Enter يرسل.",
+            "يدرج Enter سطرًا جديدًا. الإجراء الرئيسي وCommand/Ctrl+Enter يوجّهان الجولة النشطة؛ ويضيف Tab إلى قائمة الانتظار.",
+          queue:
+            "يدرج Enter سطرًا جديدًا. الإجراء الرئيسي وTab يضيفان إلى قائمة الانتظار؛ ويقطع Command/Ctrl+Enter الجولة النشطة.",
         },
         options: {
           interrupt: "مقاطعة",

@@ -1966,10 +1966,11 @@ export const ptBR: TranslationResources = {
         label: "Envio padrão",
         descriptions: {
           interrupt:
-            "Quando o agente está em execução, Enter interrompe. Command/Ctrl+Enter enfileira.",
+            "Enter insere uma nova linha. A ação principal e Command/Ctrl+Enter interrompem o turno ativo; Tab enfileira.",
           steer:
-            "Quando o agente está em execução, Enter orienta o turno ativo. Command/Ctrl+Enter enfileira.",
-          queue: "Quando o agente está em execução, Enter enfileira. Command/Ctrl+Enter envia.",
+            "Enter insere uma nova linha. A ação principal e Command/Ctrl+Enter orientam o turno ativo; Tab enfileira.",
+          queue:
+            "Enter insere uma nova linha. A ação principal e Tab enfileiram; Command/Ctrl+Enter interrompe o turno ativo.",
         },
         options: {
           interrupt: "Interromper",

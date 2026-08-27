@@ -1985,11 +1985,11 @@ export const fr: TranslationResources = {
         label: "Envoi par défaut",
         descriptions: {
           interrupt:
-            "Lorsque l'agent est en cours d'exécution, Entrée interrompt. Commande/Ctrl+Entrée met en file d'attente.",
+            "Entrée insère une nouvelle ligne. L'action principale et Commande/Ctrl+Entrée interrompent le tour actif ; Tab met en file d'attente.",
           steer:
-            "Lorsque l’agent est en cours d’exécution, Entrée oriente le tour actif. Commande/Ctrl+Entrée met en file d’attente.",
+            "Entrée insère une nouvelle ligne. L'action principale et Commande/Ctrl+Entrée orientent le tour actif ; Tab met en file d'attente.",
           queue:
-            "Lorsque l'agent est en cours d'exécution, Entrée met en file d'attente. Commande/Ctrl+Entrée envoie.",
+            "Entrée insère une nouvelle ligne. L'action principale et Tab mettent en file d'attente ; Commande/Ctrl+Entrée interrompt le tour actif.",
         },
         options: {
           interrupt: "Interrompre",

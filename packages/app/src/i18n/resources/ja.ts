@@ -1950,10 +1950,12 @@ export const ja: TranslationResources = {
       defaultSend: {
         label: "デフォルトの送信",
         descriptions: {
-          interrupt: "エージェント実行中、Enterで中断します。Command/Ctrl+Enterでキューに追加。",
+          interrupt:
+            "Enterは改行します。メイン操作とCommand/Ctrl+Enterは現在のターンを中断し、Tabは常にキューに追加します。",
           steer:
-            "エージェント実行中、Enterで現在のターンに指示を送ります。Command/Ctrl+Enterでキューに追加。",
-          queue: "エージェント実行中、Enterでキューに追加します。Command/Ctrl+Enterで送信。",
+            "Enterは改行します。メイン操作とCommand/Ctrl+Enterは現在のターンに指示を送り、Tabは常にキューに追加します。",
+          queue:
+            "Enterは改行します。メイン操作とTabはキューに追加し、Command/Ctrl+Enterは現在のターンを中断します。",
         },
         options: {
           interrupt: "中断",
