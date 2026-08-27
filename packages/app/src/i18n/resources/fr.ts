@@ -582,6 +582,8 @@ export const fr: TranslationResources = {
         copyTerminalId: "Copier l'identifiant du terminal",
         copyFilePath: "Copy file path",
         rename: "Rebaptiser",
+        moveToStart: "Déplacer tout en haut",
+        moveToEnd: "Déplacer tout en bas",
         closeAbove: "Fermer les onglets ci-dessus",
         closeBelow: "Fermer les onglets ci-dessous",
         closeLeft: "Près de la gauche",

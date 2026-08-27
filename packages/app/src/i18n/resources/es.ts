@@ -582,6 +582,8 @@ export const es: TranslationResources = {
         copyTerminalId: "Copiar ID del terminal",
         copyFilePath: "Copy file path",
         rename: "Rebautizar",
+        moveToStart: "Mover arriba del todo",
+        moveToEnd: "Mover abajo del todo",
         closeAbove: "Cerrar pestañas arriba",
         closeBelow: "Cerrar pestañas a continuación",
         closeLeft: "Cerca de la izquierda",

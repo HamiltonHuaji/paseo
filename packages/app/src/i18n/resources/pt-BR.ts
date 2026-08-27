@@ -582,6 +582,8 @@ export const ptBR: TranslationResources = {
         copyTerminalId: "Copiar ID do terminal",
         copyFilePath: "Copiar caminho do arquivo",
         rename: "Renomear",
+        moveToStart: "Mover para o topo",
+        moveToEnd: "Mover para o final",
         closeAbove: "Fechar abas acima",
         closeBelow: "Fechar abas abaixo",
         closeLeft: "Fechar à esquerda",

@@ -11,6 +11,8 @@ export interface WorkspaceTabMenuLabels {
   copyTerminalId: string;
   copyFilePath: string;
   rename: string;
+  moveToStart: string;
+  moveToEnd: string;
   closeAbove: string;
   closeBelow: string;
   closeLeft: string;
@@ -27,6 +29,8 @@ export const DEFAULT_WORKSPACE_TAB_MENU_LABELS: WorkspaceTabMenuLabels = {
   copyTerminalId: i18n.t("workspace.tabs.menu.copyTerminalId"),
   copyFilePath: i18n.t("workspace.tabs.menu.copyFilePath"),
   rename: i18n.t("workspace.tabs.menu.rename"),
+  moveToStart: i18n.t("workspace.tabs.menu.moveToStart"),
+  moveToEnd: i18n.t("workspace.tabs.menu.moveToEnd"),
   closeAbove: i18n.t("workspace.tabs.menu.closeAbove"),
   closeBelow: i18n.t("workspace.tabs.menu.closeBelow"),
   closeLeft: i18n.t("workspace.tabs.menu.closeLeft"),
@@ -47,6 +51,8 @@ export type WorkspaceTabMenuEntry =
         | "rotate-cw"
         | "arrow-left-to-line"
         | "arrow-right-to-line"
+        | "arrow-up-to-line"
+        | "arrow-down-to-line"
         | "copy-x"
         | "pencil"
         | "x";
@@ -74,6 +80,8 @@ interface BuildWorkspaceTabMenuEntriesInput {
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onMoveTabToStart?: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd?: (tabId: string) => Promise<void> | void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsBefore: (tabId: string) => Promise<void> | void;
   onCloseTabsAfter: (tabId: string) => Promise<void> | void;
@@ -91,6 +99,8 @@ interface BuildWorkspaceDesktopTabActionsInput {
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onMoveTabToStart: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd: (tabId: string) => Promise<void> | void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
@@ -102,6 +112,30 @@ export interface WorkspaceDesktopTabActions {
   contextMenuTestId: string;
   menuEntries: WorkspaceTabMenuEntry[];
   closeButtonTestId: string;
+}
+
+export function moveWorkspaceTabToEdge(
+  tabs: WorkspaceTabDescriptor[],
+  tabId: string,
+  edge: "start" | "end",
+): WorkspaceTabDescriptor[] {
+  const currentIndex = tabs.findIndex((tab) => tab.tabId === tabId);
+  const destinationIndex = edge === "start" ? 0 : tabs.length - 1;
+  if (currentIndex < 0 || currentIndex === destinationIndex) {
+    return tabs;
+  }
+
+  const nextTabs = [...tabs];
+  const [tab] = nextTabs.splice(currentIndex, 1);
+  if (!tab) {
+    return tabs;
+  }
+  if (edge === "start") {
+    nextTabs.unshift(tab);
+  } else {
+    nextTabs.push(tab);
+  }
+  return nextTabs;
 }
 
 function buildCloseBeforeLabel(
@@ -178,6 +212,8 @@ export function buildWorkspaceTabMenuEntries(
     onCopyFilePath,
     onReloadAgent,
     onRenameTab,
+    onMoveTabToStart,
+    onMoveTabToEnd,
     onCloseTab,
     onCloseTabsBefore,
     onCloseTabsAfter,
@@ -254,10 +290,57 @@ export function buildWorkspaceTabMenuEntries(
         onRenameTab(tab);
       },
     });
-    entries.push({
-      kind: "separator",
-      key: "rename-separator",
-    });
+    if (surface === "mobile") {
+      entries.push({
+        kind: "separator",
+        key: "rename-separator",
+      });
+    }
+  }
+
+  if (surface === "desktop") {
+    if (entries.length > 0) {
+      entries.push({ kind: "separator", key: "actions-separator" });
+    }
+    if (onMoveTabToStart && onMoveTabToEnd) {
+      entries.push({
+        kind: "item",
+        key: "move-to-start",
+        label: labels.moveToStart,
+        icon: "arrow-up-to-line",
+        disabled: isFirstTab,
+        testID: `${menuTestIDBase}-move-to-start`,
+        onSelect: () => {
+          void onMoveTabToStart(tab.tabId);
+        },
+      });
+      entries.push({
+        kind: "item",
+        key: "move-to-end",
+        label: labels.moveToEnd,
+        icon: "arrow-down-to-line",
+        disabled: isLastTab,
+        testID: `${menuTestIDBase}-move-to-end`,
+        onSelect: () => {
+          void onMoveTabToEnd(tab.tabId);
+        },
+      });
+      entries.push({ kind: "separator", key: "ordering-separator" });
+    }
+    if (tab.target.kind === "agent") {
+      const { agentId } = tab.target;
+      entries.push({
+        kind: "item",
+        key: "reload-agent",
+        label: labels.reloadAgent,
+        icon: "rotate-cw",
+        tooltip: labels.reloadAgentTooltip,
+        testID: `${menuTestIDBase}-reload-agent`,
+        onSelect: () => {
+          void onReloadAgent(agentId);
+        },
+      });
+    }
   }
 
   entries.push({
@@ -293,7 +376,7 @@ export function buildWorkspaceTabMenuEntries(
       void onCloseOtherTabs(tab.tabId);
     },
   });
-  if (tab.target.kind === "agent") {
+  if (surface === "mobile" && tab.target.kind === "agent") {
     const { agentId } = tab.target;
     entries.push({
       kind: "item",
@@ -339,6 +422,8 @@ export function buildWorkspaceDesktopTabActions(
       onCopyFilePath: input.onCopyFilePath,
       onReloadAgent: input.onReloadAgent,
       onRenameTab: input.onRenameTab,
+      onMoveTabToStart: input.onMoveTabToStart,
+      onMoveTabToEnd: input.onMoveTabToEnd,
       onCloseTab: input.onCloseTab,
       onCloseTabsBefore: input.onCloseTabsToLeft,
       onCloseTabsAfter: input.onCloseTabsToRight,

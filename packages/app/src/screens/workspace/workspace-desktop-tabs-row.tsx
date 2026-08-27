@@ -14,6 +14,8 @@ import {
   CopyX,
   ArrowLeftToLine,
   ArrowRightToLine,
+  ArrowUpToLine,
+  ArrowDownToLine,
   Copy,
   Pencil,
   RotateCw,
@@ -44,6 +46,7 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
+import { useWorkspaceTabHorizontalScroll } from "@/hooks/use-workspace-tab-horizontal-scroll";
 import { WORKSPACE_SECONDARY_HEADER_HEIGHT, useIsCompactFormFactor } from "@/constants/layout";
 import { buttonControlHeight } from "@/components/ui/control-geometry";
 import type { ShortcutKey } from "@/utils/format-shortcut";
@@ -58,6 +61,7 @@ import {
 import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
 import {
   buildWorkspaceDesktopTabActions,
+  moveWorkspaceTabToEdge,
   type WorkspaceDesktopTabActions,
   type WorkspaceTabMenuEntry,
   type WorkspaceTabMenuLabels,
@@ -116,6 +120,8 @@ const ThemedCopy = withUnistyles(Copy);
 const ThemedRotateCw = withUnistyles(RotateCw);
 const ThemedArrowLeftToLine = withUnistyles(ArrowLeftToLine);
 const ThemedArrowRightToLine = withUnistyles(ArrowRightToLine);
+const ThemedArrowUpToLine = withUnistyles(ArrowUpToLine);
+const ThemedArrowDownToLine = withUnistyles(ArrowDownToLine);
 const ThemedCopyX = withUnistyles(CopyX);
 const ThemedPencil = withUnistyles(Pencil);
 const ThemedPlus = withUnistyles(Plus);
@@ -356,6 +362,10 @@ function TabContextMenuItem({
         return <ThemedArrowLeftToLine size={16} uniProps={mutedColorMapping} />;
       case "arrow-right-to-line":
         return <ThemedArrowRightToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-up-to-line":
+        return <ThemedArrowUpToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-down-to-line":
+        return <ThemedArrowDownToLine size={16} uniProps={mutedColorMapping} />;
       case "copy-x":
         return <ThemedCopyX size={16} uniProps={mutedColorMapping} />;
       case "pencil":
@@ -968,6 +978,7 @@ function ResolvedWorkspaceDesktopTabsRow({
   const newTabKeys = useShortcutKeys("workspace-tab-new");
   const [tabsContainerWidth, setTabsContainerWidth] = useState<number>(0);
   const [exitFocusModeWidth, setExitFocusModeWidth] = useState<number>(0);
+  const tabsScrollRef = useRef<React.ElementRef<typeof Animated.ScrollView>>(null);
   const tabScrollBoundary = useHorizontalScrollBoundary();
   const [labelMeasurements, setLabelMeasurements] = useState(
     () => new Map<string, WorkspaceTabLabelMeasurement>(),
@@ -1024,6 +1035,8 @@ function ResolvedWorkspaceDesktopTabsRow({
       copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
+      moveToStart: t("workspace.tabs.menu.moveToStart"),
+      moveToEnd: t("workspace.tabs.menu.moveToEnd"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
       closeBelow: t("workspace.tabs.menu.closeBelow"),
       closeLeft: t("workspace.tabs.menu.closeLeft"),
@@ -1128,6 +1141,49 @@ function ResolvedWorkspaceDesktopTabsRow({
     metrics: layoutMetrics,
   });
 
+  const activeTabRevealTarget = useMemo(() => {
+    const activeIndex = displayedTabs.findIndex((item) => item.isActive);
+    const activeItem = layout.items[activeIndex];
+    const activeTab = displayedTabs[activeIndex];
+    if (activeIndex < 0 || !activeItem || !activeTab) {
+      return null;
+    }
+    let start = TAB_ROW_PADDING_HORIZONTAL;
+    for (let index = 0; index < activeIndex; index += 1) {
+      start += (layout.items[index]?.width ?? 0) + TAB_CHIP_GAP;
+    }
+    return {
+      key: activeTab.tab.tabId,
+      start,
+      end: start + activeItem.width + TAB_CHIP_GAP,
+    };
+  }, [displayedTabs, layout.items]);
+  useWorkspaceTabHorizontalScroll(
+    tabsScrollRef,
+    layout.requiresHorizontalScrollFallback,
+    activeTabRevealTarget,
+  );
+
+  const orderedTabs = useMemo(() => tabs.map((item) => item.tab), [tabs]);
+  const handleMoveTabToStart = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "start");
+      if (nextTabs !== orderedTabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, orderedTabs],
+  );
+  const handleMoveTabToEnd = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "end");
+      if (nextTabs !== orderedTabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, orderedTabs],
+  );
+
   const handleDragEnd = useCallback(
     (nextTabs: ResolvedWorkspaceDesktopTabRowItem[]) => {
       onReorderTabs(nextTabs.map((tab) => tab.tab));
@@ -1202,6 +1258,8 @@ function ResolvedWorkspaceDesktopTabsRow({
           onCopyFilePath={onCopyFilePath}
           onReloadAgent={onReloadAgent}
           onRenameTab={onRenameTab}
+          onMoveTabToStart={handleMoveTabToStart}
+          onMoveTabToEnd={handleMoveTabToEnd}
           onCloseTabsToLeft={onCloseTabsToLeft}
           onCloseTabsToRight={onCloseTabsToRight}
           onCloseOtherTabs={onCloseOtherTabs}
@@ -1234,6 +1292,8 @@ function ResolvedWorkspaceDesktopTabsRow({
       onNavigateTab,
       onReloadAgent,
       onRenameTab,
+      handleMoveTabToStart,
+      handleMoveTabToEnd,
       setHoveredCloseTabKey,
       tabMenuLabels,
       tabDropPreviewIndex,
@@ -1279,6 +1339,7 @@ function ResolvedWorkspaceDesktopTabsRow({
       />
       <View style={styles.tabsScrollContainer}>
         <Animated.ScrollView
+          ref={tabsScrollRef}
           horizontal
           scrollEnabled={layout.requiresHorizontalScrollFallback}
           testID="workspace-tabs-scroll"
@@ -1347,6 +1408,8 @@ function ResolvedDesktopTabChip({
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
+  onMoveTabToStart,
+  onMoveTabToEnd,
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
@@ -1372,6 +1435,8 @@ function ResolvedDesktopTabChip({
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onMoveTabToStart: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd: (tabId: string) => Promise<void> | void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
@@ -1400,6 +1465,8 @@ function ResolvedDesktopTabChip({
         onCopyFilePath,
         onReloadAgent,
         onRenameTab,
+        onMoveTabToStart,
+        onMoveTabToEnd,
         onCloseTab,
         onCloseTabsToLeft,
         onCloseTabsToRight,
@@ -1420,6 +1487,8 @@ function ResolvedDesktopTabChip({
       labels,
       onReloadAgent,
       onRenameTab,
+      onMoveTabToStart,
+      onMoveTabToEnd,
       tabCount,
     ],
   );

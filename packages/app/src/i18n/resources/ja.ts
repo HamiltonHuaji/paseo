@@ -582,6 +582,8 @@ export const ja: TranslationResources = {
         copyTerminalId: "ターミナルIDをコピー",
         copyFilePath: "ファイルパスをコピー",
         rename: "名前を変更",
+        moveToStart: "一番上へ移動",
+        moveToEnd: "一番下へ移動",
         closeAbove: "上のタブを閉じる",
         closeBelow: "下のタブを閉じる",
         closeLeft: "左のタブを閉じる",

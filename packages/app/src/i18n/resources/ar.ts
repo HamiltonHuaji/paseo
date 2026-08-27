@@ -578,6 +578,8 @@ export const ar: TranslationResources = {
         copyTerminalId: "نسخ معرف المحطة",
         copyFilePath: "Copy file path",
         rename: "إعادة تسمية",
+        moveToStart: "نقل إلى الأعلى",
+        moveToEnd: "نقل إلى الأسفل",
         closeAbove: "إغلاق علامات التبويب أعلاه",
         closeBelow: "إغلاق علامات التبويب أدناه",
         closeLeft: "بالقرب من اليسار",
