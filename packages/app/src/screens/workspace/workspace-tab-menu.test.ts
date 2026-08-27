@@ -88,6 +88,53 @@ describe("buildWorkspaceTabMenuEntries", () => {
   });
 
   it("uses stacked ordering labels for mobile menus", () => {
+    const onMoveTabToStart = vi.fn();
+    const onMoveTabToEnd = vi.fn();
+    const entries = buildWorkspaceTabMenuEntries({
+      surface: "mobile",
+      tab: createAgentTab(),
+      index: 1,
+      tabCount: 3,
+      menuTestIDBase: "workspace-tab-menu-agent_123",
+      onCopyResumeCommand: vi.fn(),
+      onCopyAgentId: vi.fn(),
+      onCopyTerminalId: vi.fn(),
+      onCopyFilePath: vi.fn(),
+      onReloadAgent: vi.fn(),
+      onRenameTab: vi.fn(),
+      onMoveTabToStart,
+      onMoveTabToEnd,
+      onCloseTab: vi.fn(),
+      onCloseTabsBefore: vi.fn(),
+      onCloseTabsAfter: vi.fn(),
+      onCloseOtherTabs: vi.fn(),
+    });
+
+    expect(entries.filter((entry) => entry.kind === "item").map((entry) => entry.label)).toEqual([
+      "Copy resume command",
+      "Copy agent id",
+      "Rename",
+      "Move to top",
+      "Move to bottom",
+      "Reload agent",
+      "Close tabs above",
+      "Close tabs below",
+      "Close other tabs",
+      "Close",
+    ]);
+
+    const moveToStart = entries.find((entry) => entry.key === "move-to-start");
+    const moveToEnd = entries.find((entry) => entry.key === "move-to-end");
+    if (moveToStart?.kind !== "item" || moveToEnd?.kind !== "item") {
+      throw new Error("Mobile move entries missing");
+    }
+    moveToStart.onSelect();
+    moveToEnd.onSelect();
+    expect(onMoveTabToStart).toHaveBeenCalledWith("agent_123");
+    expect(onMoveTabToEnd).toHaveBeenCalledWith("agent_123");
+  });
+
+  it("does not render partial mobile ordering actions as no-ops", () => {
     const entries = buildWorkspaceTabMenuEntries({
       surface: "mobile",
       tab: createAgentTab(),
@@ -101,23 +148,15 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
       onMoveTabToStart: vi.fn(),
-      onMoveTabToEnd: vi.fn(),
       onCloseTab: vi.fn(),
       onCloseTabsBefore: vi.fn(),
       onCloseTabsAfter: vi.fn(),
       onCloseOtherTabs: vi.fn(),
     });
 
-    expect(entries.filter((entry) => entry.kind === "item").map((entry) => entry.label)).toEqual([
-      "Copy resume command",
-      "Copy agent id",
-      "Rename",
-      "Close tabs above",
-      "Close tabs below",
-      "Close other tabs",
-      "Reload agent",
-      "Close",
-    ]);
+    expect(entries.map((entry) => entry.key)).not.toContain("move-to-start");
+    expect(entries.map((entry) => entry.key)).not.toContain("move-to-end");
+    expect(entries.map((entry) => entry.key)).not.toContain("ordering-separator");
   });
 
   it("uses above and below semantics for desktop rail close actions", () => {
@@ -243,7 +282,9 @@ describe("buildWorkspaceTabMenuEntries", () => {
       false,
     );
     expect(entries.some((entry) => entry.kind === "item" && entry.label === "Rename")).toBe(false);
-    expect(entries.some((entry) => entry.kind === "separator")).toBe(false);
+    expect(entries.filter((entry) => entry.kind === "separator").map((entry) => entry.key)).toEqual(
+      ["ordering-separator"],
+    );
   });
 
   it("adds reload tooltip copy for agent tabs", () => {

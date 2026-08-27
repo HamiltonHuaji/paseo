@@ -312,49 +312,56 @@ export function buildWorkspaceTabMenuEntries(
     }
   }
 
+  const hasMoveActions = Boolean(onMoveTabToStart && onMoveTabToEnd);
   if (surface !== "mobile") {
     if (entries.length > 0) {
       entries.push({ kind: "separator", key: "actions-separator" });
     }
-    if (onMoveTabToStart && onMoveTabToEnd) {
-      entries.push({
-        kind: "item",
-        key: "move-to-start",
-        label: labels.moveToStart,
-        icon: "arrow-up-to-line",
-        disabled: isFirstTab,
-        testID: `${menuTestIDBase}-move-to-start`,
-        onSelect: () => {
-          void onMoveTabToStart(tab.tabId);
-        },
-      });
-      entries.push({
-        kind: "item",
-        key: "move-to-end",
-        label: labels.moveToEnd,
-        icon: "arrow-down-to-line",
-        disabled: isLastTab,
-        testID: `${menuTestIDBase}-move-to-end`,
-        onSelect: () => {
-          void onMoveTabToEnd(tab.tabId);
-        },
-      });
-      entries.push({ kind: "separator", key: "ordering-separator" });
-    }
-    if (tab.target.kind === "agent") {
-      const { agentId } = tab.target;
-      entries.push({
-        kind: "item",
-        key: "reload-agent",
-        label: labels.reloadAgent,
-        icon: "rotate-cw",
-        tooltip: labels.reloadAgentTooltip,
-        testID: `${menuTestIDBase}-reload-agent`,
-        onSelect: () => {
-          void onReloadAgent(agentId);
-        },
-      });
-    }
+  } else if (
+    hasMoveActions &&
+    entries.length > 0 &&
+    entries[entries.length - 1]?.kind !== "separator"
+  ) {
+    entries.push({ kind: "separator", key: "actions-separator" });
+  }
+  if (onMoveTabToStart && onMoveTabToEnd) {
+    entries.push({
+      kind: "item",
+      key: "move-to-start",
+      label: labels.moveToStart,
+      icon: "arrow-up-to-line",
+      disabled: isFirstTab,
+      testID: `${menuTestIDBase}-move-to-start`,
+      onSelect: () => {
+        void onMoveTabToStart(tab.tabId);
+      },
+    });
+    entries.push({
+      kind: "item",
+      key: "move-to-end",
+      label: labels.moveToEnd,
+      icon: "arrow-down-to-line",
+      disabled: isLastTab,
+      testID: `${menuTestIDBase}-move-to-end`,
+      onSelect: () => {
+        void onMoveTabToEnd(tab.tabId);
+      },
+    });
+    entries.push({ kind: "separator", key: "ordering-separator" });
+  }
+  if (tab.target.kind === "agent") {
+    const { agentId } = tab.target;
+    entries.push({
+      kind: "item",
+      key: "reload-agent",
+      label: labels.reloadAgent,
+      icon: "rotate-cw",
+      tooltip: labels.reloadAgentTooltip,
+      testID: `${menuTestIDBase}-reload-agent`,
+      onSelect: () => {
+        void onReloadAgent(agentId);
+      },
+    });
   }
 
   entries.push({
@@ -390,20 +397,6 @@ export function buildWorkspaceTabMenuEntries(
       void onCloseOtherTabs(tab.tabId);
     },
   });
-  if (surface === "mobile" && tab.target.kind === "agent") {
-    const { agentId } = tab.target;
-    entries.push({
-      kind: "item",
-      key: "reload-agent",
-      label: labels.reloadAgent,
-      icon: "rotate-cw",
-      tooltip: labels.reloadAgentTooltip,
-      testID: `${menuTestIDBase}-reload-agent`,
-      onSelect: () => {
-        void onReloadAgent(agentId);
-      },
-    });
-  }
   entries.push({
     kind: "item",
     key: "close",

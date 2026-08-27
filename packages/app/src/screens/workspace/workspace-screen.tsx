@@ -130,6 +130,7 @@ import {
 } from "@/screens/workspace/workspace-desktop-tabs-row";
 import {
   buildWorkspaceTabMenuEntries,
+  moveWorkspaceTabToEdge,
   type WorkspaceTabMenuLabels,
 } from "@/screens/workspace/workspace-tab-menu";
 import { useDesktopBrowserNewTabRequests } from "@/desktop/browser/new-tab-requests";
@@ -419,6 +420,7 @@ interface MobileWorkspaceTabSwitcherProps {
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  onReorderTabs: (nextTabs: WorkspaceTabDescriptor[]) => void;
 }
 
 function MobileActiveTabTrigger({
@@ -526,6 +528,8 @@ function MobileWorkspaceTabOption({
   onCloseTabsAbove,
   onCloseTabsBelow,
   onCloseOtherTabs,
+  onMoveTabToStart,
+  onMoveTabToEnd,
 }: {
   tab: WorkspaceTabDescriptor;
   tabIndex: number;
@@ -545,6 +549,8 @@ function MobileWorkspaceTabOption({
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
+  onMoveTabToStart: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd: (tabId: string) => Promise<void> | void;
 }) {
   const { t } = useTranslation();
   const tabMenuLabels = useMemo<WorkspaceTabMenuLabels>(
@@ -584,6 +590,8 @@ function MobileWorkspaceTabOption({
     onCloseTabsBefore: onCloseTabsAbove,
     onCloseTabsAfter: onCloseTabsBelow,
     onCloseOtherTabs,
+    onMoveTabToStart,
+    onMoveTabToEnd,
     labels: tabMenuLabels,
   });
 
@@ -656,6 +664,7 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
   onCloseTabsAbove,
   onCloseTabsBelow,
   onCloseOtherTabs,
+  onReorderTabs,
 }: MobileWorkspaceTabSwitcherProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -672,6 +681,24 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
     Keyboard.dismiss();
     setIsOpen(true);
   }, []);
+  const handleMoveTabToStart = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(tabs, tabId, "start");
+      if (nextTabs !== tabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, tabs],
+  );
+  const handleMoveTabToEnd = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(tabs, tabId, "end");
+      if (nextTabs !== tabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, tabs],
+  );
 
   const renderTabOption = useCallback(
     ({
@@ -713,6 +740,8 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
           onCloseTabsAbove={onCloseTabsAbove}
           onCloseTabsBelow={onCloseTabsBelow}
           onCloseOtherTabs={onCloseOtherTabs}
+          onMoveTabToStart={handleMoveTabToStart}
+          onMoveTabToEnd={handleMoveTabToEnd}
         />
       );
     },
@@ -732,6 +761,8 @@ const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
       onCloseTabsAbove,
       onCloseTabsBelow,
       onCloseOtherTabs,
+      handleMoveTabToStart,
+      handleMoveTabToEnd,
     ],
   );
 
@@ -3995,6 +4026,7 @@ function WorkspaceScreenContent({
           onCloseTabsAbove={handleCloseTabsToLeft}
           onCloseTabsBelow={handleCloseTabsToRight}
           onCloseOtherTabs={handleCloseOtherTabs}
+          onReorderTabs={handleReorderTabsInFocusedPane}
         />
       ) : null}
 
