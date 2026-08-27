@@ -66,7 +66,7 @@ describe("DefaultNpmGlobalPaseoCli", () => {
     ]);
   });
 
-  test("runs the global install command for the latest cli", async () => {
+  test("force-installs the latest cli so the paseo command can change distributions", async () => {
     const calls: CommandCall[] = [];
     const cli = new DefaultNpmGlobalPaseoCli(async (command, args, options) => {
       calls.push({
@@ -86,7 +86,7 @@ describe("DefaultNpmGlobalPaseoCli", () => {
     expect(calls).toEqual([
       {
         command: "npm",
-        args: ["install", "-g", "@getpaseo/cli@latest"],
+        args: ["install", "-g", "--force", "@getpaseo/cli@latest"],
         timeout: 300_000,
         maxBuffer: 10 * 1024 * 1024,
       },
@@ -128,6 +128,7 @@ describe("DefaultNpmGlobalPaseoCli", () => {
       [
         "install",
         "-g",
+        "--force",
         "https://github.com/HamiltonHuaji/paseo/releases/latest/download/paseo-fork.tgz",
       ],
     ]);
