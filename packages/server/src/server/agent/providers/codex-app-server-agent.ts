@@ -3313,6 +3313,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   private emittedExecCommandCompletedCallIds = new Set<string>();
   private emittedItemStartedIds = new Set<string>();
   private emittedItemCompletedIds = new Set<string>();
+  private activeRootToolCallsByCallId = new Map<string, ToolCallTimelineItem>();
   private emittedProviderSubagentUserMessageKeys = new Set<string>();
   private subAgentCallsByCallId = new Map<string, CodexSubAgentCallState>();
   private subAgentCallIdByChildThreadId = new Map<string, string>();
@@ -5538,7 +5539,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     childThreadId?: string | null,
   ): void {
     if (!subAgentCallId) {
-      this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: timelineItem });
+      this.emitRootTimelineItem(timelineItem);
       return;
     }
     this.upsertSubAgentChildItem(subAgentCallId, timelineItem.callId, timelineItem);
@@ -5611,7 +5612,38 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.emitSubAgentActivityUpdate(state.parentCallId);
       return;
     }
-    this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: nextToolCall });
+    this.emitRootTimelineItem(nextToolCall);
+  }
+
+  private emitRootTimelineItem(item: AgentTimelineItem): void {
+    if (item.type === "tool_call" && item.detail.type !== "sub_agent") {
+      if (item.status === "running") {
+        this.activeRootToolCallsByCallId.set(item.callId, item);
+      } else {
+        this.activeRootToolCallsByCallId.delete(item.callId);
+      }
+    }
+    this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item });
+  }
+
+  private settleActiveRootToolCalls(
+    turnStatus: Extract<ParsedCodexNotification, { kind: "turn_completed" }>["status"],
+    errorMessage: string | null,
+  ): void {
+    const pending = Array.from(this.activeRootToolCallsByCallId.values());
+    for (const item of pending) {
+      if (turnStatus === "interrupted") {
+        this.emitRootTimelineItem({ ...item, status: "canceled", error: null });
+      } else if (turnStatus === "failed") {
+        this.emitRootTimelineItem({
+          ...item,
+          status: "failed",
+          error: item.error ?? { message: errorMessage ?? "Codex turn failed" },
+        });
+      } else {
+        this.emitRootTimelineItem({ ...item, status: "completed", error: null });
+      }
+    }
   }
 
   private emitProviderSubagentUpsert(
@@ -5888,6 +5920,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       return;
     }
     this.completePendingRootCompactions();
+    this.settleActiveRootToolCalls(parsed.status, parsed.errorMessage);
     if (parsed.status === "failed") {
       this.emitEvent({
         type: "turn_failed",
@@ -5922,6 +5955,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.emittedProviderSubagentUserMessageKeys.clear();
     this.emittedExecCommandStartedCallIds.clear();
     this.emittedExecCommandCompletedCallIds.clear();
+    this.activeRootToolCallsByCallId.clear();
     this.pendingAgentMessages.clear();
     this.pendingReasoning.clear();
     this.pendingCommandOutputDeltas.clear();
@@ -6186,7 +6220,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       command,
       stdin: parsed.stdin,
     });
-    this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: timelineItem });
+    this.emitRootTimelineItem(timelineItem);
   }
 
   private handlePatchApplyStartedNotification(
@@ -6319,7 +6353,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       }
       this.warnOnIncompleteEditToolCall(timelineItem, "item_completed", parsed.item);
     }
-    this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: timelineItem });
+    this.emitRootTimelineItem(timelineItem);
     if (timelineItem.type === "assistant_message") {
       this.pendingAssistantMessageBoundary = true;
     }
@@ -6469,7 +6503,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       return;
     }
     this.warnOnIncompleteEditToolCall(timelineItem, "item_started", parsed.item);
-    this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: timelineItem });
+    this.emitRootTimelineItem(timelineItem);
     if (itemId) {
       this.emittedItemStartedIds.add(itemId);
       this.pendingCommandOutputDeltas.delete(itemId);

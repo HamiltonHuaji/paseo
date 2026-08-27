@@ -14,6 +14,7 @@ import type {
   AgentSessionConfig,
   AgentSlashCommand,
   AgentStreamEvent,
+  AgentTimelineItem,
 } from "../agent-sdk-types.js";
 import {
   buildCodexAppServerEnv,
@@ -3165,6 +3166,91 @@ describe("Codex app-server provider", () => {
       type: "timeline",
       item: { callId: "spawn-child-root", status: "completed" },
     });
+  });
+
+  test.each([
+    { turnStatus: "completed", toolStatus: "completed", terminalType: "turn_completed" },
+    { turnStatus: "interrupted", toolStatus: "canceled", terminalType: "turn_canceled" },
+    { turnStatus: "failed", toolStatus: "failed", terminalType: "turn_failed" },
+  ] as const)(
+    "settles a running root tool as $toolStatus before a $turnStatus turn terminal",
+    ({ turnStatus, toolStatus, terminalType }) => {
+      const session = createSession();
+      const events: AgentStreamEvent[] = [];
+      session.subscribe((event) => events.push(event));
+
+      asInternals(session).handleNotification("item/started", {
+        threadId: "test-thread",
+        item: {
+          type: "commandExecution",
+          id: "sleep-command",
+          status: "inProgress",
+          command: "sleep 3600",
+          cwd: "/tmp/codex-question-test",
+        },
+      });
+      asInternals(session).handleNotification("turn/completed", {
+        threadId: "test-thread",
+        turn: {
+          id: "test-turn",
+          status: turnStatus,
+          ...(turnStatus === "failed" ? { error: { message: "turn exploded" } } : {}),
+        },
+      });
+
+      const toolStatuses = events
+        .filter(
+          (event) =>
+            event.type === "timeline" &&
+            event.item.type === "tool_call" &&
+            event.item.callId === "sleep-command",
+        )
+        .map((event) => (event.type === "timeline" ? event.item : null))
+        .filter((item): item is Extract<AgentTimelineItem, { type: "tool_call" }> =>
+          Boolean(item?.type === "tool_call"),
+        );
+      expect(toolStatuses.map((item) => item.status)).toEqual(["running", toolStatus]);
+      if (toolStatus === "failed") {
+        expect(toolStatuses.at(-1)).toMatchObject({ error: { message: "turn exploded" } });
+      }
+      expect(events.at(-2)).toMatchObject({
+        type: "timeline",
+        item: { callId: "sleep-command", status: toolStatus },
+      });
+      expect(events.at(-1)).toMatchObject({ type: terminalType });
+    },
+  );
+
+  test("does not settle a provider sub-agent tool when the root turn completes", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    asInternals(session).handleNotification("item/completed", {
+      threadId: "test-thread",
+      item: {
+        type: "subAgentActivity",
+        id: "spawn-background-child",
+        kind: "started",
+        agentThreadId: "background-child-thread",
+        agentPath: "/root/background-child",
+      },
+    });
+    asInternals(session).handleNotification("turn/completed", {
+      threadId: "test-thread",
+      turn: { id: "test-turn", status: "completed" },
+    });
+
+    const childStatuses = events
+      .filter(
+        (event) =>
+          event.type === "timeline" &&
+          event.item.type === "tool_call" &&
+          event.item.callId === "spawn-background-child",
+      )
+      .map((event) => (event.type === "timeline" ? event.item.status : null));
+    expect(childStatuses).toEqual(["running"]);
+    expect(events.at(-1)).toMatchObject({ type: "turn_completed" });
   });
 
   test("never treats an unmapped foreign terminal as the root terminal", () => {
