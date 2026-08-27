@@ -12,7 +12,9 @@ Controlled by `APP_VARIANT` in `packages/app/app.config.js` (vanilla Expo, no cu
 
 EAS profiles: `development`, `production`, `production-apk`, and `fork-apk` in
 `packages/app/eas.json`. The fork profile uses its own EAS project and remotely managed signing
-credentials, disables official Expo Updates, and can coexist with the official app.
+credentials, disables official Expo Updates, and can coexist with the official app. It builds an
+arm64-only APK on the standard EAS resource class; compiling every ABI before Hermes exhausts that
+worker's memory.
 
 `development` uses Android `debug`.
 
