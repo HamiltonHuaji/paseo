@@ -170,6 +170,39 @@ describe("splitHtmlishMarkdown", () => {
     expect(splitHtmlishMarkdown(source)).toEqual([{ kind: "markdown", text: source }]);
   });
 
+  it("unwraps paragraph containers and uses alt text for relative HTML images", () => {
+    const source = [
+      '<p align="center">',
+      '  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">',
+      "</p>",
+      "",
+      '<p align="center">Paseo</p>',
+    ].join("\n");
+
+    expect(splitHtmlishMarkdown(source)).toEqual([
+      { kind: "markdown", text: "\n  Paseo logo\n\n\nPaseo" },
+    ]);
+  });
+
+  it("unwraps paragraph containers without disturbing remote image parts", () => {
+    const source = [
+      '<p align="center">',
+      '  <a href="https://example.com"><img src="https://example.com/badge.svg" alt="Badge"></a>',
+      "</p>",
+    ].join("\n");
+
+    expect(splitHtmlishMarkdown(source)).toEqual([
+      { kind: "markdown", text: "\n  " },
+      {
+        kind: "inlineImage",
+        alt: "Badge",
+        src: "https://example.com/badge.svg",
+        href: "https://example.com",
+      },
+      { kind: "markdown", text: "\n" },
+    ]);
+  });
+
   it("removes raw image anchor and image tags from rendered markdown text", () => {
     const text = splitHtmlishMarkdown(inlineImageBody)
       .map((part) => (part.kind === "markdown" ? part.text : ""))
