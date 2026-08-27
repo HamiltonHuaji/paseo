@@ -2497,6 +2497,57 @@ test("sends create_agent_request with workspace and caller identity", async () =
   await expect(createPromise).rejects.toThrow("compat test sentinel");
 });
 
+test("sends native conversation fork boundaries in create_agent_request", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_unit_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen();
+  await connectPromise;
+
+  const createPromise = client.createAgent({
+    provider: "codex",
+    cwd: "/tmp/project",
+    forkFrom: {
+      agentId: "source-agent",
+      boundaryCursor: { epoch: "timeline-1", seq: 42 },
+      boundaryMessageId: "assistant-1",
+    },
+  });
+
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request).toEqual(
+    expect.objectContaining({
+      type: "create_agent_request",
+      forkFrom: {
+        agentId: "source-agent",
+        boundaryCursor: { epoch: "timeline-1", seq: 42 },
+        boundaryMessageId: "assistant-1",
+      },
+    }),
+  );
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "status",
+      payload: {
+        status: "agent_create_failed",
+        requestId: request.requestId,
+        error: "fork test sentinel",
+      },
+    }),
+  );
+  await expect(createPromise).rejects.toThrow("fork test sentinel");
+});
+
 test("sends worktree target and autoArchive in create_agent_request", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

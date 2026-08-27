@@ -3404,6 +3404,7 @@ export class Session {
       images,
       attachments,
       env,
+      forkFrom,
     } = msg;
     this.sessionLogger.info(
       { cwd: config.cwd, provider: config.provider, worktreeName },
@@ -3415,6 +3416,7 @@ export class Session {
     let createdWorktreeForCleanup: CreatePaseoWorktreeWorkflowResult | null = null;
     let createdAgentId: string | null = null;
     try {
+      await this.ensureConversationForkReady(forkFrom);
       const requestedCwd = resolve(config.cwd);
       const needsRequestedDirectory =
         Boolean(worktreeName || git || worktree) || (!msg.workspaceId && !msg.callerAgentId);
@@ -3472,6 +3474,7 @@ export class Session {
           labels: resolvedIntent.intent.labels,
           env,
           provisionalTitle,
+          forkFrom,
           firstAgentContext,
           buildSessionConfig: (sessionConfig, gitOptions, legacyWorktreeName, ctx) =>
             this.buildAgentSessionConfig(sessionConfig, gitOptions, legacyWorktreeName, ctx),
@@ -3539,6 +3542,24 @@ export class Session {
         },
       });
     }
+  }
+
+  private async ensureConversationForkReady(
+    forkFrom: CreateAgentRequestMessage["forkFrom"],
+  ): Promise<void> {
+    if (!forkFrom) return;
+    // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+    if (!this.supports(CLIENT_CAPS.agentConversationFork)) {
+      throw new Error("Update the client to fork a provider-native conversation");
+    }
+    if (!forkFrom.boundaryCursor && !forkFrom.boundaryMessageId) {
+      throw new Error("Select a completed assistant response to fork this conversation");
+    }
+    await ensureAgentLoaded(forkFrom.agentId, {
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
+      logger: this.sessionLogger,
+    });
   }
 
   private async resolveSessionCreateAgentIntent(input: {

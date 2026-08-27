@@ -181,6 +181,51 @@ test("session create applies the resolved mode from the provider create config",
   );
 });
 
+test("session create delegates native conversation forks to the manager", async () => {
+  const snapshot = {
+    id: "fork-agent",
+    provider: "codex",
+    cwd: "/tmp/paseo-create-test",
+    runtimeInfo: null,
+  } as ManagedAgent;
+  const forkAgentFromConversation = vi.fn(async () => snapshot);
+  const createAgent = vi.fn(async () => snapshot);
+  const dependencies: Parameters<typeof createAgentCommand>[0] = {
+    agentManager: {
+      createAgent,
+      forkAgentFromConversation,
+      getAgent: vi.fn(() => snapshot),
+    } as unknown as Parameters<typeof createAgentCommand>[0]["agentManager"],
+    agentStorage: {} as Parameters<typeof createAgentCommand>[0]["agentStorage"],
+    logger: createTestLogger(),
+    providerSnapshotManager: createProviderSnapshotManagerStub().manager,
+  };
+  const forkFrom = {
+    agentId: "source-agent",
+    boundaryCursor: { epoch: "timeline-1", seq: 42 },
+    boundaryMessageId: "assistant-1",
+  };
+
+  await createAgentCommand(dependencies, {
+    kind: "session",
+    config: { provider: "codex", cwd: "/tmp/paseo-create-test" },
+    workspaceId: "ws-create-test",
+    labels: {},
+    provisionalTitle: null,
+    forkFrom,
+    firstAgentContext: { attachments: [] },
+    buildSessionConfig: async (config) => ({ sessionConfig: config }),
+  });
+
+  expect(forkAgentFromConversation).toHaveBeenCalledWith(
+    forkFrom,
+    expect.objectContaining({ provider: "codex", cwd: "/tmp/paseo-create-test" }),
+    undefined,
+    expect.objectContaining({ workspaceId: "ws-create-test" }),
+  );
+  expect(createAgent).not.toHaveBeenCalled();
+});
+
 test("mcp create accepts provider-only internal input and leaves model undefined", async () => {
   const snapshot = {
     id: "agent-1",

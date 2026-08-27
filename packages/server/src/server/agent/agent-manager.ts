@@ -14,6 +14,7 @@ import {
 } from "@getpaseo/protocol/agent-labels";
 import type { Logger } from "pino";
 import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
+import type { AgentConversationForkSource } from "@getpaseo/protocol/messages";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 
@@ -81,6 +82,7 @@ import {
   type ProviderSubagentDescriptor,
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
+import { resolveConversationForkBoundary } from "./conversation-fork-boundary.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -1134,6 +1136,103 @@ export class AgentManager {
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
     return this.trackAgentRegistrationOperation(this.createAgentInternal(config, agentId, options));
+  }
+
+  forkAgentFromConversation(
+    source: AgentConversationForkSource,
+    config: AgentSessionConfig,
+    agentId: string | undefined,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(
+      this.forkAgentFromConversationInternal(source, config, agentId, options),
+    );
+  }
+
+  private async forkAgentFromConversationInternal(
+    source: AgentConversationForkSource,
+    config: AgentSessionConfig,
+    agentId: string | undefined,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
+    const sourceAgent = this.requireSessionAgent(source.agentId);
+    if (sourceAgent.lifecycle === "initializing") {
+      throw new Error("Wait for the current turn to finish before forking this conversation");
+    }
+    if (!sourceAgent.capabilities.supportsNativeConversationFork) {
+      throw new Error(
+        `Provider '${sourceAgent.provider}' does not support native conversation forks`,
+      );
+    }
+    if (sourceAgent.provider !== config.provider) {
+      throw new Error("A native conversation fork must use the same provider as its source");
+    }
+
+    const sourceHasRun = this.hasInFlightRun(sourceAgent.id) || isAgentBusy(sourceAgent.lifecycle);
+    const timeline = this.fetchTimeline(sourceAgent.id, { direction: "tail", limit: 0 });
+    const boundary = resolveConversationForkBoundary({
+      source,
+      epoch: timeline.epoch,
+      rows: timeline.rows,
+      sourceHasActiveTurn: sourceHasRun,
+    });
+    const sourceLock = sourceHasRun ? null : this.runs.createPendingRun(sourceAgent.id);
+    try {
+      const resolvedAgentId = validateAgentId(
+        agentId ?? this.idFactory(),
+        "forkAgentFromConversation",
+      );
+      await this.deleteAgentState(resolvedAgentId);
+      const { storedConfig, launchConfig } = await this.prepareSessionConfig(
+        config,
+        resolvedAgentId,
+        options.env,
+      );
+      this.requireEnabledProvider(storedConfig.provider);
+      const client = await this.requireAvailableClient({ provider: storedConfig.provider });
+      if (!client.capabilities.supportsNativeConversationFork || !client.forkSession) {
+        throw new Error(
+          `Provider '${storedConfig.provider}' does not support native conversation forks`,
+        );
+      }
+      const launchContext = await this.buildLaunchContext(
+        resolvedAgentId,
+        client,
+        storedConfig.cwd,
+        options.env,
+      );
+      const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+      const session = await client.forkSession(
+        sourceAgent.session,
+        { ...boundary, targetConfig: providerLaunchConfig },
+        launchContext,
+      );
+      await this.requireExternalMcpSupport(session, storedConfig);
+      const persistence = session.describePersistence();
+      if (!persistence) {
+        await session.close();
+        throw new Error("The forked provider session did not return a persistence handle");
+      }
+      if (persistence.provider !== storedConfig.provider) {
+        await session.close();
+        throw new Error("The forked provider session does not match the requested provider");
+      }
+      const registered = await this.registerSession(session, storedConfig, resolvedAgentId, {
+        labels: options.labels,
+        initialTitle: options.initialTitle,
+        workspaceId: options.workspaceId,
+        owner: options.owner,
+        persistence,
+        historyPrimed: false,
+      });
+      await this.hydrateTimelineFromProvider(registered.id);
+      return this.getAgent(registered.id) ?? registered;
+    } finally {
+      if (sourceLock) {
+        this.runs.settleForegroundRun(sourceAgent.id, sourceLock.token);
+      }
+    }
   }
 
   private async createAgentInternal(

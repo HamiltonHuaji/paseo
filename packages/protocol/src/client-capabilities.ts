@@ -24,6 +24,8 @@ export const CLIENT_CAPS = {
   // provider catalogs with shared thinking sets and may revalidate by content hash.
   // Remove the legacy snapshot encoding after 2027-02-04.
   compactProviderSnapshots: "compact_provider_snapshots",
+  // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+  agentConversationFork: "agent_conversation_fork",
   browserHost: "browser_host",
 } as const;
 

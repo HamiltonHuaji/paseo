@@ -10,7 +10,12 @@ import type {
   CreatePaseoWorktreeWorkflowFn,
   CreatePaseoWorktreeWorkflowResult,
 } from "../../worktree-session.js";
-import type { AgentAttachment, FirstAgentContext, GitSetupOptions } from "../../messages.js";
+import type {
+  AgentAttachment,
+  AgentConversationForkSource,
+  FirstAgentContext,
+  GitSetupOptions,
+} from "../../messages.js";
 import type { AgentManager, CreateAgentOptions, ManagedAgent } from "../agent-manager.js";
 import type { AgentPromptInput, AgentRunOptions, AgentSessionConfig } from "../agent-sdk-types.js";
 import type { AgentStorage } from "../agent-storage.js";
@@ -67,6 +72,7 @@ export interface CreateAgentFromSessionInput {
   labels: Record<string, string>;
   env?: Record<string, string>;
   provisionalTitle: string | null;
+  forkFrom?: AgentConversationForkSource;
   firstAgentContext: FirstAgentContext;
   buildSessionConfig: (
     config: AgentSessionConfig,
@@ -168,6 +174,7 @@ interface ResolvedCreateAgent {
   promptFailure: CreateAgentPromptFailureMode;
   promptLogger?: Logger;
   createdWorktree?: CreatePaseoWorktreeWorkflowResult;
+  forkFrom?: AgentConversationForkSource;
 }
 
 export async function createAgentCommand(
@@ -179,11 +186,18 @@ export async function createAgentCommand(
       ? await resolveSessionCreateAgent(dependencies, input)
       : await resolveMcpCreateAgent(dependencies, input);
 
-  const snapshot = await dependencies.agentManager.createAgent(
-    resolved.config,
-    undefined,
-    resolved.createOptions,
-  );
+  const snapshot = resolved.forkFrom
+    ? await dependencies.agentManager.forkAgentFromConversation(
+        resolved.forkFrom,
+        resolved.config,
+        undefined,
+        resolved.createOptions,
+      )
+    : await dependencies.agentManager.createAgent(
+        resolved.config,
+        undefined,
+        resolved.createOptions,
+      );
 
   resolved.setupContinuation?.startAfterAgentCreate({
     agentId: snapshot.id,
@@ -296,6 +310,7 @@ async function resolveSessionCreateAgent(
     promptLogger: dependencies.logger.child({
       clientMessageId: resolveClientMessageId(input.clientMessageId),
     }),
+    forkFrom: input.forkFrom,
   };
 }
 

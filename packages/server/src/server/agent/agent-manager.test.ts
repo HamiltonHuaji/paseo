@@ -28,6 +28,7 @@ import type {
 } from "./agent-timeline-store-types.js";
 import type {
   AgentClient,
+  AgentConversationForkInput,
   AgentCreateSessionOptions,
   AgentFeature,
   AgentLaunchContext,
@@ -518,6 +519,50 @@ class TestAgentSession implements AgentSession {
   async close(): Promise<void> {}
 }
 
+class ConversationForkTestSession extends TestAgentSession {
+  override readonly capabilities = {
+    ...TEST_CAPABILITIES,
+    supportsNativeConversationFork: true,
+  };
+
+  constructor(
+    config: AgentSessionConfig,
+    private readonly history: AgentStreamEvent[] = [],
+  ) {
+    super(config);
+  }
+
+  override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+    yield* this.history;
+  }
+}
+
+class ConversationForkTestClient extends TestAgentClient {
+  override readonly capabilities = {
+    ...TEST_CAPABILITIES,
+    supportsNativeConversationFork: true,
+  };
+  forkInput: AgentConversationForkInput | null = null;
+
+  override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+    return new ConversationForkTestSession(config);
+  }
+
+  async forkSession(
+    _source: AgentSession,
+    input: AgentConversationForkInput,
+  ): Promise<AgentSession> {
+    this.forkInput = input;
+    return new ConversationForkTestSession(input.targetConfig, [
+      {
+        type: "timeline",
+        provider: "codex",
+        item: { type: "assistant_message", messageId: "assistant-1", text: "forked history" },
+      },
+    ]);
+  }
+}
+
 class McpCapableTestAgentSession extends TestAgentSession {
   override readonly capabilities = {
     ...TEST_CAPABILITIES,
@@ -653,6 +698,57 @@ test("uses an injected timeline store without making it a production requirement
     );
   } finally {
     if (agentId) await manager.closeAgent(agentId).catch(() => undefined);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("native conversation fork hydrates provider history before resolving", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-conversation-fork-"));
+  const client = new ConversationForkTestClient();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  const agentIds: string[] = [];
+  try {
+    const source = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-1",
+    });
+    agentIds.push(source.id);
+    await manager.appendTimelineItem(source.id, {
+      type: "assistant_message",
+      messageId: "assistant-1",
+      text: "source history",
+    });
+
+    const sourceTimeline = manager.fetchTimeline(source.id, { direction: "tail", limit: 0 });
+    const boundarySeq = sourceTimeline.rows.at(-1)?.seq;
+    if (boundarySeq === undefined) throw new Error("missing test boundary");
+    const forked = await manager.forkAgentFromConversation(
+      {
+        agentId: source.id,
+        boundaryCursor: { epoch: sourceTimeline.epoch, seq: boundarySeq },
+        boundaryMessageId: "assistant-1",
+      },
+      { provider: "codex", cwd: workdir },
+      undefined,
+      { workspaceId: "workspace-1" },
+    );
+    agentIds.push(forked.id);
+
+    expect(client.forkInput).toEqual(
+      expect.objectContaining({
+        boundaryMessageId: "assistant-1",
+        isLatestCompletedTurn: true,
+      }),
+    );
+    expect(manager.getAgent(forked.id)?.historyPrimed).toBe(true);
+    expect(manager.getTimeline(forked.id)).toContainEqual({
+      type: "assistant_message",
+      messageId: "assistant-1",
+      text: "forked history",
+    });
+  } finally {
+    await Promise.all(
+      agentIds.map((agentId) => manager.closeAgent(agentId).catch(() => undefined)),
+    );
     rmSync(workdir, { recursive: true, force: true });
   }
 });

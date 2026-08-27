@@ -190,6 +190,13 @@ export interface AgentCapabilityFlags {
   supportsRewindConversation?: boolean;
   supportsRewindFiles?: boolean;
   supportsRewindBoth?: boolean;
+  supportsNativeConversationFork?: boolean;
+}
+
+export interface AgentConversationForkInput {
+  boundaryMessageId: string;
+  isLatestCompletedTurn: boolean;
+  targetConfig: AgentSessionConfig;
 }
 
 export interface AgentPersistenceHandle {
@@ -723,6 +730,11 @@ export interface AgentClient {
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
     options?: AgentResumeSessionOptions,
+  ): Promise<AgentSession>;
+  forkSession?(
+    source: AgentSession,
+    input: AgentConversationForkInput,
+    launchContext?: AgentLaunchContext,
   ): Promise<AgentSession>;
   /**
    * Discover models and modes together. Implementations may use one upstream

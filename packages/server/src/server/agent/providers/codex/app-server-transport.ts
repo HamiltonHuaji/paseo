@@ -50,6 +50,7 @@ type UnexpectedTerminationHandler = (error: Error) => void;
 
 export interface CodexThreadForkParams {
   threadId: string;
+  lastTurnId?: string | null;
   path?: string | null;
   model?: string | null;
   modelProvider?: string | null;
