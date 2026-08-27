@@ -3,8 +3,8 @@ import {
   applyDictationTranscript,
   computeCanStartDictation,
   resolveActiveSendBehavior,
+  resolveComposerHardwareKeyAction,
   resolveComposerSurfacePresentation,
-  runAlternateSendAction,
   runDefaultSendAction,
   runMessageInputKeyboardAction,
   stopRealtimeVoice,
@@ -205,53 +205,7 @@ describe("composer send behavior", () => {
     };
   }
 
-  it("uses Enter to interrupt and Mod+Enter to queue when interrupt is selected", () => {
-    const defaultAction = actions();
-    runDefaultSendAction({
-      defaultSendBehavior: "interrupt",
-      isAgentRunning: true,
-      onQueue: defaultAction.onQueue,
-      handleSendMessage: defaultAction.handleSendMessage,
-      handleQueueMessage: defaultAction.handleQueueMessage,
-    });
-
-    const alternateAction = actions();
-    runAlternateSendAction({
-      defaultSendBehavior: "interrupt",
-      isAgentRunning: true,
-      onQueue: alternateAction.onQueue,
-      handleSendMessage: alternateAction.handleSendMessage,
-      handleQueueMessage: alternateAction.handleQueueMessage,
-    });
-
-    expect(defaultAction.calls).toEqual(["send"]);
-    expect(alternateAction.calls).toEqual(["queue"]);
-  });
-
-  it("uses Enter to steer and Mod+Enter to queue when steer is selected", () => {
-    const defaultAction = actions();
-    runDefaultSendAction({
-      defaultSendBehavior: "steer",
-      isAgentRunning: true,
-      onQueue: defaultAction.onQueue,
-      handleSendMessage: defaultAction.handleSendMessage,
-      handleQueueMessage: defaultAction.handleQueueMessage,
-    });
-
-    const alternateAction = actions();
-    runAlternateSendAction({
-      defaultSendBehavior: "steer",
-      isAgentRunning: true,
-      onQueue: alternateAction.onQueue,
-      handleSendMessage: alternateAction.handleSendMessage,
-      handleQueueMessage: alternateAction.handleQueueMessage,
-    });
-
-    expect(defaultAction.calls).toEqual(["send"]);
-    expect(alternateAction.calls).toEqual(["queue"]);
-  });
-
-  it("uses Enter to queue and Mod+Enter to submit when queue is selected", () => {
+  it("keeps the primary button behavior independent from keyboard intent", () => {
     const defaultAction = actions();
     runDefaultSendAction({
       defaultSendBehavior: "queue",
@@ -260,18 +214,18 @@ describe("composer send behavior", () => {
       handleSendMessage: defaultAction.handleSendMessage,
       handleQueueMessage: defaultAction.handleQueueMessage,
     });
-
-    const alternateAction = actions();
-    runAlternateSendAction({
-      defaultSendBehavior: "queue",
-      isAgentRunning: true,
-      onQueue: alternateAction.onQueue,
-      handleSendMessage: alternateAction.handleSendMessage,
-      handleQueueMessage: alternateAction.handleQueueMessage,
-    });
-
     expect(defaultAction.calls).toEqual(["queue"]);
-    expect(alternateAction.calls).toEqual(["send"]);
+  });
+
+  it("leaves Enter for newlines and maps only modified Enter to submit", () => {
+    expect(resolveComposerHardwareKeyAction({ key: "Enter" })).toBeNull();
+    expect(resolveComposerHardwareKeyAction({ key: "Enter", metaKey: true })).toBe("submit");
+    expect(resolveComposerHardwareKeyAction({ key: "Enter", ctrlKey: true })).toBe("submit");
+  });
+
+  it("always maps Tab to queue", () => {
+    expect(resolveComposerHardwareKeyAction({ key: "Tab" })).toBe("queue");
+    expect(resolveComposerHardwareKeyAction({ key: "Tab", metaKey: true })).toBe("queue");
   });
 });
 

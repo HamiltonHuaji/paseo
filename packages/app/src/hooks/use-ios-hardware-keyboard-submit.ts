@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import {
+  addHardwareKeyboardQueueListener,
   addHardwareKeyboardSubmitListener,
   setHardwareKeyboardSubmitEnabled,
 } from "@/native/ios-hardware-keyboard-submit";
@@ -11,6 +12,7 @@ import {
 interface UseIosHardwareKeyboardSubmitInput {
   isEnabled: boolean;
   onSubmit: () => void;
+  onQueue: () => void;
 }
 
 export function useIosHardwareKeyboardSubmit(input: UseIosHardwareKeyboardSubmitInput) {
@@ -18,12 +20,14 @@ export function useIosHardwareKeyboardSubmit(input: UseIosHardwareKeyboardSubmit
   if (!controllerRef.current) {
     controllerRef.current = createHardwareKeyboardSubmitController({
       addListener: addHardwareKeyboardSubmitListener,
+      addQueueListener: addHardwareKeyboardQueueListener,
       setEnabled: setHardwareKeyboardSubmitEnabled,
     });
   }
   const controller = controllerRef.current;
 
   controller.setOnSubmit(input.onSubmit);
+  controller.setOnQueue(input.onQueue);
 
   useEffect(() => {
     if (!input.isEnabled) {
