@@ -4,6 +4,7 @@ const pkg = require("./package.json");
 const withAndroidAsyncStorageSize = require("./plugins/with-android-async-storage-size");
 const withAndroidProfileable = require("./plugins/with-android-profileable");
 const withFdroidAutolinking = require("./plugins/with-fdroid-autolinking");
+const withForkHermesFlags = require("./plugins/with-fork-hermes-flags");
 const withPasteInput = require("./plugins/with-paste-input");
 const forkBuildMetadata = require("../desktop/src/features/fork-build-info.json");
 const { getNativeReleaseVersion } = require("./native-release-version");
@@ -194,6 +195,7 @@ export default {
         },
       ],
       ...buildProfile.fdroidPlugins,
+      ...(isForkBuild ? [withForkHermesFlags] : []),
       ...(isProfileBuild ? [withAndroidProfileable] : []),
     ],
     experiments: {
