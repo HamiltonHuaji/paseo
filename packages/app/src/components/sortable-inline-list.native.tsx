@@ -17,6 +17,7 @@ export function SortableInlineList<T>({
   activeId?: string | null;
   getItemData?: (item: T, index: number) => Record<string, unknown>;
   orientation?: DragOrientation;
+  isItemDisabled?: (item: T, index: number) => boolean;
 }): ReactElement {
   return (
     <>
