@@ -18,6 +18,11 @@ describe("fork EAS profile", () => {
     expect(profile.buildType).toBe("apk");
     expect(profile.credentialsSource).toBe("remote");
     expect(profile.resourceClass).toBeUndefined();
+    expect(profile.gradleCommand).toContain(":app:createBundleReleaseJsAndAssets");
     expect(profile.gradleCommand).toContain("-PreactNativeArchitectures=arm64-v8a");
+    expect(profile.gradleCommand).toContain("--no-daemon");
+    expect(profile.gradleCommand).toContain("--max-workers=1");
+    expect(profile.gradleCommand).toContain("-Dorg.gradle.parallel=false");
+    expect(profile.gradleCommand).toContain("-Dorg.gradle.jvmargs=-Xmx2048m");
   });
 });
