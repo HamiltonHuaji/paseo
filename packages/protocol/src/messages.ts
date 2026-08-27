@@ -405,6 +405,8 @@ const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z
     supportsRewindFiles: z.boolean().optional().default(false),
     // COMPAT(rewind): added in v0.1.X, drop when floor >= v0.1.X.
     supportsRewindBoth: z.boolean().optional().default(false),
+    // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+    supportsNativeConversationFork: z.boolean().optional().default(false),
   })
   .catchall(z.boolean());
 
@@ -1691,6 +1693,18 @@ const GitSetupOptionsSchema = z.object({
 
 export type GitSetupOptions = z.infer<typeof GitSetupOptionsSchema>;
 
+export const AgentTimelineCursorSchema = z.object({
+  epoch: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
+export const AgentConversationForkSourceSchema = z.object({
+  agentId: z.string(),
+  boundaryCursor: AgentTimelineCursorSchema.optional(),
+  boundaryMessageId: z.string().optional(),
+});
+export type AgentConversationForkSource = z.infer<typeof AgentConversationForkSourceSchema>;
+
 export const CreateAgentWorktreeTargetSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("branch-off"),
@@ -1728,6 +1742,8 @@ export const CreateAgentRequestMessageSchema = z.object({
   git: GitSetupOptionsSchema.optional(),
   worktree: CreateAgentWorktreeTargetSchema.optional(),
   autoArchive: z.boolean().optional(),
+  // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+  forkFrom: AgentConversationForkSourceSchema.optional(),
   labels: z.record(z.string(), z.string()).default({}),
   requestId: z.string(),
 });
@@ -1849,11 +1865,6 @@ export const ShutdownServerRequestMessageSchema = z.object({
 export const DaemonUpdateRequestMessageSchema = z.object({
   type: z.literal("daemon.update.request"),
   requestId: z.string(),
-});
-
-export const AgentTimelineCursorSchema = z.object({
-  epoch: z.string(),
-  seq: z.number().int().nonnegative(),
 });
 
 export const FetchAgentTimelineRequestMessageSchema = z.object({
@@ -3683,6 +3694,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContext: z.boolean().optional(),
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: z.boolean().optional(),
+        // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+        agentConversationFork: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.

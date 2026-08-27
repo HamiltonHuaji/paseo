@@ -192,6 +192,13 @@ export interface AgentCapabilityFlags {
   supportsRewindConversation?: boolean;
   supportsRewindFiles?: boolean;
   supportsRewindBoth?: boolean;
+  supportsNativeConversationFork?: boolean;
+}
+
+export interface AgentConversationForkInput {
+  boundaryMessageId: string;
+  isLatestCompletedTurn: boolean;
+  targetConfig: AgentSessionConfig;
 }
 
 export interface AgentPersistenceHandle {
@@ -747,6 +754,11 @@ export interface AgentClient {
     overrides?: Partial<AgentSessionConfig>,
     launchContext?: AgentLaunchContext,
     options?: AgentResumeSessionOptions,
+  ): Promise<AgentSession>;
+  forkSession?(
+    source: AgentSession,
+    input: AgentConversationForkInput,
+    launchContext?: AgentLaunchContext,
   ): Promise<AgentSession>;
   /** Equal keys share availability and catalogue discovery within this configured client.
    * Include the execution environment and effective configuration; omit to use target identity.

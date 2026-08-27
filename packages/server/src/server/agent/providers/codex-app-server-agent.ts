@@ -4,6 +4,7 @@ import {
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
+  type AgentConversationForkInput,
   type AgentFeature,
   type AgentLaunchContext,
   type AgentResumeSessionOptions,
@@ -221,6 +222,7 @@ const CODEX_APP_SERVER_CAPABILITIES: AgentCapabilityFlags = {
   supportsRewindConversation: true,
   supportsRewindFiles: false,
   supportsRewindBoth: false,
+  supportsNativeConversationFork: true,
 };
 
 const CODEX_MODES: AgentMode[] = [
@@ -1960,6 +1962,69 @@ async function requestCodexThreadHistory(
 ): Promise<CodexThreadReadResponse> {
   const response = await requestThread(threadId);
   return CodexThreadReadResponseSchema.parse(response);
+}
+
+const CodexThreadItemsListResponseSchema = z
+  .object({
+    data: z
+      .array(
+        z
+          .object({
+            turnId: z.string(),
+            item: z.unknown(),
+          })
+          .passthrough(),
+      )
+      .default([]),
+    nextCursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export async function resolveCodexForkBeforeTurnId(input: {
+  threadId: string;
+  boundaryMessageId: string;
+  isLatestCompletedTurn: boolean;
+  request: (method: string, params?: unknown) => Promise<unknown>;
+  activeTurnId?: string | null;
+}): Promise<string | undefined> {
+  if (input.isLatestCompletedTurn) return undefined;
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  let boundaryTurnId: string | null = null;
+  while (true) {
+    const response = CodexThreadItemsListResponseSchema.parse(
+      await input.request("thread/items/list", {
+        threadId: input.threadId,
+        limit: 100,
+        sortDirection: "asc",
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    for (const entry of response.data) {
+      if (boundaryTurnId && entry.turnId !== boundaryTurnId) {
+        return entry.turnId;
+      }
+      const item = toObjectRecord(entry.item);
+      if (item?.id === input.boundaryMessageId) {
+        boundaryTurnId = entry.turnId;
+      }
+    }
+    const nextCursor = response.nextCursor ?? null;
+    if (!nextCursor) break;
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("Codex returned a repeated thread item cursor while resolving fork");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  if (!boundaryTurnId) {
+    throw new Error(`Could not map Codex message '${input.boundaryMessageId}' to a completed turn`);
+  }
+  if (boundaryTurnId === input.activeTurnId) {
+    throw new Error("Wait for the current turn to finish before forking this conversation");
+  }
+  if (input.activeTurnId) return input.activeTurnId;
+  throw new Error("The selected response is no longer followed by a persisted Codex turn");
 }
 
 async function loadCodexThreadHistoryTimeline(params: {
@@ -4762,6 +4827,59 @@ export class CodexAppServerAgentSession implements AgentSession {
     };
   }
 
+  async forkFromConversation(
+    source: CodexAppServerAgentSession,
+    input: AgentConversationForkInput,
+  ): Promise<void> {
+    await source.connect();
+    await this.connect();
+    if (!this.client) {
+      throw new Error("Codex client is not initialized");
+    }
+    if (!source.client) {
+      throw new Error("Source Codex client is not initialized");
+    }
+    if (!source.currentThreadId) {
+      throw new Error("Codex thread is not initialized");
+    }
+    if (source.activeForegroundTurnId && input.isLatestCompletedTurn) {
+      throw new Error("Wait for the current turn to finish before forking this conversation");
+    }
+
+    const targetConfig = input.targetConfig;
+    const codexConfig = this.buildCodexInnerConfig();
+    const developerInstructions = composeSystemPromptParts(
+      targetConfig.systemPrompt,
+      targetConfig.daemonAppendSystemPrompt,
+    );
+    const serviceTier =
+      targetConfig.featureValues?.fast_mode === true &&
+      codexModelSupportsFastMode(targetConfig.model)
+        ? "fast"
+        : null;
+    const beforeTurnId = await resolveCodexForkBeforeTurnId({
+      threadId: source.currentThreadId,
+      boundaryMessageId: input.boundaryMessageId,
+      isLatestCompletedTurn: input.isLatestCompletedTurn,
+      request: (method, params) => source.client!.request(method, params),
+      activeTurnId: source.currentTurnId,
+    });
+    const forked = await forkCodexThread(this.client, {
+      threadId: source.currentThreadId,
+      ...(beforeTurnId ? { beforeTurnId } : {}),
+      cwd: targetConfig.cwd,
+      model: targetConfig.model ?? null,
+      serviceTier,
+      ...(codexConfig ? { config: codexConfig } : {}),
+      ...(developerInstructions ? { developerInstructions } : {}),
+      excludeTurns: false,
+      persistExtendedHistory: true,
+    });
+    this.currentThreadId = forked.thread.id;
+    this.rememberResolvedSandboxPolicy(forked);
+    await this.loadPersistedHistory(this.client);
+  }
+
   async revertConversation(input: { messageId: string }): Promise<void> {
     await this.connect();
     if (!this.client) {
@@ -7123,6 +7241,40 @@ export class CodexAppServerAgentClient implements AgentClient {
     );
     await session.connect();
     return session;
+  }
+
+  async forkSession(
+    source: AgentSession,
+    input: AgentConversationForkInput,
+    launchContext?: AgentLaunchContext,
+  ): Promise<AgentSession> {
+    if (!(source instanceof CodexAppServerAgentSession)) {
+      throw new Error("A Codex conversation fork requires a Codex source session");
+    }
+    const goalsEnabled = await this.resolveGoalsEnabled();
+    const autoReviewEnabled = await this.resolveAutoReviewEnabled();
+    const session = new CodexAppServerAgentSession(
+      { ...input.targetConfig, provider: CODEX_PROVIDER },
+      null,
+      this.logger,
+      () =>
+        this.spawnAppServer(launchContext?.env, {
+          goalsEnabled,
+          agentId: launchContext?.agentId,
+        }),
+      this.sessionDeps(),
+      false,
+      goalsEnabled,
+      autoReviewEnabled,
+      launchContext?.agentId,
+    );
+    try {
+      await session.forkFromConversation(source, input);
+      return session;
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
   }
 
   async listImportableSessions(
