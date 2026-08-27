@@ -120,8 +120,11 @@ jobs:
           cd packages/app
           build_json="$(npx eas build --platform android --profile fork-apk --non-interactive --freeze-credentials --wait --json)"
           build_id="$(jq -r 'if type == "array" then .[0].id // empty else .id // empty end' <<<"$build_json")"
+          artifact_url="$(jq -r 'if type == "array" then .[0].artifacts.buildUrl // .[0].artifacts.applicationArchiveUrl // empty else .artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty end' <<<"$build_json")"
           test -n "$build_id"
+          test -n "$artifact_url"
           echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+          echo "artifact_url=$artifact_url" >> "$GITHUB_OUTPUT"
 
       - name: Download APK
         id: artifact
@@ -129,8 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           cd packages/app
-          build_json="$(npx eas build:view '${{ steps.eas_build.outputs.build_id }}' --json)"
-          artifact_url="$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' <<<"$build_json")"
+          artifact_url='${{ steps.eas_build.outputs.artifact_url }}'
           test -n "$artifact_url"
           asset_name="Paseo-Fork-${RELEASE_VERSION}-android.apk"
           asset_path="$RUNNER_TEMP/$asset_name"
