@@ -2049,6 +2049,13 @@ export const ja: TranslationResources = {
       updates: {
         label: "アプリの更新",
         forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "インストール準備完了: {{version}}",
         installTitle: "デスクトップの更新をインストール",
         installMessage: "このコンピューターのPaseoを更新します",

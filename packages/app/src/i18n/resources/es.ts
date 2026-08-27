@@ -2082,6 +2082,13 @@ export const es: TranslationResources = {
       updates: {
         label: "Actualizaciones de aplicaciones",
         forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "Listo para instalar:{{version}}",
         installTitle: "Instalar actualización de escritorio",
         installMessage: "Esto actualizaPaseoen esta computadora.",

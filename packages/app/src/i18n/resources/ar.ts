@@ -2031,6 +2031,13 @@ export const ar: TranslationResources = {
       updates: {
         label: "تحديثات التطبيق",
         forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "جاهز للتثبيت:{{version}}",
         installTitle: "تثبيت تحديث سطح المكتب",
         installMessage: "يؤدي هذا إلى تحديث Paseo على هذا الكمبيوتر",

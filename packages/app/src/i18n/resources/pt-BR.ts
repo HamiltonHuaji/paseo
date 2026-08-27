@@ -2066,6 +2066,13 @@ export const ptBR: TranslationResources = {
       updates: {
         label: "Atualizações do app",
         forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "Pronta para instalar: {{version}}",
         installTitle: "Instalar atualização desktop",
         installMessage: "Isso atualiza o Paseo neste computador",

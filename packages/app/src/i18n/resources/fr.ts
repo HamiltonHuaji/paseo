@@ -2086,6 +2086,13 @@ export const fr: TranslationResources = {
       updates: {
         label: "Mises à jour de l'application",
         forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "Prêt à installer:{{version}}",
         installTitle: "Installer la mise à jour du bureau",
         installMessage: "Cela met à jourPaseosur cet ordinateur",

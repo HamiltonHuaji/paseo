@@ -2007,6 +2007,13 @@ export const zhCN: TranslationResources = {
       updates: {
         label: "应用更新",
         forkLabel: "Fork 更新",
+        android: {
+          available: "已发布签名 APK {{version}}。",
+          latest: "此设备已是最新版本 {{version}}。",
+          unavailable: "无法获取 Fork APK 版本状态。",
+          checkFailed: "无法检查 Fork APK 版本。",
+          download: "下载 APK",
+        },
         readyToInstall: "可安装：{{version}}",
         installTitle: "安装桌面版更新",
         installMessage: "这会更新此电脑上的 Paseo",

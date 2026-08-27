@@ -2135,6 +2135,13 @@ export const en = {
       updates: {
         label: "App updates",
         forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "Ready to install: {{version}}",
         installTitle: "Install desktop update",
         installMessage: "This updates Paseo on this computer",

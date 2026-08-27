@@ -2043,6 +2043,13 @@ export const ko: TranslationResources = {
       updates: {
         label: "앱 업데이트",
         forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "설치 준비됨: {{version}}",
         installTitle: "데스크톱 업데이트 설치",
         installMessage: "이 컴퓨터의 Paseo를 업데이트합니다",

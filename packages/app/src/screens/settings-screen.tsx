@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -135,6 +136,8 @@ import {
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { returnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
 import { isNative, isWeb } from "@/constants/platform";
+import { isForkBuild } from "@/constants/build-profile";
+import { checkForkAndroidRelease, type ForkAndroidRelease } from "@/updates/fork-android-release";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -609,6 +612,7 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
             <Text style={styles.aboutValue}>{appVersionText}</Text>
           </View>
           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
+          <ForkAndroidUpdateRow currentVersion={appVersion} />
         </View>
       </SettingsSection>
       <ConnectedHostsSection clientVersion={appVersion} />
@@ -616,6 +620,81 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
         <CommunityLinks />
       </View>
     </>
+  );
+}
+
+function ForkAndroidUpdateRow({ currentVersion }: { currentVersion: string | null }) {
+  const { t } = useTranslation();
+  const [release, setRelease] = useState<ForkAndroidRelease | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [hasCheckError, setHasCheckError] = useState(false);
+  const isAvailable = Platform.OS === "android" && isForkBuild && currentVersion !== null;
+
+  const checkForUpdate = useCallback(async () => {
+    if (!isAvailable || !currentVersion) return;
+    setIsChecking(true);
+    setHasCheckError(false);
+    try {
+      setRelease(await checkForkAndroidRelease(currentVersion));
+    } catch (error) {
+      console.error("[Settings] Failed to check fork Android release", error);
+      setHasCheckError(true);
+    } finally {
+      setIsChecking(false);
+    }
+  }, [currentVersion, isAvailable]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isAvailable) void checkForUpdate();
+      return undefined;
+    }, [checkForUpdate, isAvailable]),
+  );
+
+  const handleOpenRelease = useCallback(() => {
+    const url = release?.hasUpdate && release.apkUrl ? release.apkUrl : release?.releaseUrl;
+    if (url) void openExternalUrl(url);
+  }, [release]);
+
+  if (!isAvailable) return null;
+
+  let statusText = t("settings.about.updates.android.unavailable");
+  if (isChecking && !release) {
+    statusText = t("settings.about.updates.checking");
+  } else if (release?.hasUpdate) {
+    statusText = t("settings.about.updates.android.available", {
+      version: formatVersionWithPrefix(release.latestVersion),
+    });
+  } else if (release) {
+    statusText = t("settings.about.updates.android.latest", {
+      version: formatVersionWithPrefix(release.latestVersion),
+    });
+  }
+
+  return (
+    <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.forkLabel")}</Text>
+        <Text style={settingsStyles.rowHint}>{statusText}</Text>
+        {hasCheckError ? (
+          <Text style={styles.aboutErrorText}>
+            {t("settings.about.updates.android.checkFailed")}
+          </Text>
+        ) : null}
+      </View>
+      <View style={styles.aboutUpdateActions}>
+        <Button variant="outline" size="sm" onPress={checkForUpdate} disabled={isChecking}>
+          {isChecking ? t("settings.about.updates.checking") : t("settings.about.updates.check")}
+        </Button>
+        {release ? (
+          <Button variant="default" size="sm" onPress={handleOpenRelease}>
+            {release.hasUpdate && release.apkUrl
+              ? t("settings.about.updates.android.download")
+              : t("settings.about.updates.official.viewRelease")}
+          </Button>
+        ) : null}
+      </View>
+    </View>
   );
 }
 
