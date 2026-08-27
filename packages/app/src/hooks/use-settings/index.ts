@@ -48,6 +48,7 @@ import {
   type SidebarWorkspaceTrailing,
   type SettingsDeps,
   type WorkspaceTitleSource,
+  type WorkspaceTabPlacement,
 } from "./storage";
 
 export {
@@ -85,6 +86,7 @@ export type {
   Settings,
   SettingsDeps,
   SidebarWorkspaceTrailing,
+  WorkspaceTabPlacement,
   WorkspaceTitleSource,
 };
 

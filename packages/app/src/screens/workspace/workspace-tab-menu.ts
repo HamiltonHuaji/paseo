@@ -1,9 +1,10 @@
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
+import type { DragOrientation } from "@/components/drag-orientation";
 import { i18n } from "@/i18n/i18next";
 import { encodeFilePathForPathSegment, encodeWorkspaceIdForPathSegment } from "@/utils/host-routes";
 import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
 
-export type WorkspaceTabMenuSurface = "desktop" | "mobile";
+export type WorkspaceTabMenuSurface = "desktop" | "desktop-rail" | "mobile";
 
 export interface WorkspaceTabMenuLabels {
   copyResumeCommand: string;
@@ -90,6 +91,7 @@ interface BuildWorkspaceTabMenuEntriesInput {
 }
 
 interface BuildWorkspaceDesktopTabActionsInput {
+  orientation?: DragOrientation;
   tab: WorkspaceTabDescriptor;
   index: number;
   tabCount: number;
@@ -142,22 +144,34 @@ function buildCloseBeforeLabel(
   surface: WorkspaceTabMenuSurface,
   labels: WorkspaceTabMenuLabels,
 ): string {
-  return surface === "mobile" ? labels.closeAbove : labels.closeLeft;
+  return surface === "desktop" ? labels.closeLeft : labels.closeAbove;
 }
 
 function buildCloseAfterLabel(
   surface: WorkspaceTabMenuSurface,
   labels: WorkspaceTabMenuLabels,
 ): string {
-  return surface === "mobile" ? labels.closeBelow : labels.closeRight;
+  return surface === "desktop" ? labels.closeRight : labels.closeBelow;
 }
 
 function buildCloseBeforeTestIDSuffix(surface: WorkspaceTabMenuSurface): string {
-  return surface === "mobile" ? "close-above" : "close-left";
+  return surface === "desktop" ? "close-left" : "close-above";
 }
 
 function buildCloseAfterTestIDSuffix(surface: WorkspaceTabMenuSurface): string {
-  return surface === "mobile" ? "close-below" : "close-right";
+  return surface === "desktop" ? "close-right" : "close-below";
+}
+
+function buildCloseBeforeIcon(
+  surface: WorkspaceTabMenuSurface,
+): Extract<WorkspaceTabMenuEntry, { kind: "item" }>["icon"] {
+  return surface === "desktop-rail" ? "arrow-up-to-line" : "arrow-left-to-line";
+}
+
+function buildCloseAfterIcon(
+  surface: WorkspaceTabMenuSurface,
+): Extract<WorkspaceTabMenuEntry, { kind: "item" }>["icon"] {
+  return surface === "desktop-rail" ? "arrow-down-to-line" : "arrow-right-to-line";
 }
 
 function getCloseButtonTestId(tab: WorkspaceTabDescriptor): string {
@@ -298,7 +312,7 @@ export function buildWorkspaceTabMenuEntries(
     }
   }
 
-  if (surface === "desktop") {
+  if (surface !== "mobile") {
     if (entries.length > 0) {
       entries.push({ kind: "separator", key: "actions-separator" });
     }
@@ -347,7 +361,7 @@ export function buildWorkspaceTabMenuEntries(
     kind: "item",
     key: "close-before",
     label: buildCloseBeforeLabel(surface, labels),
-    icon: "arrow-left-to-line",
+    icon: buildCloseBeforeIcon(surface),
     disabled: isFirstTab,
     testID: `${menuTestIDBase}-${buildCloseBeforeTestIDSuffix(surface)}`,
     onSelect: () => {
@@ -358,7 +372,7 @@ export function buildWorkspaceTabMenuEntries(
     kind: "item",
     key: "close-after",
     label: buildCloseAfterLabel(surface, labels),
-    icon: "arrow-right-to-line",
+    icon: buildCloseAfterIcon(surface),
     disabled: isLastTab,
     testID: `${menuTestIDBase}-${buildCloseAfterTestIDSuffix(surface)}`,
     onSelect: () => {
@@ -411,7 +425,7 @@ export function buildWorkspaceDesktopTabActions(
   return {
     contextMenuTestId,
     menuEntries: buildWorkspaceTabMenuEntries({
-      surface: "desktop",
+      surface: input.orientation === "vertical" ? "desktop-rail" : "desktop",
       tab: input.tab,
       index: input.index,
       tabCount: input.tabCount,
