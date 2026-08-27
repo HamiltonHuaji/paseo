@@ -1,6 +1,7 @@
 import { useCallback, useMemo, type ComponentType, type ReactElement } from "react";
 import { View } from "react-native";
 import { withUnistyles } from "react-native-unistyles";
+import { useTranslation } from "react-i18next";
 import {
   DropdownMenuContent,
   DropdownMenuItem,
@@ -18,6 +19,8 @@ import {
 } from "@/workspace-tabs/launcher";
 import type { PaneHost } from "@/panels/panel-manifest";
 import type { PanelIconProps } from "@/panels/panel-registry";
+import { ToolbarButton, ToolbarControls } from "@/components/ui/pane-content-toolbar";
+import { getWorkspaceVerticalQuickLaunchItems } from "@/screens/workspace/workspace-vertical-tab-actions";
 
 const mutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
@@ -78,6 +81,54 @@ function WorkspaceNewTabMenuItem({
 function LaunchItemShortcut({ actionId }: { actionId: string }) {
   const keys = useShortcutKeys(actionId);
   return keys ? <Shortcut chord={keys} /> : null;
+}
+
+function WorkspaceVerticalQuickLaunchAction({
+  item,
+  paneId,
+}: {
+  item: WorkspaceTabLaunchItem;
+  paneId?: string;
+}) {
+  const { t } = useTranslation();
+  const shortcutKeys = useShortcutKeys(item.shortcutActionId ?? "");
+  const handlePress = useCallback(() => item.launch({ kind: "open", paneId }), [item, paneId]);
+  let label = item.label;
+  if (item.id === "agent") label = t("workspace.tabs.actions.newAgent");
+  else if (item.id === "terminal") label = t("workspace.tabs.actions.newTerminal");
+  else if (item.id === "browser") label = t("workspace.tabs.actions.newBrowser");
+
+  return (
+    <ToolbarButton
+      label={label}
+      shortcut={shortcutKeys}
+      tooltipSide="top"
+      testID={`workspace-tabs-rail-new-${item.id}`}
+      disabled={item.disabled}
+      onPress={handlePress}
+    >
+      <LaunchItemIcon item={item} />
+    </ToolbarButton>
+  );
+}
+
+export function WorkspaceVerticalTabLaunchActions({
+  serverId,
+  paneId,
+}: {
+  serverId: string;
+  paneId?: string;
+}) {
+  const groups = useWorkspaceTabLaunchCatalog({ serverId, purpose: "primary", host: "main" });
+  const items = useMemo(() => getWorkspaceVerticalQuickLaunchItems(groups), [groups]);
+
+  return (
+    <ToolbarControls testID="workspace-tabs-rail-quick-actions">
+      {items.map((item) => (
+        <WorkspaceVerticalQuickLaunchAction key={item.id} item={item} paneId={paneId} />
+      ))}
+    </ToolbarControls>
+  );
 }
 
 export function WorkspaceNewTabMenuContent({
