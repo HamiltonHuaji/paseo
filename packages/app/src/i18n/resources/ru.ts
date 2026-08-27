@@ -330,9 +330,15 @@ export const ru: TranslationResources = {
       copyTurn: "Скопировать ответ",
       copyMessage: "Копировать сообщение",
       forkMenu: "Форкнуть чат отсюда",
+      forkImplementationNative: "Нативный форк диалога",
+      forkImplementationCopiedContext: "Копирует историю чата",
       forkInNewTab: "Создать форк в новой вкладке",
       forkInNewWorkspace: "Создать форк в новом рабочем пространстве",
       forkUnavailable: "Обновите хост, чтобы использовать эту функцию.",
+      forkNativeUnavailable:
+        "Обновите клиент Paseo и хост, чтобы создавать нативные форки диалогов Codex.",
+      forkWaitForTurn: "Дождитесь завершения текущего хода перед созданием форка.",
+      forkSameHost: "Нативный форк Codex должен оставаться на исходном хосте.",
       forkMissingWorkspace: "Этот агент не связан с рабочим пространством.",
       forkFailed: "Не удалось создать форк чата",
       openFile: "Открыть файл",
@@ -2214,6 +2220,11 @@ export const ru: TranslationResources = {
           pureBlack: "Абсолютно чёрная",
           auto: "Системная",
         },
+      },
+      workspaceTabs: {
+        title: "Вкладки рабочей области",
+        description: "Слева на широких панелях; сверху на узких",
+        options: { top: "Сверху", left: "Слева" },
       },
       detailLevel: {
         title: "Уровень детализации",

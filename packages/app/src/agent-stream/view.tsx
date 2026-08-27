@@ -82,6 +82,12 @@ import {
 import { resolveBottomOverlayTailInset } from "./bottom-overlay-inset";
 import { layoutStream, type StreamLayoutItem } from "./layout";
 import {
+  CLIENT_SUPPORTS_NATIVE_CONVERSATION_FORK,
+  resolveAssistantForkImplementation,
+  resolveForkPreparation,
+  type AssistantForkImplementation,
+} from "./fork-preparation";
+import {
   type BottomAnchorLocalRequest,
   type BottomAnchorRouteRequest,
 } from "./bottom-anchor-controller";
@@ -100,6 +106,7 @@ import {
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { useForkAgent } from "@/hooks/use-fork-agent";
+import { useHostFeature } from "@/runtime/host-features";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 import { recordRenderProfileReasons } from "@/utils/render-profiler";
@@ -156,6 +163,7 @@ function renderStreamItemWithTurnFooter(input: {
   layoutItem: StreamLayoutItem;
   strategy: TurnContentStrategy;
   supportsTimelineCursor: boolean;
+  forkImplementation: AssistantForkImplementation;
   onForkAssistantTurn?: AssistantTurnForkHandler;
 }): ReactNode {
   if (!input.content) {
@@ -170,6 +178,7 @@ function renderStreamItemWithTurnFooter(input: {
       timing={footerHost.timing}
       startIndex={footerHost.startIndex}
       supportsTimelineCursor={input.supportsTimelineCursor}
+      forkImplementation={input.forkImplementation}
       onForkAssistantTurn={input.onForkAssistantTurn}
     />
   ) : null;
@@ -194,6 +203,12 @@ function renderStreamItemWithTurnFooter(input: {
       {footer}
     </>
   );
+}
+
+function sourceSupportsNativeConversationFork(
+  capabilities: AgentStreamViewProps["context"]["capabilities"],
+): boolean {
+  return capabilities?.supportsNativeConversationFork === true;
 }
 
 function renderListEmptyComponent(input: {
@@ -395,6 +410,26 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const isTimelineDetached = useSessionStore(
       (state) => state.sessions[resolvedServerId]?.agentTimelineHasNewer.get(agentId) === true,
     );
+    const supportsAgentForkContext = useHostFeature(resolvedServerId, "agentForkContext");
+    const supportsNativeConversationFork = useHostFeature(
+      resolvedServerId,
+      "agentConversationFork",
+    );
+    const forkPreparation = resolveForkPreparation({
+      provider: context.provider,
+      clientSupportsNative: CLIENT_SUPPORTS_NATIVE_CONVERSATION_FORK,
+      sourceSupportsNative: sourceSupportsNativeConversationFork(context.capabilities),
+      daemonSupportsNative: supportsNativeConversationFork,
+      daemonSupportsContext: supportsAgentForkContext,
+    });
+    const completedForkImplementation = resolveAssistantForkImplementation({
+      preparation: forkPreparation,
+      selectedTurnIsActive: false,
+    });
+    const activeForkImplementation = resolveAssistantForkImplementation({
+      preparation: forkPreparation,
+      selectedTurnIsActive: true,
+    });
 
     const workspaceRoot = context.cwd?.trim() || "";
     const { requestDirectoryListing } = useFileExplorerActions({
@@ -512,10 +547,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       },
     );
 
-    // The in-flight turn forks with no boundary at all: `selectForkContextRows`
-    // projects the whole timeline when neither boundary field is given, so the
-    // fork carries everything up to now, including the response still streaming
-    // in front of the user.
+    // Copied-context providers can capture an in-flight projection. Native
+    // provider forks reject this boundary and ask the user to wait for the turn.
     const handleForkInFlightTurn: InFlightTurnForkHandler = useStableEvent(async (target) => {
       await forkAgent({
         agentId,
@@ -913,6 +946,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           layoutItem,
           strategy: streamRenderStrategy,
           supportsTimelineCursor: supportsAgentForkContextCursor,
+          forkImplementation: completedForkImplementation,
           onForkAssistantTurn: readOnly ? undefined : handleForkAssistantTurn,
         });
       },
@@ -922,6 +956,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         renderStreamItemContent,
         streamRenderStrategy,
         supportsAgentForkContextCursor,
+        completedForkImplementation,
       ],
     );
 
@@ -929,7 +964,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       () => Array.from(pendingPermissions.values()).filter((perm) => perm.agentId === agentId),
       [pendingPermissions, agentId],
     );
-
     const pendingPermissionsNode = useMemo(
       () =>
         renderPendingPermissionsNode({
@@ -947,6 +981,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
             host={bottomTurnFooterHost}
             strategy={streamRenderStrategy}
             supportsTimelineCursor={supportsAgentForkContextCursor}
+            completedForkImplementation={completedForkImplementation}
+            activeForkImplementation={activeForkImplementation}
             onForkAssistantTurn={readOnly ? undefined : handleForkAssistantTurn}
             onForkInFlightTurn={readOnly ? undefined : handleForkInFlightTurn}
           />
@@ -960,6 +996,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         bottomTurnFooterHost,
         streamRenderStrategy,
         supportsAgentForkContextCursor,
+        completedForkImplementation,
+        activeForkImplementation,
       ],
     );
     const renderModel = useMemo<AgentStreamRenderModel>(() => {

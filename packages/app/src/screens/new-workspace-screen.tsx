@@ -95,6 +95,10 @@ import type { AgentAttachment, ForgeSearchItem } from "@getpaseo/protocol/messag
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/workspace-tabs/model";
+import {
+  assertNativeConversationForkHost,
+  toNativeConversationForkSource,
+} from "@/agent-stream/native-conversation-fork";
 import { isEmptyWorkspaceSubmission, runCreateEmptyWorkspace } from "./new-workspace-empty";
 import {
   getWorkspaceNamingAttachments,
@@ -879,6 +883,7 @@ interface CreateChatAgentInput {
   labels: {
     composerStateRequired: string;
     selectModel: string;
+    forkSameHost: string;
   };
 }
 
@@ -960,6 +965,12 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
     format: attachmentSubmitFormat,
   });
   const workspaceNamingAttachments = getWorkspaceNamingAttachments(reviewAttachments);
+  assertNativeConversationForkHost({
+    forkFrom: input.forkDraftSetup?.nativeForkFrom,
+    serverId,
+    errorMessage: input.labels.forkSameHost,
+  });
+  const nativeForkSource = toNativeConversationForkSource(input.forkDraftSetup?.nativeForkFrom);
   const wirePayload = splitComposerAttachmentsForSubmit(attachments, {
     format: attachmentSubmitFormat,
   });
@@ -979,6 +990,7 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
     clientMessageId: `${input.draftId}:initial-message`,
     images: images?.length ? images : undefined,
     attachments: wirePayload.attachments?.length ? wirePayload.attachments : undefined,
+    ...(nativeForkSource ? { forkFrom: nativeForkSource } : {}),
   };
   const execute = async (requestedAgent = initialAgent): Promise<AgentSnapshotPayload> => {
     const { agent } = await ensureWorkspace({
@@ -1035,6 +1047,9 @@ async function createWorkspaceChatAgent(input: CreateChatAgentInput): Promise<Su
         clientMessageId: initialAgent.clientMessageId,
         images: request.images,
         attachments: request.attachments,
+        ...((request.forkFrom ?? initialAgent.forkFrom)
+          ? { forkFrom: request.forkFrom ?? initialAgent.forkFrom }
+          : {}),
       }),
   };
   await agentCreation.result;
@@ -2108,7 +2123,7 @@ export function NewWorkspaceScreen({
         setErrorMessage(null);
         await composerState?.persistFormPreferences();
         await updateFormPreferences({ launchTarget });
-        if (isEmptyWorkspaceSubmission(payload)) {
+        if (!forkDraftSetup?.nativeForkFrom && isEmptyWorkspaceSubmission(payload)) {
           setPendingAction("empty");
           let outcome: SubmitOutcome = "background";
           await runCreateEmptyWorkspace({
@@ -2148,6 +2163,7 @@ export function NewWorkspaceScreen({
           labels: {
             composerStateRequired: t("newWorkspace.errors.composerStateRequired"),
             selectModel: t("newWorkspace.errors.selectModel"),
+            forkSameHost: t("message.actions.forkSameHost"),
           },
         });
         if (outcome === "background") {

@@ -331,9 +331,15 @@ export const ja: TranslationResources = {
       copyTurn: "ターンをコピー",
       copyMessage: "メッセージをコピー",
       forkMenu: "メッセージをフォーク",
+      forkImplementationNative: "ネイティブ会話フォーク",
+      forkImplementationCopiedContext: "チャット履歴をコピー",
       forkInNewTab: "新しいタブにフォーク",
       forkInNewWorkspace: "新しいワークスペースにフォーク",
       forkUnavailable: "これを使用するにはホストを更新してください。",
+      forkNativeUnavailable:
+        "Codex 会話をネイティブにフォークするには、Paseo クライアントとホストを更新してください。",
+      forkWaitForTurn: "現在のターンが完了してからフォークしてください。",
+      forkSameHost: "Codex のネイティブフォークは元のホスト上に作成する必要があります。",
       forkMissingWorkspace: "このエージェントはワークスペース内にありません。",
       forkFailed: "チャットのフォークに失敗しました",
       openFile: "ファイルを開く",
@@ -2197,6 +2203,11 @@ export const ja: TranslationResources = {
           pureBlack: "ピュアブラック",
           auto: "システム",
         },
+      },
+      workspaceTabs: {
+        title: "ワークスペースタブ",
+        description: "広いペインでは左側、狭いペインでは自動的に上部へ戻ります",
+        options: { top: "上", left: "左" },
       },
       detailLevel: {
         title: "詳細レベル",
