@@ -120,6 +120,43 @@ describe("buildWorkspaceTabMenuEntries", () => {
     ]);
   });
 
+  it("uses above and below semantics for desktop rail close actions", () => {
+    const entries = buildWorkspaceTabMenuEntries({
+      surface: "desktop-rail",
+      tab: createAgentTab(),
+      index: 1,
+      tabCount: 3,
+      menuTestIDBase: "workspace-tab-context-agent_123",
+      onCopyResumeCommand: vi.fn(),
+      onCopyAgentId: vi.fn(),
+      onCopyTerminalId: vi.fn(),
+      onCopyFilePath: vi.fn(),
+      onReloadAgent: vi.fn(),
+      onRenameTab: vi.fn(),
+      onMoveTabToStart: vi.fn(),
+      onMoveTabToEnd: vi.fn(),
+      onCloseTab: vi.fn(),
+      onCloseTabsBefore: vi.fn(),
+      onCloseTabsAfter: vi.fn(),
+      onCloseOtherTabs: vi.fn(),
+    });
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        key: "close-before",
+        label: "Close tabs above",
+        icon: "arrow-up-to-line",
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        key: "close-after",
+        label: "Close tabs below",
+        icon: "arrow-down-to-line",
+      }),
+    );
+  });
+
   it("moves a tab to either edge without mutating the source order", () => {
     const first = createAgentTab();
     const middle: WorkspaceTabDescriptor = {

@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import type { DraggableRenderItemInfo } from "./draggable-list.types";
+import type { DragOrientation } from "./drag-orientation";
 
 export function SortableInlineList<T>({
   data,
@@ -15,6 +16,7 @@ export function SortableInlineList<T>({
   externalDndContext?: boolean;
   activeId?: string | null;
   getItemData?: (item: T, index: number) => Record<string, unknown>;
+  orientation?: DragOrientation;
 }): ReactElement {
   return (
     <>

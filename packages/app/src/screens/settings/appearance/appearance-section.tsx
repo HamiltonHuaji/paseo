@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { useContributedThemes } from "@/appearance/provider";
 import { EditingTextInput as TextInput } from "@/components/ui/text-input";
@@ -31,6 +32,7 @@ import {
   sanitizeFontFamily,
   useAppSettings,
   type AppSettings,
+  type WorkspaceTabPlacement,
   DEFAULT_THEME_PREFERENCE,
 } from "@/hooks/use-settings";
 import {
@@ -42,7 +44,7 @@ import {
   THEME_SWATCHES,
   type Theme,
 } from "@/styles/theme";
-import { isNative } from "@/constants/platform";
+import { isNative, isWeb } from "@/constants/platform";
 import type { PluginThemeOption } from "@/plugins/themes";
 import { settingsStyles } from "@/styles/settings";
 import { AppearancePreview } from "./appearance-preview";
@@ -64,6 +66,41 @@ type BuiltInThemePreference = Exclude<AppSettings["theme"], typeof PLUGIN_THEME_
 
 function getThemeLabel(t: TFunction, value: BuiltInThemePreference): string {
   return t(`settings.appearance.theme.options.${value}`);
+}
+
+function WorkspaceTabPlacementRow({
+  value,
+  onChange,
+}: {
+  value: WorkspaceTabPlacement;
+  onChange: (value: WorkspaceTabPlacement) => void;
+}) {
+  const { t } = useTranslation();
+  const options = useMemo<SegmentedControlOption<WorkspaceTabPlacement>[]>(
+    () => [
+      { value: "top", label: t("settings.appearance.workspaceTabs.options.top") },
+      { value: "left", label: t("settings.appearance.workspaceTabs.options.left") },
+    ],
+    [t],
+  );
+
+  return (
+    <View style={settingsStyles.row}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{t("settings.appearance.workspaceTabs.title")}</Text>
+        <Text style={settingsStyles.rowHint}>
+          {t("settings.appearance.workspaceTabs.description")}
+        </Text>
+      </View>
+      <SegmentedControl
+        options={options}
+        value={value}
+        onValueChange={onChange}
+        size="sm"
+        testID="workspace-tab-placement"
+      />
+    </View>
+  );
 }
 
 // Platform default stacks can be the bare native tokens ("normal"/"monospace");
@@ -588,6 +625,13 @@ export function AppearanceSection() {
     [updateSettings],
   );
 
+  const handleWorkspaceTabPlacementChange = useCallback(
+    (workspaceTabPlacement: WorkspaceTabPlacement) => {
+      void updateSettings({ workspaceTabPlacement });
+    },
+    [updateSettings],
+  );
+
   const commitUiFontFamily = useCallback(
     (value: string) => {
       const sanitized = sanitizeFontFamily(value);
@@ -691,6 +735,16 @@ export function AppearanceSection() {
           />
         </View>
       </SettingsSection>
+      {isWeb ? (
+        <SettingsSection title={t("settings.appearance.workspaceTabs.title")}>
+          <View style={settingsStyles.card}>
+            <WorkspaceTabPlacementRow
+              value={settings.workspaceTabPlacement}
+              onChange={handleWorkspaceTabPlacementChange}
+            />
+          </View>
+        </SettingsSection>
+      ) : null}
       <SettingsSection title={t("settings.appearance.detailLevel.title")}>
         <View style={settingsStyles.card}>
           <AutoExpandReasoningRow

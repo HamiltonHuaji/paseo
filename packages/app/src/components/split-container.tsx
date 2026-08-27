@@ -70,8 +70,12 @@ import type { WorkspacePaneContentModel } from "@/screens/workspace/workspace-pa
 import { WorkspacePanelHost } from "@/screens/workspace/workspace-panel-host";
 import {
   WorkspaceDesktopTabsRow,
+  WorkspaceDesktopTabsRail,
   type WorkspaceDesktopTabRowItem,
 } from "@/screens/workspace/workspace-desktop-tabs-row";
+import type { DragOrientation } from "@/components/drag-orientation";
+import { useAppSettings, type WorkspaceTabPlacement } from "@/hooks/use-settings";
+import { resolveWorkspaceTabPlacement } from "@/screens/workspace/workspace-tab-placement";
 import { ExplorerSidebarDock } from "@/screens/workspace/explorer-sidebar";
 import {
   WorkspaceTabPresentationResolver,
@@ -88,7 +92,7 @@ import {
 } from "@/stores/workspace-layout-store";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
 import { RenderProfile } from "@/utils/render-profiler";
-import { isNative } from "@/constants/platform";
+import { isNative, isWeb } from "@/constants/platform";
 import { panelTargetSupportsHost } from "@/plugins/workspace-panels/locations";
 
 interface SplitContainerProps {
@@ -141,6 +145,7 @@ interface WorkspaceTabDragData {
   kind: "workspace-tab";
   paneId: string;
   tabId: string;
+  orientation?: DragOrientation;
 }
 
 interface SplitPaneDropData {
@@ -187,6 +192,7 @@ interface SplitNodeViewProps extends Omit<
   maximizedPaneId: string | null;
   workspaceHasSplits: boolean;
   onTogglePaneMaximized: (paneId: string) => void;
+  workspaceTabPlacement: WorkspaceTabPlacement;
 }
 
 interface SplitPaneViewProps extends Omit<
@@ -244,13 +250,18 @@ function computeTabOverDropPreview(input: {
     overPaneId: overData.paneId,
     overTabId: overData.tabId,
     targetTabs,
+    orientation: overData.orientation ?? "horizontal",
     activeRect: {
       left: rects.translatedRect.left,
+      top: rects.translatedRect.top,
       width: rects.translatedRect.width,
+      height: rects.translatedRect.height,
     },
     overRect: {
       left: rects.overRect.left,
+      top: rects.overRect.top,
       width: rects.overRect.width,
+      height: rects.overRect.height,
     },
   });
 }
@@ -339,6 +350,8 @@ export function SplitContainer({
   focusModeEnabled,
   onExitFocusMode,
 }: SplitContainerProps) {
+  const { settings } = useAppSettings();
+  const workspaceTabPlacement = settings.workspaceTabPlacement;
   const inheritedWindowChromeCorners = useWindowChromeCorners();
   const windowChromeCorners = focusModeEnabled ? inheritedWindowChromeCorners : "none";
   const [activeDragTabId, setActiveDragTabId] = useState<string | null>(null);
@@ -695,6 +708,7 @@ export function SplitContainer({
                   maximizedPaneId={maximizedPaneId}
                   workspaceHasSplits={workspaceHasSplits}
                   onTogglePaneMaximized={handleTogglePaneMaximized}
+                  workspaceTabPlacement={workspaceTabPlacement}
                   focusModeEnabled={focusModeEnabled}
                   onExitFocusMode={onExitFocusMode}
                 />
@@ -957,6 +971,7 @@ function SplitNodeView({
   maximizedPaneId,
   workspaceHasSplits,
   onTogglePaneMaximized,
+  workspaceTabPlacement,
   focusModeEnabled,
   onExitFocusMode,
 }: SplitNodeViewProps) {
@@ -1043,6 +1058,7 @@ function SplitNodeView({
             maximizedPaneId={maximizedPaneId}
             workspaceHasSplits={workspaceHasSplits}
             onTogglePaneMaximized={onTogglePaneMaximized}
+            workspaceTabPlacement={workspaceTabPlacement}
             focusModeEnabled={focusModeEnabled}
             onExitFocusMode={onExitFocusMode}
           />
@@ -1097,6 +1113,7 @@ function SplitNodeView({
               maximizedPaneId={maximizedPaneId}
               workspaceHasSplits={workspaceHasSplits}
               onTogglePaneMaximized={onTogglePaneMaximized}
+              workspaceTabPlacement={workspaceTabPlacement}
               focusModeEnabled={focusModeEnabled}
               onExitFocusMode={onExitFocusMode}
             />
@@ -1155,11 +1172,21 @@ function SplitPaneView({
   maximizedPaneId,
   workspaceHasSplits,
   onTogglePaneMaximized,
+  workspaceTabPlacement,
   focusModeEnabled,
   onExitFocusMode,
 }: SplitPaneViewProps) {
   const paneRef = useRef<View | null>(null);
+  const [paneWidth, setPaneWidth] = useState(0);
   const stableOnFocusPane = useStableEvent(onFocusPane);
+  const effectiveTabPlacement = resolveWorkspaceTabPlacement({
+    isCompact: false,
+    isWeb,
+    paneWidth,
+    preference: workspaceTabPlacement,
+  });
+  const usesTabRail = effectiveTabPlacement === "left";
+  const TabsComponent = usesTabRail ? WorkspaceDesktopTabsRail : WorkspaceDesktopTabsRow;
   const paneState = useMemo(
     () =>
       deriveWorkspacePaneState({
@@ -1180,6 +1207,11 @@ function SplitPaneView({
       })),
     [activeTabDescriptor?.key, closingTabIds, hoveredCloseTabKey, paneTabs],
   );
+
+  const handlePaneLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = Math.round(event.nativeEvent.layout.width);
+    setPaneWidth((current) => (current === nextWidth ? current : nextWidth));
+  }, []);
 
   useEffect(() => {
     if (isNative) {
@@ -1249,6 +1281,49 @@ function SplitPaneView({
     () => onTogglePaneMaximized(paneId),
     [onTogglePaneMaximized, paneId],
   );
+  const tabs = (
+    <TabsComponent
+      paneId={pane.id}
+      isFocused={isFocused && isWorkspaceFocused}
+      tabs={desktopTabRowItems}
+      normalizedServerId={normalizedServerId}
+      normalizedWorkspaceId={normalizedWorkspaceId}
+      setHoveredCloseTabKey={setHoveredCloseTabKey}
+      onNavigateTab={onNavigateTab}
+      onCloseTab={onCloseTab}
+      onCopyResumeCommand={onCopyResumeCommand}
+      onCopyAgentId={onCopyAgentId}
+      onCopyTerminalId={onCopyTerminalId}
+      onCopyFilePath={onCopyFilePath}
+      onReloadAgent={onReloadAgent}
+      onRenameTab={onRenameTab}
+      onCloseTabsToLeft={handleCloseTabsToLeft}
+      onCloseTabsToRight={handleCloseTabsToRight}
+      onCloseOtherTabs={handleCloseOtherTabs}
+      onCreateNewTab={onCreateNewTab}
+      onReorderTabs={handleReorderTabs}
+      externalDndContext
+      activeDragTabId={activeDragTabId}
+      tabDropPreviewIndex={
+        tabDropPreview?.paneId === pane.id ? tabDropPreview.indicatorIndex : null
+      }
+      showPaneSplitActions={!focusModeEnabled}
+      showPaneMaximizeAction={workspaceHasSplits && !focusModeEnabled}
+      paneMaximized={paneId === maximizedPaneId}
+      onTogglePaneMaximized={handleTogglePaneMaximized}
+      onSplitRight={handleSplitRight}
+      onSplitDown={handleSplitDown}
+      focusModeEnabled={Boolean(focusModeEnabled)}
+      onExitFocusMode={onExitFocusMode}
+    />
+  );
+  const paneLayoutStyle = useMemo(
+    () => [
+      styles.paneLayout,
+      usesTabRail ? styles.paneLayoutWithRail : styles.paneLayoutWithTopTabs,
+    ],
+    [usesTabRail],
+  );
   return (
     <RenderProfile id={`SplitPaneView:${pane.id}`}>
       <View
@@ -1256,58 +1331,40 @@ function SplitPaneView({
         collapsable={false}
         style={styles.pane}
         testID={`workspace-pane-${pane.id}`}
+        onLayout={handlePaneLayout}
       >
-        <WindowChromeSafeArea placement="inline" style={styles.paneTabs}>
-          <TitlebarDragRegion />
-          <WorkspaceDesktopTabsRow
-            paneId={pane.id}
-            isFocused={isFocused && isWorkspaceFocused}
-            tabs={desktopTabRowItems}
-            normalizedServerId={normalizedServerId}
-            normalizedWorkspaceId={normalizedWorkspaceId}
-            setHoveredCloseTabKey={setHoveredCloseTabKey}
-            onNavigateTab={onNavigateTab}
-            onCloseTab={onCloseTab}
-            onCopyResumeCommand={onCopyResumeCommand}
-            onCopyAgentId={onCopyAgentId}
-            onCopyTerminalId={onCopyTerminalId}
-            onCopyFilePath={onCopyFilePath}
-            onReloadAgent={onReloadAgent}
-            onRenameTab={onRenameTab}
-            onCloseTabsToLeft={handleCloseTabsToLeft}
-            onCloseTabsToRight={handleCloseTabsToRight}
-            onCloseOtherTabs={handleCloseOtherTabs}
-            onCreateNewTab={onCreateNewTab}
-            onReorderTabs={handleReorderTabs}
-            externalDndContext
-            activeDragTabId={activeDragTabId}
-            tabDropPreviewIndex={
-              tabDropPreview?.paneId === pane.id ? tabDropPreview.indicatorIndex : null
-            }
-            showPaneSplitActions={!focusModeEnabled}
-            showPaneMaximizeAction={workspaceHasSplits && !focusModeEnabled}
-            paneMaximized={paneId === maximizedPaneId}
-            onTogglePaneMaximized={handleTogglePaneMaximized}
-            onSplitRight={handleSplitRight}
-            onSplitDown={handleSplitDown}
-            focusModeEnabled={Boolean(focusModeEnabled)}
-            onExitFocusMode={onExitFocusMode}
-          />
-        </WindowChromeSafeArea>
-
-        <View style={styles.paneContent}>
-          <WorkspacePanelHost
-            paneId={pane.id}
-            tabs={paneTabs}
-            activeTabId={activeTabDescriptor?.tabId ?? null}
-            normalizedServerId={normalizedServerId}
-            normalizedWorkspaceId={normalizedWorkspaceId}
-            isWorkspaceFocused={isWorkspaceFocused}
-            isPaneFocused={isFocused}
-            onFocusPane={stableOnFocusPane}
-            buildPaneContentModel={buildPaneContentModel}
-          />
-          <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
+        {usesTabRail && focusModeEnabled ? (
+          <WindowChromeSafeArea
+            key="rail-window-chrome"
+            placement="below"
+            style={styles.paneRailWindowChrome}
+          >
+            <TitlebarDragRegion />
+          </WindowChromeSafeArea>
+        ) : null}
+        <View key="pane-layout" style={paneLayoutStyle}>
+          {usesTabRail ? (
+            tabs
+          ) : (
+            <WindowChromeSafeArea placement="inline" style={styles.paneTabs}>
+              <TitlebarDragRegion />
+              {tabs}
+            </WindowChromeSafeArea>
+          )}
+          <View style={styles.paneContent}>
+            <WorkspacePanelHost
+              paneId={pane.id}
+              tabs={paneTabs}
+              activeTabId={activeTabDescriptor?.tabId ?? null}
+              normalizedServerId={normalizedServerId}
+              normalizedWorkspaceId={normalizedWorkspaceId}
+              isWorkspaceFocused={isWorkspaceFocused}
+              isPaneFocused={isFocused}
+              onFocusPane={stableOnFocusPane}
+              buildPaneContentModel={buildPaneContentModel}
+            />
+            <SplitDropZone paneId={pane.id} active={showDropZones} preview={dropPreview} />
+          </View>
         </View>
       </View>
     </RenderProfile>
@@ -1426,6 +1483,20 @@ const styles = StyleSheet.create((theme) => ({
   paneTabs: {
     position: "relative",
     minWidth: 0,
+  },
+  paneRailWindowChrome: {
+    position: "relative",
+  },
+  paneLayout: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  paneLayoutWithRail: {
+    flexDirection: "row",
+  },
+  paneLayoutWithTopTabs: {
+    flexDirection: "column",
   },
   paneContent: {
     position: "relative",

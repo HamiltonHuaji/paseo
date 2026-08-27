@@ -70,4 +70,23 @@ describe("computeTabDropPreview", () => {
       indicatorIndex: 4,
     });
   });
+
+  it("uses the vertical midpoint for drops onto a left rail", () => {
+    expect(
+      computeTabDropPreview({
+        activePaneId: "source",
+        activeTabId: "x",
+        overPaneId: "target",
+        overTabId: "c",
+        targetTabs,
+        orientation: "vertical",
+        activeRect: { left: 0, top: 270, width: 200, height: 30 },
+        overRect: { left: 0, top: 200, width: 200, height: 40 },
+      }),
+    ).toEqual({
+      paneId: "target",
+      insertionIndex: 3,
+      indicatorIndex: 3,
+    });
+  });
 });
