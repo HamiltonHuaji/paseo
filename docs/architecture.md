@@ -151,6 +151,9 @@ Commander.js CLI with Docker-style commands. Common agent operations are also ex
 
 Communicates with the daemon via the same WebSocket protocol as the app.
 
+The fork can ship the CLI and daemon workspaces as one npm-compatible asset; see
+[fork-daemon-distribution.md](fork-daemon-distribution.md).
+
 ### `packages/relay` — Relay transport and E2E encryption
 
 Enables remote access when the daemon is behind a firewall.

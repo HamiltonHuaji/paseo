@@ -3,6 +3,9 @@
 The fork branch topology and upstream rebase procedure are documented in
 [fork-overlay.md](fork-overlay.md).
 
+The fork daemon tarball and its independent GitHub Release workflow are documented in
+[fork-daemon-distribution.md](fork-daemon-distribution.md).
+
 All workspaces share one version and release together.
 
 ## Two steps

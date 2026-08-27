@@ -4,6 +4,7 @@ import {
   validateDaemonInstallOrigin,
   type DaemonInstallOriginRuntime,
 } from "./install-origin.js";
+import { currentDaemonDistribution, type PaseoDaemonDistribution } from "./distribution.js";
 import { npmGlobalPaseoCli, type NpmGlobalPaseoCli } from "./npm-global-cli.js";
 
 export type DaemonSelfUpdatePhase = "starting" | "downloading" | "installing" | "complete";
@@ -29,6 +30,7 @@ export interface DaemonSelfUpdateLogger {
 export interface DaemonSelfUpdateRuntime {
   npm: NpmGlobalPaseoCli;
   installOrigin: DaemonInstallOriginRuntime;
+  distribution: PaseoDaemonDistribution;
 }
 
 export class DaemonSelfUpdateInProgressError extends Error {
@@ -41,6 +43,7 @@ export class DaemonSelfUpdateInProgressError extends Error {
 const defaultRuntime: DaemonSelfUpdateRuntime = {
   npm: npmGlobalPaseoCli,
   installOrigin: daemonInstallOriginRuntime,
+  distribution: currentDaemonDistribution,
 };
 
 const DESKTOP_MANAGED_UPDATE_ERROR =
@@ -67,6 +70,7 @@ export class DaemonSelfUpdater {
       const unsupportedReason = validateDaemonInstallOrigin(
         install,
         input.daemonVersion,
+        this.runtime.distribution,
         this.runtime.installOrigin,
       );
       if (unsupportedReason) {

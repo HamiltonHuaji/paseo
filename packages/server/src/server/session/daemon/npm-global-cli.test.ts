@@ -1,5 +1,6 @@
 import path from "node:path";
 import { describe, expect, test } from "vitest";
+import type { PaseoDaemonDistribution } from "./distribution.js";
 import { DefaultNpmGlobalPaseoCli } from "./npm-global-cli.js";
 
 interface CommandCall {
@@ -12,6 +13,15 @@ interface CommandCall {
 const globalRoot = path.join(path.sep, "global", "lib");
 const globalNodeModules = path.join(globalRoot, "node_modules");
 const cliPackagePath = path.join(globalNodeModules, "@getpaseo", "cli");
+const forkPackagePath = path.join(globalNodeModules, "@hamiltonhuaji", "paseo-fork");
+const forkDistribution: PaseoDaemonDistribution = {
+  kind: "bundled",
+  packageName: "@hamiltonhuaji/paseo-fork",
+  version: "0.6.1-fork.1",
+  serverVersion: "0.6.1",
+  installSpec: "https://github.com/HamiltonHuaji/paseo/releases/latest/download/paseo-fork.tgz",
+  packageRoot: forkPackagePath,
+};
 
 function npmGlobalPaseoCliJson(version: string, options?: { linked?: boolean }): string {
   return JSON.stringify({
@@ -80,6 +90,46 @@ describe("DefaultNpmGlobalPaseoCli", () => {
         timeout: 300_000,
         maxBuffer: 10 * 1024 * 1024,
       },
+    ]);
+  });
+
+  test("inspects and updates the bundled distribution rather than the official cli", async () => {
+    const calls: CommandCall[] = [];
+    const cli = new DefaultNpmGlobalPaseoCli(async (command, args, options) => {
+      calls.push({ command, args, timeout: options?.timeout, maxBuffer: options?.maxBuffer });
+      if (args[0] === "-g") {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            path: globalRoot,
+            dependencies: {
+              "@hamiltonhuaji/paseo-fork": {
+                version: "0.6.1-fork.1",
+                path: forkPackagePath,
+              },
+            },
+          }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "updated", stderr: "" };
+    }, forkDistribution);
+
+    await expect(cli.inspect()).resolves.toEqual({
+      version: "0.6.1-fork.1",
+      packagePath: forkPackagePath,
+      globalRootPath: globalRoot,
+      isLinked: false,
+    });
+    await cli.installLatest();
+
+    expect(calls.map((call) => call.args)).toEqual([
+      ["-g", "ls", "@hamiltonhuaji/paseo-fork", "--json", "--depth=0", "--long"],
+      [
+        "install",
+        "-g",
+        "https://github.com/HamiltonHuaji/paseo/releases/latest/download/paseo-fork.tgz",
+      ],
     ]);
   });
 
