@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Text } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
+  ArrowDownToLine,
   ArrowLeftToLine,
   ArrowRightToLine,
+  ArrowUpToLine,
   Copy,
   CopyX,
   Ellipsis,
@@ -25,6 +27,8 @@ import type { Theme } from "@/styles/theme";
 const ThemedEllipsis = withUnistyles(Ellipsis);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedRotateCw = withUnistyles(RotateCw);
+const ThemedArrowUpToLine = withUnistyles(ArrowUpToLine);
+const ThemedArrowDownToLine = withUnistyles(ArrowDownToLine);
 const ThemedArrowLeftToLine = withUnistyles(ArrowLeftToLine);
 const ThemedArrowRightToLine = withUnistyles(ArrowRightToLine);
 const ThemedCopyX = withUnistyles(CopyX);
@@ -51,6 +55,10 @@ function MobileTabDropdownMenuItem({
         return <ThemedCopy size={16} uniProps={mutedColorMapping} />;
       case "rotate-cw":
         return <ThemedRotateCw size={16} uniProps={mutedColorMapping} />;
+      case "arrow-up-to-line":
+        return <ThemedArrowUpToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-down-to-line":
+        return <ThemedArrowDownToLine size={16} uniProps={mutedColorMapping} />;
       case "arrow-left-to-line":
         return <ThemedArrowLeftToLine size={16} uniProps={mutedColorMapping} />;
       case "arrow-right-to-line":
