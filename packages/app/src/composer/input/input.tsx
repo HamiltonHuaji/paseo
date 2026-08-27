@@ -52,7 +52,6 @@ import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
 import { isImeComposingKeyboardEvent } from "@/utils/keyboard-ime";
 import { isWeb } from "@/constants/platform";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { RenderProfile } from "@/utils/render-profiler";
 import { useComposerHeight } from "./height";
@@ -77,13 +76,13 @@ import {
   applyDictationTranscript,
   computeCanStartDictation,
   resolveComposerSurfacePresentation,
-  runAlternateSendAction,
   runDefaultSendAction,
   runMessageInputKeyboardAction,
+  resolveComposerHardwareKeyAction,
   stopRealtimeVoice,
 } from "./state";
 
-const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["Enter"]];
+const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["mod", "Enter"]];
 const COMPOSER_INPUT_DATASET = { composerInput: "" } as const;
 
 export interface AttachmentMenuItem {
@@ -383,14 +382,12 @@ function SendButtonContent({
 interface DesktopKeyPressContext {
   onKeyPressCallback: ((event: ComposerKeyPressEvent) => boolean) | undefined;
   input: ComposerKeyPressEvent["input"];
-  submitOnEnter: boolean;
-  isAgentRunning: boolean;
   onQueue: ((payload: MessagePayload) => void) | undefined;
   isSubmitDisabled: boolean;
   isSubmitLoading: boolean;
   disabled: boolean;
-  handleAlternateSendAction: () => void;
-  handleDefaultSendAction: () => void;
+  handleQueueMessage: () => void;
+  handleSendMessage: () => void;
 }
 
 function handleDesktopKeyPressImpl(
@@ -398,6 +395,19 @@ function handleDesktopKeyPressImpl(
   ctx: DesktopKeyPressContext,
 ): void {
   if (isImeComposingKeyboardEvent(event.nativeEvent)) return;
+
+  const keyAction = resolveComposerHardwareKeyAction(event.nativeEvent);
+  if (keyAction) {
+    if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
+    if (keyAction === "queue" && !ctx.onQueue) return;
+    event.preventDefault();
+    if (keyAction === "queue") {
+      ctx.handleQueueMessage();
+    } else {
+      ctx.handleSendMessage();
+    }
+    return;
+  }
 
   if (ctx.onKeyPressCallback) {
     const handled = ctx.onKeyPressCallback({
@@ -407,23 +417,6 @@ function handleDesktopKeyPressImpl(
     });
     if (handled) return;
   }
-
-  const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-
-  if (event.nativeEvent.key !== "Enter") return;
-  if (!ctx.submitOnEnter) return;
-  if (shiftKey) return;
-
-  if ((metaKey || ctrlKey) && ctx.isAgentRunning && ctx.onQueue) {
-    if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
-    event.preventDefault();
-    ctx.handleAlternateSendAction();
-    return;
-  }
-
-  if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
-  event.preventDefault();
-  ctx.handleDefaultSendAction();
 }
 
 function getTextInputNativeElement(current: ComposerTextInputHandle | null): HTMLElement | null {
@@ -1188,7 +1181,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     } = resolveMessageInputProps(props);
     const mode = resolveComposerInputMode(inputMode);
     const { t } = useTranslation();
-    const isCompact = useIsCompactFormFactor();
     const { height: windowHeight } = useWindowDimensions();
     const maxInputHeight = resolveMaxInputHeight(windowHeight);
     const buttonIconSize = isWeb ? ICON_SIZE.md : ICON_SIZE.lg;
@@ -1544,16 +1536,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       });
     }, [defaultSendBehavior, isAgentRunning, onQueue, handleQueueMessage, handleSendMessage]);
 
-    const handleAlternateSendAction = useCallback(() => {
-      runAlternateSendAction({
-        defaultSendBehavior,
-        isAgentRunning,
-        onQueue,
-        handleSendMessage,
-        handleQueueMessage,
-      });
-    }, [defaultSendBehavior, isAgentRunning, handleSendMessage, handleQueueMessage, onQueue]);
-
     const getWebTextArea = useCallback(
       (): TextAreaHandle | null => getWebTextAreaImpl(textInputRef.current),
       [],
@@ -1585,8 +1567,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     );
 
     const shouldHandleWebKeyPress = isWeb;
-    const shouldSubmitOnEnter = isWeb && !isCompact;
-
     function handleDesktopKeyPress(event: WebTextInputKeyPressEvent) {
       if (!shouldHandleWebKeyPress) return;
       handleDesktopKeyPressImpl(event, {
@@ -1596,15 +1576,20 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
           valueRef.current,
           selectionRef.current,
         ),
-        submitOnEnter: shouldSubmitOnEnter,
-        isAgentRunning,
         onQueue,
         isSubmitDisabled,
         isSubmitLoading,
         disabled,
-        handleAlternateSendAction,
-        handleDefaultSendAction,
+        handleQueueMessage,
+        handleSendMessage,
       });
+    }
+
+    function handleNativeKeyPress(event: NativeSyntheticEvent<TextInputKeyPressEventData>) {
+      if (event.nativeEvent.key !== "Tab" || !onQueue) return;
+      if (isSubmitDisabled || isSubmitLoading || disabled) return;
+      event.preventDefault();
+      handleQueueMessage();
     }
 
     const primaryActionKind = resolvePrimaryActionKind({
@@ -1628,7 +1613,8 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       });
     useIosHardwareKeyboardSubmit({
       isEnabled: isInputFocused && !isSendButtonDisabled,
-      onSubmit: handleDefaultSendAction,
+      onSubmit: handleSendMessage,
+      onQueue: handleQueueMessage,
     });
     const submitAccessibilityLabel = resolveSubmitAccessibilityLabel({
       submitButtonAccessibilityLabel,
@@ -1806,7 +1792,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
               editable={!isDictating && !isRealtimeVoiceForCurrentAgent && !disabled}
               scrollEnabled={isComposerScrollEnabled}
               autoFocus={false}
-              onKeyPress={shouldHandleWebKeyPress ? handleDesktopKeyPress : undefined}
+              onKeyPress={shouldHandleWebKeyPress ? handleDesktopKeyPress : handleNativeKeyPress}
               onSelectionChange={handleSelectionChange}
               onPasteImages={onPasteImages}
               onPasteError={handlePasteError}

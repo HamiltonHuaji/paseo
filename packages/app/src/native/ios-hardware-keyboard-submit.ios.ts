@@ -1,12 +1,13 @@
 import { requireNativeModule, type EventSubscription } from "expo-modules-core";
 
 type HardwareKeyboardSubmitHandler = () => void;
+type HardwareKeyboardQueueHandler = () => void;
 
 interface PaseoHardwareKeyboardModule {
   setHardwareKeyboardSubmitEnabled(enabled: boolean): void;
   addListener(
-    eventName: "onHardwareKeyboardSubmit",
-    handler: HardwareKeyboardSubmitHandler,
+    eventName: "onHardwareKeyboardSubmit" | "onHardwareKeyboardQueue",
+    handler: HardwareKeyboardSubmitHandler | HardwareKeyboardQueueHandler,
   ): EventSubscription;
 }
 
@@ -18,4 +19,8 @@ export function setHardwareKeyboardSubmitEnabled(enabled: boolean) {
 
 export function addHardwareKeyboardSubmitListener(handler: HardwareKeyboardSubmitHandler) {
   return module.addListener("onHardwareKeyboardSubmit", handler);
+}
+
+export function addHardwareKeyboardQueueListener(handler: HardwareKeyboardQueueHandler) {
+  return module.addListener("onHardwareKeyboardQueue", handler);
 }
