@@ -203,6 +203,7 @@ export const es: TranslationResources = {
     empty: "Comience a chatear con este agente...",
     scrollToBottom: "Desplazarse hacia abajo",
     historyLoadFailed: "No se pudo cargar el historial del agente",
+    activity: { thinking: "Pensando", waiting: "Esperando" },
     permission: {
       plan: "Plan",
       required: "Permiso requerido",
@@ -296,9 +297,15 @@ export const es: TranslationResources = {
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensaje",
       forkMenu: "Bifurcar mensaje",
+      forkImplementationNative: "Bifurcación nativa de la conversación",
+      forkImplementationCopiedContext: "Copia el historial del chat",
       forkInNewTab: "Bifurcar en una pestaña nueva",
       forkInNewWorkspace: "Bifurcar en un espacio de trabajo nuevo",
       forkUnavailable: "Actualiza el host para usar esto.",
+      forkNativeUnavailable:
+        "Actualiza el cliente y el host de Paseo para bifurcar conversaciones de Codex.",
+      forkWaitForTurn: "Espera a que termine el turno actual antes de bifurcar.",
+      forkSameHost: "Una bifurcación nativa de Codex debe permanecer en el host de origen.",
       forkMissingWorkspace: "Este agente no está en un espacio de trabajo.",
       forkFailed: "No se pudo bifurcar el chat",
       openFile: "Abrir archivo",
@@ -2100,6 +2107,11 @@ export const es: TranslationResources = {
           pureBlack: "Negro puro",
           auto: "Sistema",
         },
+      },
+      workspaceTabs: {
+        title: "Pestañas del espacio de trabajo",
+        description: "La izquierda se usa en paneles anchos; los estrechos vuelven arriba",
+        options: { top: "Arriba", left: "Izquierda" },
       },
       detailLevel: {
         title: "Nivel de detalle",

@@ -205,6 +205,7 @@ export const fr: TranslationResources = {
     empty: "Commencez à discuter avec cet agent...",
     scrollToBottom: "Faire défiler vers le bas",
     historyLoadFailed: "Impossible de charger l’historique de l’agent",
+    activity: { thinking: "Réflexion", waiting: "En attente" },
     permission: {
       plan: "Plan",
       required: "Autorisation requise",
@@ -297,9 +298,15 @@ export const fr: TranslationResources = {
       copyTurn: "Copier le tour",
       copyMessage: "Copier le message",
       forkMenu: "Dupliquer le message",
+      forkImplementationNative: "Duplication native de la conversation",
+      forkImplementationCopiedContext: "Copie l’historique de discussion",
       forkInNewTab: "Dupliquer dans un nouvel onglet",
       forkInNewWorkspace: "Dupliquer dans un nouvel espace de travail",
       forkUnavailable: "Mettez l'hôte à jour pour utiliser ceci.",
+      forkNativeUnavailable:
+        "Mettez à jour le client Paseo et l'hôte pour dupliquer les conversations Codex.",
+      forkWaitForTurn: "Attendez la fin du tour actuel avant de dupliquer.",
+      forkSameHost: "Une duplication native Codex doit rester sur l'hôte source.",
       forkMissingWorkspace: "Cet agent n'est pas dans un espace de travail.",
       forkFailed: "Impossible de dupliquer le chat",
       openFile: "Ouvrir le fichier",
@@ -2104,6 +2111,11 @@ export const fr: TranslationResources = {
           pureBlack: "Noir pur",
           auto: "Système",
         },
+      },
+      workspaceTabs: {
+        title: "Onglets de l’espace de travail",
+        description: "À gauche sur les volets larges ; en haut sur les volets étroits",
+        options: { top: "En haut", left: "À gauche" },
       },
       detailLevel: {
         title: "Niveau de détail",

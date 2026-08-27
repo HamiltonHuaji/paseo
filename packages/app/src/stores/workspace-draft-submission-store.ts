@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ComposerAttachment } from "@/attachments/types";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import type { WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
+import type { NativeConversationForkHandoff } from "@/agent-stream/native-conversation-fork";
 
 export interface PendingWorkspaceDraftSubmission {
   serverId: string;
@@ -18,11 +19,13 @@ export interface PendingWorkspaceDraftSubmission {
   thinkingOptionId?: string;
   featureValues?: Record<string, unknown>;
   allowEmptyText?: boolean;
+  nativeForkFrom?: NativeConversationForkHandoff;
 }
 
 export interface PendingWorkspaceDraftSetup {
   setup: WorkspaceDraftTabSetup;
   sourceDirectory?: string | null;
+  nativeForkFrom?: NativeConversationForkHandoff;
 }
 
 interface WorkspaceDraftSubmissionState {
@@ -33,6 +36,7 @@ interface WorkspaceDraftSubmissionState {
     draftId: string;
     setup: WorkspaceDraftTabSetup;
     sourceDirectory?: string | null;
+    nativeForkFrom?: NativeConversationForkHandoff;
   }) => void;
   clearDraftSetup: (input: { draftId: string }) => void;
   consumePending: (input: {
@@ -68,13 +72,17 @@ export const useWorkspaceDraftSubmissionStore = create<WorkspaceDraftSubmissionS
           [submission.draftId]: submission,
         },
       })),
-    setDraftSetup: ({ draftId, setup, sourceDirectory }) => {
+    setDraftSetup: ({ draftId, setup, sourceDirectory, nativeForkFrom }) => {
       const normalizedDraftId = normalizeDraftId(draftId);
       if (!normalizedDraftId) return;
       set((state) => ({
         setupByDraftId: {
           ...state.setupByDraftId,
-          [normalizedDraftId]: { setup, sourceDirectory: sourceDirectory ?? null },
+          [normalizedDraftId]: {
+            setup,
+            sourceDirectory: sourceDirectory ?? null,
+            ...(nativeForkFrom ? { nativeForkFrom } : {}),
+          },
         },
       }));
     },

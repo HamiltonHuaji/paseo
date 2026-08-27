@@ -754,6 +754,7 @@ interface SubmitDraftInput {
   provider: AgentProvider;
   composerState: NewWorkspaceComposerState;
   supportsForgeSearch: boolean;
+  nativeForkFrom?: PendingWorkspaceDraftSetup["nativeForkFrom"];
 }
 
 type NewWorkspaceComposerState = NonNullable<
@@ -768,6 +769,7 @@ interface WorkspaceDraftSubmissionConfig {
   thinkingOptionId: string | null;
   featureValues: Record<string, unknown> | undefined;
   target: WorkspaceTabTarget;
+  nativeForkFrom?: PendingWorkspaceDraftSetup["nativeForkFrom"];
 }
 
 async function createAndMergeWorkspace(input: {
@@ -959,6 +961,7 @@ async function runCreateChatAgent(input: CreateChatAgentInput): Promise<void> {
     provider,
     composerState,
     supportsForgeSearch: input.supportsForgeSearch,
+    nativeForkFrom: input.forkDraftSetup?.nativeForkFrom,
   });
 }
 
@@ -999,8 +1002,10 @@ function resolveWorkspaceDraftSubmissionConfig(input: {
   provider: AgentProvider;
   composerState: NewWorkspaceComposerState;
   initialSetup?: WorkspaceDraftTabSetup;
+  nativeForkFrom?: PendingWorkspaceDraftSetup["nativeForkFrom"];
 }): WorkspaceDraftSubmissionConfig {
-  const { draftId, workspaceDirectory, provider, composerState, initialSetup } = input;
+  const { draftId, workspaceDirectory, provider, composerState, initialSetup, nativeForkFrom } =
+    input;
   if (initialSetup) {
     return {
       cwd: initialSetup.cwd,
@@ -1010,6 +1015,7 @@ function resolveWorkspaceDraftSubmissionConfig(input: {
       thinkingOptionId: initialSetup.thinkingOptionId,
       featureValues: initialSetup.featureValues,
       target: { kind: "draft", draftId, setup: initialSetup },
+      ...(nativeForkFrom ? { nativeForkFrom } : {}),
     };
   }
   return {
@@ -1020,6 +1026,7 @@ function resolveWorkspaceDraftSubmissionConfig(input: {
     thinkingOptionId: composerState.effectiveThinkingOptionId || null,
     featureValues: composerState.featureValues,
     target: { kind: "draft", draftId },
+    ...(nativeForkFrom ? { nativeForkFrom } : {}),
   };
 }
 
@@ -1035,6 +1042,7 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
     provider,
     composerState,
     initialSetup,
+    nativeForkFrom,
   } = input;
   const draftId = draftIdInput?.trim() || generateDraftId();
   const clientMessageId = generateMessageId();
@@ -1050,6 +1058,7 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
     provider,
     composerState,
     initialSetup,
+    nativeForkFrom,
   });
   useCreateFlowStore.getState().setPending({
     serverId,
@@ -1077,6 +1086,7 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
     ...(submission.thinkingOptionId ? { thinkingOptionId: submission.thinkingOptionId } : {}),
     ...(submission.featureValues ? { featureValues: submission.featureValues } : {}),
     allowEmptyText: true,
+    ...(submission.nativeForkFrom ? { nativeForkFrom: submission.nativeForkFrom } : {}),
   });
   clearDraft("sent");
   navigateToWorkspace({
@@ -2035,7 +2045,11 @@ export function NewWorkspaceScreen({
         setErrorMessage(null);
         await composerState?.persistFormPreferences();
         await updateFormPreferences({ launchTarget });
-        if (isEmptyWorkspaceSubmission(payload)) {
+        const nativeForkFrom = forkDraftSetup?.nativeForkFrom;
+        if (nativeForkFrom && nativeForkFrom.serverId !== selectedServerId) {
+          throw new Error(t("message.actions.forkSameHost"));
+        }
+        if (!nativeForkFrom && isEmptyWorkspaceSubmission(payload)) {
           setPendingAction("empty");
           await runCreateEmptyWorkspace({
             payload,

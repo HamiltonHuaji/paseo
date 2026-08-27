@@ -11,10 +11,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ICON_SIZE, type Theme } from "@/styles/theme";
+import type { AssistantForkImplementation } from "@/agent-stream/fork-preparation";
 
 export type AssistantForkTarget = "tab" | "workspace";
 
 interface AssistantForkMenuProps {
+  implementation: AssistantForkImplementation;
   onFork: (target: AssistantForkTarget) => Promise<void> | void;
   testID?: string;
 }
@@ -25,6 +27,7 @@ const foregroundColorMapping = (theme: Theme) => ({ color: theme.colors.foregrou
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
 export const AssistantForkMenu = memo(function AssistantForkMenu({
+  implementation,
   onFork,
   testID = "assistant-fork-menu",
 }: AssistantForkMenuProps) {
@@ -60,13 +63,30 @@ export const AssistantForkMenu = memo(function AssistantForkMenu({
     [isLocked],
   );
 
+  const implementationLabel = useMemo(() => {
+    switch (implementation) {
+      case "native":
+        return t("message.actions.forkImplementationNative");
+      case "context_attachment":
+        return t("message.actions.forkImplementationCopiedContext");
+      case "native_wait":
+        return t("message.actions.forkWaitForTurn");
+      case "native_unavailable":
+        return t("message.actions.forkNativeUnavailable");
+      case "unavailable":
+        return t("message.actions.forkUnavailable");
+    }
+  }, [implementation, t]);
+  const accessibilityLabel = `${t("message.actions.forkMenu")}. ${implementationLabel}`;
+
   const tooltipContent = useMemo(
     () => (
       <TooltipContent side="top" align="center" offset={8}>
         <Text style={styles.tooltipText}>{t("message.actions.forkMenu")}</Text>
+        <Text style={styles.tooltipDetail}>{implementationLabel}</Text>
       </TooltipContent>
     ),
-    [t],
+    [implementationLabel, t],
   );
 
   const forkIcon = useMemo(
@@ -80,7 +100,7 @@ export const AssistantForkMenu = memo(function AssistantForkMenu({
         <TooltipTrigger asChild>
           <View style={styles.triggerSlot} collapsable={false}>
             <DropdownMenuTrigger
-              accessibilityLabel={t("message.actions.forkMenu")}
+              accessibilityLabel={accessibilityLabel}
               accessibilityRole="button"
               disabled={isLocked}
               style={triggerStyle}
@@ -138,6 +158,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   tooltipText: {
     color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+  },
+  tooltipDetail: {
+    color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
 }));

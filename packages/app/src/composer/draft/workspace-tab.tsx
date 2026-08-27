@@ -54,6 +54,11 @@ import {
 } from "@/workspace-tabs/model";
 import { openPreferredWorkspaceTarget } from "@/workspace-tabs/open-beside";
 import { useSettings } from "@/hooks/use-settings";
+import {
+  assertNativeConversationForkHost,
+  toNativeConversationForkSource,
+  type NativeConversationForkHandoff,
+} from "@/agent-stream/native-conversation-fork";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
 const EMPTY_ONLINE_SERVER_IDS: string[] = [];
@@ -146,6 +151,8 @@ async function submitDraftCreateRequest(input: {
   client: DaemonClient | null;
   workspaceDirectory: string | null;
   workspaceId: string | null;
+  serverId: string;
+  nativeForkFrom?: NativeConversationForkHandoff;
   autoSubmitConfig: AutoSubmitConfig | null;
   composerState: {
     selectedProvider: string | null;
@@ -157,6 +164,7 @@ async function submitDraftCreateRequest(input: {
   };
   hostDisconnectedMessage: string;
   selectModelMessage: string;
+  forkSameHostMessage: string;
 }): Promise<{ agentId: string | null; result: AgentSnapshotPayload }> {
   const {
     attempt,
@@ -167,12 +175,19 @@ async function submitDraftCreateRequest(input: {
     client,
     workspaceDirectory,
     workspaceId,
+    serverId,
+    nativeForkFrom,
     autoSubmitConfig,
     composerState,
   } = input;
 
   invariant(workspaceDirectory, "Workspace directory is required");
   invariant(workspaceId, "Workspace id is required");
+  assertNativeConversationForkHost({
+    forkFrom: nativeForkFrom,
+    serverId,
+    errorMessage: input.forkSameHostMessage,
+  });
   if (!client) {
     throw new Error(input.hostDisconnectedMessage);
   }
@@ -198,6 +213,7 @@ async function submitDraftCreateRequest(input: {
 
   const imagesData = await encodeImages(images);
   const attachmentsArray = Array.isArray(attachments) ? attachments : undefined;
+  const nativeForkSource = toNativeConversationForkSource(nativeForkFrom);
   const result = await client.createAgent({
     config,
     workspaceId,
@@ -205,6 +221,7 @@ async function submitDraftCreateRequest(input: {
     clientMessageId: attempt.clientMessageId,
     ...(imagesData && imagesData.length > 0 ? { images: imagesData } : {}),
     ...(attachmentsArray && attachmentsArray.length > 0 ? { attachments: attachmentsArray } : {}),
+    ...(nativeForkSource ? { forkFrom: nativeForkSource } : {}),
   });
 
   return {
@@ -428,7 +445,8 @@ export function WorkspaceDraftAgentTab({
         : {}),
     };
   }, [pendingAutoSubmit, pendingCreateAttempt]);
-  const allowsEmptyAutoSubmit = pendingAutoSubmit?.allowEmptyText === true;
+  const allowsEmptyAutoSubmit =
+    pendingAutoSubmit?.allowEmptyText === true || Boolean(pendingAutoSubmit?.nativeForkFrom);
   const isCompactFormFactor = useIsCompactFormFactor();
   const { onLayout: onInputAreaLayout, isBelow: isCompactComposerLayout } = useContainerWidthBelow(
     COMPACT_FORM_FACTOR_WIDTH,
@@ -518,10 +536,13 @@ export function WorkspaceDraftAgentTab({
         client,
         workspaceDirectory: draftWorkingDirectory,
         workspaceId: workspaceFields?.id ?? null,
+        serverId,
+        nativeForkFrom: pendingAutoSubmit?.nativeForkFrom,
         autoSubmitConfig,
         composerState,
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
         selectModelMessage: t("workspaceSetup.errors.selectModel"),
+        forkSameHostMessage: t("message.actions.forkSameHost"),
       }),
     onCreateSuccess: ({ result }) => {
       clearDraftInput("sent");
