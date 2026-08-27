@@ -4,12 +4,15 @@
 
 Controlled by `APP_VARIANT` in `packages/app/app.config.js` (vanilla Expo, no custom Gradle plugin):
 
-| Variant       | App name    | Package ID       |
-| ------------- | ----------- | ---------------- |
-| `production`  | Paseo       | `sh.paseo`       |
-| `development` | Paseo Debug | `sh.paseo.debug` |
+| Variant       | App name    | Package ID                      |
+| ------------- | ----------- | ------------------------------- |
+| `production`  | Paseo       | `sh.paseo`                      |
+| `development` | Paseo Debug | `sh.paseo.debug`                |
+| `fork`        | Paseo Fork  | `io.github.hamiltonhuaji.paseo` |
 
-EAS profiles: `development`, `production`, and `production-apk` in `packages/app/eas.json`.
+EAS profiles: `development`, `production`, `production-apk`, and `fork-apk` in
+`packages/app/eas.json`. The fork profile uses its own EAS project and remotely managed signing
+credentials, disables official Expo Updates, and can coexist with the official app.
 
 `development` uses Android `debug`.
 
@@ -129,7 +132,7 @@ cd android
 PASEO_FDROID_BUILD=1 ./gradlew assembleRelease --no-daemon --max-workers=1 -Dorg.gradle.parallel=false
 ```
 
-The flag must be present for both prebuild and Gradle because Gradle starts Metro for the release bundle. Keep the source build serial and daemon-free as shown above: compiling every Expo module can exhaust memory when Gradle workers run in parallel. The profile enables source-built Expo modules, excludes the proprietary camera, Firebase notification, and Expo development-client native modules, disables Gradle dependency metadata, and substitutes JavaScript stubs for camera and notifications. The resulting app supports direct and pasted-link pairing but not QR scanning or push notifications.
+The flag must be present for both prebuild and Gradle because Gradle starts Metro for the release bundle. Keep the source build serial and daemon-free as shown above: compiling every Expo module can exhaust memory when Gradle workers run in parallel. The profile enables source-built Expo modules, excludes the proprietary camera, Firebase notification, Expo development-client, and RaTeX native modules, disables Gradle dependency metadata, and substitutes JavaScript stubs for them. The resulting app supports direct and pasted-link pairing but not QR scanning or push notifications; formulas remain readable as selectable TeX source instead of using the prebuilt RaTeX library.
 
 For a single-ABI APK, pass React Native's architecture property to Gradle:
 

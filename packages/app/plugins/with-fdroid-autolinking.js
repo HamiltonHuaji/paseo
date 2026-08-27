@@ -9,6 +9,7 @@ const EXCLUDED_ANDROID_MODULES = [
   "expo-dev-launcher",
   "expo-dev-menu",
   "expo-dev-menu-interface",
+  "ratex-react-native",
 ];
 
 const FDROID_ABI_VERSION_CODE_BLOCK = `// Paseo F-Droid single-ABI version codes

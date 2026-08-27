@@ -11,6 +11,7 @@ const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
 const fdroidModuleOverrides = {
   "expo-camera": path.resolve(appSrcRoot, "fdroid/expo-camera.tsx"),
   "expo-notifications": path.resolve(appSrcRoot, "fdroid/expo-notifications.ts"),
+  "ratex-react-native": path.resolve(appSrcRoot, "fdroid/ratex-react-native.tsx"),
 };
 const customWebPlatform = (process.env.PASEO_WEB_PLATFORM ?? "")
   .trim()

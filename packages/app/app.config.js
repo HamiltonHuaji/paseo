@@ -5,10 +5,16 @@ const withAndroidAsyncStorageSize = require("./plugins/with-android-async-storag
 const withAndroidProfileable = require("./plugins/with-android-profileable");
 const withFdroidAutolinking = require("./plugins/with-fdroid-autolinking");
 const withPasteInput = require("./plugins/with-paste-input");
+const forkBuildMetadata = require("../desktop/src/features/fork-build-info.json");
 const { getNativeReleaseVersion } = require("./native-release-version");
 const appVariant = process.env.APP_VARIANT ?? "production";
 const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
 const isProfileBuild = process.env.PASEO_PROFILE_BUILD === "1";
+const isForkBuild = appVariant === "fork";
+const officialEasProjectId = "0e7f65ce-0367-46c8-a238-2b65963d235a";
+const forkEasProjectId = process.env.PASEO_FORK_EAS_PROJECT_ID?.trim();
+const forkEasOwner = process.env.PASEO_FORK_EAS_OWNER?.trim();
+const forkDisplayVersion = `${forkBuildMetadata.upstreamBaseVersion}-fork.${forkBuildMetadata.revision}`;
 
 const buildProfile = isFdroidBuild
   ? {
@@ -89,21 +95,33 @@ const variants = {
       fallbackRelativePath: "./.secrets/GoogleService-Info.debug.plist",
     }),
   },
+  fork: {
+    name: "Paseo Fork",
+    packageId: "io.github.hamiltonhuaji.paseo",
+    scheme: "paseo-fork",
+  },
 };
 
 const variant = variants[appVariant] ?? variants.production;
 const nativeReleaseVersion = getNativeReleaseVersion(pkg.version);
+const easProjectId = isForkBuild ? forkEasProjectId : officialEasProjectId;
+const easOwner = isForkBuild ? forkEasOwner : "getpaseo";
 
 export default {
   expo: {
     name: variant.name,
-    slug: "voice-mobile",
+    slug: isForkBuild ? "paseo-fork" : "voice-mobile",
     version: nativeReleaseVersion.appVersion,
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    scheme: "paseo",
+    scheme: variant.scheme ?? "paseo",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
+    updates: isForkBuild
+      ? { enabled: false }
+      : {
+          url: `https://u.expo.dev/${officialEasProjectId}`,
+        },
     ios: {
       supportsTablet: true,
       infoPlist: {
@@ -186,11 +204,15 @@ export default {
     extra: {
       fdroidBuild: isFdroidBuild,
       profileBuild: isProfileBuild,
-      router: {},
-      eas: {
-        projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a",
+      distribution: isForkBuild ? "fork" : "official",
+      forkBuild: {
+        upstreamBaseVersion: forkBuildMetadata.upstreamBaseVersion,
+        revision: forkBuildMetadata.revision,
+        displayVersion: forkDisplayVersion,
       },
+      router: {},
+      ...(easProjectId ? { eas: { projectId: easProjectId } } : {}),
     },
-    owner: "getpaseo",
+    ...(easOwner ? { owner: easOwner } : {}),
   },
 };
