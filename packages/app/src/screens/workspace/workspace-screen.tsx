@@ -244,8 +244,7 @@ function useWorkspaceExperimentsSurface(serverId: string, projectId: string | un
     setHasOpened(true);
     setActive((current) => !current);
   }, []);
-  const close = useCallback(() => setActive(false), []);
-  return { active, available, close, hasOpened, toggle };
+  return { active, available, hasOpened, toggle };
 }
 
 function WorkspaceExperimentsSurface({
@@ -254,7 +253,6 @@ function WorkspaceExperimentsSurface({
   serverId,
   projectId,
   header,
-  onClose,
   routeFocused,
 }: {
   active: boolean;
@@ -262,7 +260,6 @@ function WorkspaceExperimentsSurface({
   serverId: string;
   projectId: string | undefined;
   header: ReactNode;
-  onClose: () => void;
   routeFocused: boolean;
 }) {
   if (!mounted || !projectId) return null;
@@ -275,7 +272,6 @@ function WorkspaceExperimentsSurface({
           projectId={projectId}
           embedded
           active={active && routeFocused}
-          onClose={onClose}
         />
       </View>
     </RetainedPanel>
@@ -1676,17 +1672,8 @@ function WorkspaceScreenContent({
     experimentProjectId,
   );
   const handleOpenExperiments = experimentsSurface.toggle;
-  const handleCloseExperiments = experimentsSurface.close;
   const showExperiments = experimentsSurface.available;
   const tabDeckFocused = isWorkspaceTabDeckFocused(isRouteFocused, experimentsSurface.active);
-  useEffect(() => {
-    if (!isNative || !isRouteFocused || !experimentsSurface.active) return;
-    const handler = BackHandler.addEventListener("hardwareBackPress", () => {
-      handleCloseExperiments();
-      return true;
-    });
-    return () => handler.remove();
-  }, [experimentsSurface.active, handleCloseExperiments, isRouteFocused]);
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
 
@@ -4230,7 +4217,6 @@ function WorkspaceScreenContent({
         serverId={normalizedServerId}
         projectId={experimentProjectId}
         header={renderWorkspaceScreenHeader()}
-        onClose={handleCloseExperiments}
         routeFocused={isRouteFocused}
       />
     </View>

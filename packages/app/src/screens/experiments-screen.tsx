@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import {
+  BackHandler,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  type ViewStyle,
+} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused } from "@react-navigation/native";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,7 +20,6 @@ import {
   Grid2X2,
   List,
   RefreshCw,
-  X,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
@@ -62,7 +69,6 @@ interface ExperimentsScreenProps {
   projectId: string;
   embedded?: boolean;
   active?: boolean;
-  onClose?: () => void;
 }
 
 export function ExperimentsScreen({
@@ -70,7 +76,6 @@ export function ExperimentsScreen({
   projectId,
   embedded = false,
   active = true,
-  onClose,
 }: ExperimentsScreenProps) {
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
@@ -190,6 +195,14 @@ export function ExperimentsScreen({
   }, [projectId, queryClient, refetchList, serverId]);
   const handleRefresh = useCallback(() => void refreshAll(), [refreshAll]);
   const clearSelection = useCallback(() => setSelectedExperiment(null), []);
+  useEffect(() => {
+    if (Platform.OS !== "android" || !embedded || !active) return;
+    const handler = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (selectedExperiment) clearSelection();
+      return true;
+    });
+    return () => handler.remove();
+  }, [active, clearSelection, embedded, selectedExperiment]);
   const setAttemptExpanded = useCallback((attemptId: string, expanded: boolean) => {
     setAttemptExpansionById((current) => {
       if (current[attemptId] === expanded) return current;
@@ -232,7 +245,7 @@ export function ExperimentsScreen({
       <ScrollView
         contentContainerStyle={[styles.content, optionalStyle(canvasMode, styles.contentFill)]}
       >
-        <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} onClose={onClose} />
+        <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} />
         {!connected ? <Message text="Host is offline." /> : null}
         {listQuery.isLoading ? <ThemedLoadingSpinner /> : null}
         {listQuery.error ? <Message text={errorMessage(listQuery.error)} error /> : null}
@@ -307,23 +320,12 @@ function ExperimentsHeader({ embedded, actions }: { embedded: boolean; actions: 
 function EmbeddedExperimentsActions({
   embedded,
   actions,
-  onClose,
 }: {
   embedded: boolean;
   actions: ReactNode;
-  onClose?: () => void;
 }) {
   if (!embedded) return null;
-  return (
-    <View style={styles.embeddedActions}>
-      {actions}
-      {onClose ? (
-        <Button variant="ghost" size="sm" leftIcon={X} onPress={onClose}>
-          Back to tabs
-        </Button>
-      ) : null}
-    </View>
-  );
+  return <View style={styles.embeddedActions}>{actions}</View>;
 }
 
 function ExperimentRow({
