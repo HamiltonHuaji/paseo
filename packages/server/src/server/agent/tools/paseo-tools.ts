@@ -85,6 +85,14 @@ import {
 } from "../../worktree/commands.js";
 import { registerBrowserTools } from "../../browser-tools/tools.js";
 import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+import type { ExperimentService } from "../../experiments/service.js";
+import {
+  CreateAttemptInputSchema,
+  CreateExperimentInputSchema,
+  UpdateAttemptInputSchema,
+  UpdateExperimentInputSchema,
+  ViewerConfigSchema,
+} from "@getpaseo/protocol/experiments";
 import type {
   PaseoToolCatalog,
   PaseoToolConfig,
@@ -112,6 +120,7 @@ export interface PaseoToolHostDependencies {
   emitWorkspaceUpdatesForWorkspaceIds?: ArchiveDependencies["emitWorkspaceUpdatesForWorkspaceIds"];
   workspaceRegistry?: Pick<WorkspaceRegistry, "get" | "list" | "upsert">;
   projectRegistry?: Pick<ProjectRegistry, "get" | "list">;
+  experimentService?: ExperimentService;
   createDirectoryWorkspace?: (
     cwd: string,
     title?: string | null,
@@ -550,10 +559,40 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     callerAgentId,
     resolveSpeakHandler,
     resolveCallerContext,
+    experimentService,
+    workspaceRegistry,
     logger,
   } = options;
   const childLogger = logger.child({ module: "agent", component: "paseo-tool-catalog" });
   const callerContext = callerAgentId ? (resolveCallerContext?.(callerAgentId) ?? null) : null;
+
+  const resolveCallerProjectId = async (): Promise<string> => {
+    if (!callerAgentId) throw new Error("Experiment tools require an agent-scoped caller");
+    if (!workspaceRegistry) throw new Error("Workspace registry unavailable");
+    const caller = await agentStorage.get(callerAgentId);
+    if (!caller?.workspaceId) throw new Error("Caller agent has no Paseo workspace");
+    const workspace = await workspaceRegistry.get(caller.workspaceId);
+    if (!workspace) throw new Error(`Workspace ${caller.workspaceId} not found`);
+    return workspace.projectId;
+  };
+
+  const requireExperimentService = (): ExperimentService => {
+    if (!experimentService) throw new Error("Experiment service unavailable");
+    return experimentService;
+  };
+
+  const experimentToolResult = (value: unknown): PaseoToolResult => {
+    const valid = ensureValidJson(value);
+    return {
+      content: [{ type: "text", text: JSON.stringify(valid, null, 2) }],
+      structuredContent: valid,
+    };
+  };
+
+  const touchExperiment = async (experiment: string, attempt: string | null): Promise<void> => {
+    if (!callerAgentId) return;
+    await agentStorage.touchExperiment(callerAgentId, experiment, attempt);
+  };
 
   const parseToolInput = async (tool: PaseoToolDefinition, input: unknown): Promise<unknown> => {
     const inputSchema = tool.inputSchema;
@@ -2003,7 +2042,8 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     "list_agents",
     {
       title: "List agents",
-      description: "List recent agents as compact metadata.",
+      description:
+        "List recent agents as compact metadata, including their latest Experiment touches when present.",
       inputSchema: {
         includeArchived: z.boolean().optional().default(false),
         cwd: z.string().optional(),
@@ -3152,6 +3192,181 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       };
     },
   );
+
+  if (callerAgentId && experimentService) {
+    registerTool(
+      "list_experiments",
+      {
+        title: "List experiments",
+        description: "List project Experiments. Goal values are names, not internal IDs.",
+        inputSchema: z.object({
+          goal: z.string().min(1).optional(),
+          includeClosed: z.boolean().optional(),
+          includeArchived: z.boolean().optional(),
+        }),
+      },
+      async (input) => {
+        const projectId = await resolveCallerProjectId();
+        return experimentToolResult(
+          await requireExperimentService().list(projectId, {
+            ...input,
+            includeClosed: input.includeClosed ?? false,
+            includeArchived: input.includeArchived ?? false,
+          }),
+        );
+      },
+    );
+
+    registerTool(
+      "get_experiment",
+      {
+        title: "Get experiment",
+        description: "Get one Experiment and all of its Attempts.",
+        inputSchema: z.object({ experiment: z.string() }),
+      },
+      async ({ experiment }) =>
+        experimentToolResult(
+          await requireExperimentService().get(await resolveCallerProjectId(), experiment),
+        ),
+    );
+
+    registerTool(
+      "create_experiment",
+      {
+        title: "Create experiment",
+        description:
+          "Create an Experiment intent. Omit nullable fields to keep their null initial value; use basedOn for lineage.",
+        inputSchema: CreateExperimentInputSchema,
+      },
+      async (input) => {
+        const experiment = await requireExperimentService().createExperiment(
+          await resolveCallerProjectId(),
+          input,
+        );
+        await touchExperiment(experiment.id, null);
+        return experimentToolResult(experiment);
+      },
+    );
+
+    registerTool(
+      "update_experiment",
+      {
+        title: "Update experiment",
+        description:
+          "Patch an Experiment. Omitted fields stay unchanged and null clears a nullable field. Setting conclusion closes it.",
+        inputSchema: UpdateExperimentInputSchema,
+      },
+      async (input) => {
+        const experiment = await requireExperimentService().updateExperiment(
+          await resolveCallerProjectId(),
+          input,
+        );
+        await touchExperiment(experiment.id, null);
+        return experimentToolResult(experiment);
+      },
+    );
+
+    registerTool(
+      "create_attempt",
+      {
+        title: "Create attempt",
+        description:
+          "Create one concrete probe, run, retry, evaluation, or deployment. A retry is a new Attempt.",
+        inputSchema: CreateAttemptInputSchema,
+      },
+      async (input) => {
+        const attempt = await requireExperimentService().createAttempt(
+          await resolveCallerProjectId(),
+          input,
+        );
+        await touchExperiment(attempt.experiment, attempt.id);
+        return experimentToolResult(attempt);
+      },
+    );
+
+    registerTool(
+      "update_attempt",
+      {
+        title: "Update attempt",
+        description:
+          "Patch Attempt metadata or record its result. Do not report lifecycle state or timestamps.",
+        inputSchema: UpdateAttemptInputSchema,
+      },
+      async (input) => {
+        const attempt = await requireExperimentService().updateAttempt(
+          await resolveCallerProjectId(),
+          input,
+        );
+        await touchExperiment(attempt.experiment, attempt.id);
+        return experimentToolResult(attempt);
+      },
+    );
+
+    registerTool(
+      "get_experiment_storage",
+      {
+        title: "Get experiment storage",
+        description:
+          "Resolve a daemon-allocated shared, Experiment, or Attempt storage directory. Do not construct blob paths.",
+        inputSchema: z.discriminatedUnion("scope", [
+          z.object({ scope: z.literal("shared") }),
+          z.object({ scope: z.literal("experiment"), experiment: z.string() }),
+          z.object({ scope: z.literal("attempt"), attempt: z.string() }),
+        ]),
+      },
+      async (input) =>
+        experimentToolResult({
+          path: await requireExperimentService().resolveStorage(
+            await resolveCallerProjectId(),
+            input,
+          ),
+        }),
+    );
+
+    const viewerTargetSchema = z.union([
+      z.object({ experiment: z.string(), viewer: ViewerConfigSchema.nullable() }),
+      z.object({ attempt: z.string(), viewer: ViewerConfigSchema.nullable() }),
+    ]);
+    registerTool(
+      "configure_experiment_viewers",
+      {
+        title: "Configure experiment viewers",
+        description:
+          "Set one Experiment or Attempt viewer. Null restores inheritance; an empty config disables viewers.",
+        inputSchema: viewerTargetSchema,
+      },
+      async (input) => {
+        const target =
+          "experiment" in input ? { experiment: input.experiment } : { attempt: input.attempt };
+        return experimentToolResult({
+          viewer: await requireExperimentService().configureViewer(
+            await resolveCallerProjectId(),
+            target,
+            input.viewer,
+          ),
+        });
+      },
+    );
+
+    registerTool(
+      "resolve_experiment_viewers",
+      {
+        title: "Resolve experiment viewers",
+        description: "Resolve inherited static viewer entries for one Experiment or Attempt.",
+        inputSchema: z.union([
+          z.object({ experiment: z.string() }),
+          z.object({ attempt: z.string() }),
+        ]),
+      },
+      async (target) =>
+        experimentToolResult({
+          entries: await requireExperimentService().resolveViewers(
+            await resolveCallerProjectId(),
+            target,
+          ),
+        }),
+    );
+  }
 
   return toCatalog();
 }

@@ -48,6 +48,7 @@ import {
   ensureNotificationCenterRegistration,
 } from "./features/notifications.js";
 import { registerOpenerHandlers } from "./features/opener.js";
+import { closeAllTunnelForwarders, registerTunnelHandlers } from "./features/tunnels/ipc.js";
 import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
 import { resolveAppIconPath } from "./features/stamped-icon.js";
 import { setupApplicationMenu } from "./features/menu.js";
@@ -1027,6 +1028,7 @@ async function bootstrap(): Promise<void> {
   registerDialogHandlers();
   registerNotificationHandlers();
   registerOpenerHandlers();
+  registerTunnelHandlers();
   registerEditorTargetHandlers();
   registerBrowserAutomationIpc();
 
@@ -1117,6 +1119,9 @@ const quitLifecycle = createQuitLifecycle({
 // electron-updater forwards this event through Electron's built-in autoUpdater.
 electronAutoUpdater.on("before-quit-for-update", quitLifecycle.handleBeforeQuitForUpdate);
 app.on("before-quit", quitLifecycle.handleBeforeQuit);
+app.on("before-quit", () => {
+  void closeAllTunnelForwarders();
+});
 registerExternalQuitSignals({ signals: process, quit: () => app.quit() });
 
 app.on("window-all-closed", () => {

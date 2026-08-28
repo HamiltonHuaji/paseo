@@ -85,6 +85,7 @@ function createApp(options: {
   );
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
   app.get("/mcp/agents", (_req, res) => res.json({ mcp: true }));
+  app.get("/view/test", (_req, res) => res.send("viewer"));
   if (options.publicDir) {
     app.use("/public", express.static(options.publicDir));
   }
@@ -257,6 +258,15 @@ describe("daemon web UI route module", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toBe("public asset");
+  });
+
+  test("does not catch /view/* paths", async () => {
+    const app = createApp({ enabled: true, distDir, publicDir });
+
+    const res = await request(app, "GET", "/view/test");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toBe("viewer");
   });
 
   test("sets no-cache headers for index.html", async () => {

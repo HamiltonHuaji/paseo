@@ -64,6 +64,18 @@ export interface DesktopOpenerBridge {
   openUrl?: (url: string) => Promise<void>;
 }
 
+export interface DesktopTunnelBridge {
+  ensure?: (input: {
+    serverId: string;
+    connection: {
+      relayEndpoint: string;
+      useTls?: boolean;
+      daemonPublicKeyB64: string;
+    };
+    target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
+  }) => Promise<{ origin: string }>;
+}
+
 export interface DesktopEditorTargetDescriptor {
   id: string;
   label: string;
@@ -183,6 +195,7 @@ export interface DesktopHostBridge {
   dialog?: DesktopDialogBridge;
   notification?: DesktopNotificationBridge;
   opener?: DesktopOpenerBridge;
+  tunnel?: DesktopTunnelBridge;
   editor?: DesktopEditorBridge;
   webUtils?: DesktopWebUtilsBridge;
   menu?: DesktopMenuBridge;

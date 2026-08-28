@@ -32,6 +32,7 @@ function createSnapshot(
     persistence: input.persistence ?? null,
     title: input.title ?? null,
     labels: (input.labels ?? {}) as AgentSnapshotPayload["labels"],
+    experimentTouches: input.experimentTouches,
   };
 }
 
@@ -78,6 +79,21 @@ describe("normalizeAgentSnapshot", () => {
 
     expect(agent.parentAgentId).toBe("parent-1");
     expect(agent.labels).toEqual(labels);
+  });
+
+  it("round-trips Experiment touches", () => {
+    const experimentTouches = [
+      {
+        experiment: "exp_ab12cd",
+        attempt: "att_34ef56",
+        lastTouchedAt: "2026-08-27T12:00:00.000Z",
+      },
+    ];
+
+    const agent = normalizeAgentSnapshot(createSnapshot({ experimentTouches }), "server-1");
+
+    expect(agent.experimentTouches).toEqual(experimentTouches);
+    expect(projectAgentSnapshot(agent).experimentTouches).toEqual(experimentTouches);
   });
 
   it("trims whitespace around the parent label", () => {

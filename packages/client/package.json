@@ -28,6 +28,10 @@
     "./internal/daemon-transport-bridge": {
       "types": "./dist/daemon-transport-bridge.d.ts",
       "default": "./dist/daemon-transport-bridge.js"
+    },
+    "./node/local-tunnel-forwarder": {
+      "types": "./dist/node/local-tunnel-forwarder.d.ts",
+      "default": "./dist/node/local-tunnel-forwarder.js"
     }
   },
   "publishConfig": {

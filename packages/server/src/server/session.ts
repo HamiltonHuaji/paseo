@@ -29,6 +29,7 @@ import type {
 import { TerminalSessionController } from "../terminal/terminal-session-controller.js";
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
 import type { BinaryFrame } from "@getpaseo/protocol/binary-frames/index";
+import { TunnelController } from "./tunnels/controller.js";
 import { CursorError } from "./pagination/cursor.js";
 import { SortablePager, type SortSpec } from "./pagination/sortable-pager.js";
 import { describeAgentHistoryMatches, rankAgentHistoryCandidates } from "./agent-history-search.js";
@@ -76,6 +77,7 @@ import {
   WorkspaceLabelStorageUncertainError,
   type WorkspaceLabelService,
 } from "./workspace-labels/index.js";
+import type { ExperimentService } from "./experiments/service.js";
 
 import { AgentManager, AgentRunCancellationError } from "./agent/agent-manager.js";
 import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
@@ -455,6 +457,7 @@ export interface SessionOptions {
   workspaceRegistry: WorkspaceRegistry;
   directorySync?: DirectorySyncService;
   workspaceLabelService?: WorkspaceLabelService;
+  experimentService: ExperimentService;
   filesystem?: SessionFileSystem;
   scheduleService: ScheduleService;
   checkoutDiffManager: CheckoutDiffManager;
@@ -735,6 +738,8 @@ export class Session {
   private readonly daemonSession: DaemonSession;
   private readonly hubExecutionController: HubExecutionController | null;
   private readonly workspaceScripts: WorkspaceScriptsService;
+  private readonly experimentService: ExperimentService;
+  private readonly tunnelController: TunnelController;
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
 
   constructor(options: SessionOptions) {
@@ -761,6 +766,7 @@ export class Session {
       workspaceRegistry,
       directorySync,
       workspaceLabelService,
+      experimentService,
       filesystem,
       scheduleService,
       checkoutDiffManager,
@@ -832,6 +838,7 @@ export class Session {
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry;
     this.workspaceRegistry = workspaceRegistry;
+    this.experimentService = experimentService;
     this.directorySync = resolveDirectorySync(directorySync);
     this.workspaceLabelService = resolveWorkspaceLabelService(workspaceLabelService);
     this.filesystem = filesystem ?? nodeSessionFileSystem;
@@ -1028,6 +1035,9 @@ export class Session {
     });
     this.providerSnapshotManager = providerSnapshotManager;
     this.serviceProxy = serviceProxy ?? null;
+    this.tunnelController = new TunnelController(this.serviceProxy, (source, frame) =>
+      this.emitBinaryToSource(source, frame),
+    );
     this.scriptRuntimeStore = scriptRuntimeStore ?? null;
     this.workspaceSetupSnapshots = workspaceSetupSnapshots ?? new Map();
     this.workspaceSetupRuntime = resolveWorkspaceSetupRuntime(workspaceSetupRuntime);
@@ -1126,6 +1136,10 @@ export class Session {
     if (this.viewedTimelineAgentIdsBySource.delete(source)) {
       this.rebuildViewedTimelineAgentIds();
     }
+  }
+
+  clearTunnelSource(source: object): void {
+    this.tunnelController.closeSource(source);
   }
 
   private replaceAgentTimelineSubscription(source: object | undefined, agentIds: string[]): void {
@@ -1773,6 +1787,7 @@ export class Session {
     const storedRecord = await this.agentStorage.get(payload.id);
     payload.title = storedRecord?.title ?? null;
     payload.archivedAt = storedRecord?.archivedAt ?? null;
+    payload.experimentTouches = storedRecord?.experimentTouches;
     return payload;
   }
 
@@ -1916,7 +1931,7 @@ export class Session {
       this.dispatchCheckoutMessage(msg) ??
       this.dispatchWorkspaceRecoveryMessage(msg) ??
       this.dispatchWorkspaceLabelMessage(msg) ??
-      this.dispatchWorkspaceAndProjectMessage(msg) ??
+      this.dispatchProjectDomainMessage(msg, source) ??
       this.dispatchWorkspaceFileMessage(msg, source) ??
       this.dispatchProviderMessage(msg) ??
       this.dispatchOrchestrationSkillsMessage(msg) ??
@@ -2448,6 +2463,181 @@ export class Session {
     }
   }
 
+  private dispatchExperimentMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "experiment.list.request":
+        return this.handleExperimentList(msg);
+      case "experiment.get.request":
+        return this.handleExperimentGet(msg);
+      case "experiment.create.request":
+        return this.handleExperimentCreate(msg);
+      case "experiment.update.request":
+        return this.handleExperimentUpdate(msg);
+      case "experiment.attempt.create.request":
+        return this.handleExperimentAttemptCreate(msg);
+      case "experiment.attempt.update.request":
+        return this.handleExperimentAttemptUpdate(msg);
+      case "experiment.attempt.progress.refresh.request":
+        return this.handleExperimentProgressRefresh(msg);
+      case "experiment.storage.resolve.request":
+        return this.handleExperimentStorageResolve(msg);
+      case "experiment.viewer.configure.request":
+        return this.handleExperimentViewerConfigure(msg);
+      case "experiment.viewer.resolve.request":
+        return this.handleExperimentViewerResolve(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchTunnelMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
+    if (msg.type !== "tunnel.open.request") return undefined;
+    return this.handleTunnelOpen(msg, source);
+  }
+
+  private async handleTunnelOpen(
+    msg: Extract<SessionInboundMessage, { type: "tunnel.open.request" }>,
+    source?: object,
+  ): Promise<void> {
+    if (!source) throw new Error("Tunnel requests require a physical client connection");
+    const tunnelId = await this.tunnelController.open(msg.target, source);
+    this.emitForSource(
+      {
+        type: "tunnel.open.response",
+        payload: { requestId: msg.requestId, tunnelId },
+      },
+      source,
+    );
+    this.tunnelController.activate(tunnelId, source);
+  }
+
+  private dispatchProjectDomainMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
+    return (
+      this.dispatchTunnelMessage(msg, source) ??
+      this.dispatchExperimentMessage(msg) ??
+      this.dispatchWorkspaceAndProjectMessage(msg)
+    );
+  }
+
+  private async handleExperimentList(
+    msg: Extract<SessionInboundMessage, { type: "experiment.list.request" }>,
+  ): Promise<void> {
+    const experiments = await this.experimentService.list(msg.projectId, {
+      ...(msg.goal !== undefined ? { goal: msg.goal } : {}),
+      includeClosed: msg.includeClosed ?? false,
+      includeArchived: msg.includeArchived ?? false,
+    });
+    this.emit({
+      type: "experiment.list.response",
+      payload: { requestId: msg.requestId, experiments },
+    });
+  }
+
+  private async handleExperimentGet(
+    msg: Extract<SessionInboundMessage, { type: "experiment.get.request" }>,
+  ): Promise<void> {
+    const detail = await this.experimentService.get(msg.projectId, msg.experiment);
+    this.emit({ type: "experiment.get.response", payload: { requestId: msg.requestId, detail } });
+  }
+
+  private async handleExperimentCreate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.create.request" }>,
+  ): Promise<void> {
+    const experiment = await this.experimentService.createExperiment(msg.projectId, msg);
+    this.emit({
+      type: "experiment.create.response",
+      payload: { requestId: msg.requestId, experiment },
+    });
+  }
+
+  private async handleExperimentUpdate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.update.request" }>,
+  ): Promise<void> {
+    const experiment = await this.experimentService.updateExperiment(msg.projectId, msg);
+    this.emit({
+      type: "experiment.update.response",
+      payload: { requestId: msg.requestId, experiment },
+    });
+  }
+
+  private async handleExperimentAttemptCreate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.attempt.create.request" }>,
+  ): Promise<void> {
+    const attempt = await this.experimentService.createAttempt(msg.projectId, msg);
+    this.emit({
+      type: "experiment.attempt.create.response",
+      payload: { requestId: msg.requestId, attempt },
+    });
+  }
+
+  private async handleExperimentAttemptUpdate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.attempt.update.request" }>,
+  ): Promise<void> {
+    const attempt = await this.experimentService.updateAttempt(msg.projectId, msg);
+    this.emit({
+      type: "experiment.attempt.update.response",
+      payload: { requestId: msg.requestId, attempt },
+    });
+  }
+
+  private async handleExperimentProgressRefresh(
+    msg: Extract<SessionInboundMessage, { type: "experiment.attempt.progress.refresh.request" }>,
+  ): Promise<void> {
+    const result = await this.experimentService.refreshProgress(msg.projectId, msg.attempt);
+    this.emit({
+      type: "experiment.attempt.progress.refresh.response",
+      payload: { requestId: msg.requestId, ...result },
+    });
+  }
+
+  private async handleExperimentStorageResolve(
+    msg: Extract<SessionInboundMessage, { type: "experiment.storage.resolve.request" }>,
+  ): Promise<void> {
+    let input:
+      | { scope: "shared" }
+      | { scope: "experiment"; experiment: string }
+      | { scope: "attempt"; attempt: string };
+    if (msg.scope === "shared") input = { scope: "shared" };
+    else if (msg.scope === "experiment") {
+      input = { scope: "experiment", experiment: msg.experiment };
+    } else input = { scope: "attempt", attempt: msg.attempt };
+    const resolvedPath = await this.experimentService.resolveStorage(msg.projectId, input);
+    this.emit({
+      type: "experiment.storage.resolve.response",
+      payload: { requestId: msg.requestId, path: resolvedPath },
+    });
+  }
+
+  private async handleExperimentViewerConfigure(
+    msg: Extract<SessionInboundMessage, { type: "experiment.viewer.configure.request" }>,
+  ): Promise<void> {
+    const viewer = await this.experimentService.configureViewer(
+      msg.projectId,
+      msg.target,
+      msg.viewer,
+    );
+    this.emit({
+      type: "experiment.viewer.configure.response",
+      payload: { requestId: msg.requestId, viewer },
+    });
+  }
+
+  private async handleExperimentViewerResolve(
+    msg: Extract<SessionInboundMessage, { type: "experiment.viewer.resolve.request" }>,
+  ): Promise<void> {
+    const entries = await this.experimentService.resolveViewers(msg.projectId, msg.target);
+    this.emit({
+      type: "experiment.viewer.resolve.response",
+      payload: { requestId: msg.requestId, entries },
+    });
+  }
+
   private dispatchWorkspaceFileMessage(
     msg: SessionInboundMessage,
     source?: object,
@@ -2587,9 +2777,13 @@ export class Session {
     return this.sessionId;
   }
 
-  public async handleBinaryFrame(binaryFrame: BinaryFrame): Promise<void> {
+  public async handleBinaryFrame(binaryFrame: BinaryFrame, source: object): Promise<void> {
     if (binaryFrame.kind === "file_transfer") {
       await this.workspaceFilesSession.handleFileTransferFrame(binaryFrame.frame);
+      return;
+    }
+    if (binaryFrame.kind === "tunnel") {
+      this.tunnelController.handleFrame(binaryFrame.frame, source);
       return;
     }
     this.terminalController.handleBinaryFrame(binaryFrame.frame);
@@ -7447,6 +7641,11 @@ export class Session {
     this.emitBinary(frame);
   }
 
+  private async emitBinaryToSource(source: object, frame: Uint8Array): Promise<void> {
+    if (!this.onBinaryMessageToSource) throw new Error("Binary source channel is unavailable");
+    await this.onBinaryMessageToSource(source, frame);
+  }
+
   private emitForSource(msg: SessionOutboundMessage, source?: object): void {
     if (source && this.onMessageToSource) {
       this.onMessageToSource(source, msg);
@@ -7485,6 +7684,7 @@ export class Session {
     await this.voiceSession.cleanup();
 
     this.terminalController.dispose();
+    this.tunnelController.dispose();
 
     this.checkoutSession.cleanup();
 

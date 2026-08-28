@@ -195,6 +195,25 @@ describe("AgentStorage", () => {
     expect(persisted.config?.providerOptions).toEqual({ allowedTools: ["Read"] });
   });
 
+  test("keeps the latest Experiment touch per Experiment across snapshots and reloads", async () => {
+    await storage.applySnapshot(createManagedAgent({ id: "agent-experiment" }));
+    await storage.touchExperiment("agent-experiment", "exp_one", "att_first");
+    await storage.touchExperiment("agent-experiment", "exp_two", null);
+    await storage.touchExperiment("agent-experiment", "exp_one", "att_second");
+    await storage.applySnapshot(createManagedAgent({ id: "agent-experiment", lifecycle: "idle" }));
+
+    const reloaded = new AgentStorage(storagePath, logger);
+    const touches = (await reloaded.get("agent-experiment"))?.experimentTouches;
+
+    expect(touches).toHaveLength(2);
+    expect(touches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ experiment: "exp_one", attempt: "att_second" }),
+        expect.objectContaining({ experiment: "exp_two", attempt: null }),
+      ]),
+    );
+  });
+
   test("applySnapshot stores and reloads featureValues when present", async () => {
     await storage.applySnapshot(
       createManagedAgent({

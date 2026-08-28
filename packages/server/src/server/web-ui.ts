@@ -3,8 +3,8 @@ import path from "node:path";
 import type { RequestHandler, Response } from "express";
 import type { Logger } from "pino";
 
-const EXCLUDED_PATH_PREFIXES = ["/api/", "/mcp/", "/public/"];
-const EXCLUDED_PATHS = new Set(["/api", "/mcp", "/public"]);
+const EXCLUDED_PATH_PREFIXES = ["/api/", "/mcp/", "/public/", "/view/"];
+const EXCLUDED_PATHS = new Set(["/api", "/mcp", "/public", "/view"]);
 
 function isExcludedPath(requestPath: string): boolean {
   for (const prefix of EXCLUDED_PATH_PREFIXES) {

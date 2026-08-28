@@ -2,6 +2,21 @@
 
 Paseo proxies HTTP traffic to services running inside your workspaces. Localhost service URLs are always enabled; optional public aliases and a separate service-only listener can be layered on through config.
 
+The daemon uses the same route registry for internal named services. [Experiment
+viewers](experiments.md#static-viewers) register there but are not projected to a public service
+hostname.
+
+## Client-local port forwarding
+
+The client SDK can bind a loopback listener on port `0` and forward every accepted TCP connection
+through the existing daemon transport. Relay connections keep tunnel frames inside relay E2E
+encryption. The daemon target is either an arbitrary host and port or a named internal service.
+
+This is ordinary TCP forwarding. It does not restrict targets or add a second authorization layer.
+Opening the Paseo client connection is the access boundary. Use operating-system-assigned ports so
+callers do not configure ports or resolve collisions. Experiment viewers target the named `viewers`
+service, whose daemon-side port is also assigned automatically.
+
 ## How it works
 
 When a `paseo.json` script of `"type": "service"` starts, Paseo assigns it a local port and registers a route in the service proxy. Incoming requests whose `Host` header matches the script's generated hostname are forwarded to that port.

@@ -151,6 +151,43 @@ describe("service proxy subsystem shape", () => {
     ).not.toBe(label);
   });
 
+  it("routes daemon-owned services without exposing them as workspace health targets", async () => {
+    const upstreamPort = await findFreePort();
+    const upstream = http.createServer((_req, res) => res.end("viewer"));
+    await new Promise<void>((resolve) => upstream.listen(upstreamPort, "127.0.0.1", resolve));
+
+    const serviceProxy = createServiceProxySubsystem({
+      logger,
+      publicBaseUrl: "https://services.example.com",
+    });
+    const route = serviceProxy.registerInternalService({
+      serviceName: "viewers",
+      port: upstreamPort,
+      publicBaseUrl: "https://services.example.com",
+    });
+    const proxyPort = await findFreePort();
+    const app = express();
+    app.use(serviceProxy.middleware());
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(proxyPort, "127.0.0.1", resolve));
+
+    try {
+      await expect(httpGet(proxyPort, route.hostname, { path: "/view/example" })).resolves.toEqual({
+        status: 200,
+        body: "viewer",
+      });
+      await expect(
+        httpGet(proxyPort, route.publicHostname!, { path: "/view/example" }),
+      ).resolves.toEqual({ status: 200, body: "viewer" });
+      expect(serviceProxy.getHealthCheckTargets()).toEqual([]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      upstream.closeAllConnections();
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+
   it("gives long labels with the same prefix different hash suffixes", () => {
     const sharedPrefix = "service-".repeat(12);
     const first = buildServiceProxyLabel({

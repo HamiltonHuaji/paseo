@@ -420,6 +420,15 @@ export function buildHostSessionsRoute(serverId: string) {
   return `${base}/sessions` as const;
 }
 
+export function buildHostExperimentsRoute(serverId: string, projectId: string) {
+  const normalizedServerId = trimNonEmpty(serverId);
+  const normalizedProjectId = trimNonEmpty(projectId);
+  if (!normalizedServerId || !normalizedProjectId) {
+    return "/" as const;
+  }
+  return `/h/${encodeSegment(normalizedServerId)}/experiments/${encodeSegment(normalizedProjectId)}` as const;
+}
+
 export function buildSessionsRoute() {
   return "/sessions" as const;
 }

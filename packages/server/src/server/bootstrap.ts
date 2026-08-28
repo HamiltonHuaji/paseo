@@ -119,6 +119,7 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
 import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
+import { ExperimentService } from "./experiments/service.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
@@ -659,6 +660,11 @@ export async function createPaseoDaemon(
     logger,
     publicBaseUrl: serviceProxyPublicBaseUrl,
   });
+  const experimentViewerService = {
+    projectSlug: "paseo",
+    branchName: null,
+    scriptName: "viewers",
+  } as const;
   const scriptRuntimeStore = new WorkspaceScriptRuntimeStore();
   const workspaceSetupRuntime = new WorkspaceSetupRuntime();
   let configuredHostnames = config.hostnames ?? config.allowedHosts;
@@ -670,6 +676,7 @@ export async function createPaseoDaemon(
     appBaseUrl = typeof value === "string" ? value : "https://app.paseo.sh";
   });
   let wsServer: VoiceAssistantWebSocketServer | null = null;
+  let experimentService: ExperimentService | null = null;
   let serviceProxyListenTarget: ListenTarget | null = null;
   const scriptHealthMonitor = new ScriptHealthMonitor({
     serviceProxy,
@@ -844,7 +851,52 @@ export async function createPaseoDaemon(
     void handleFileDownload(req, res);
   });
 
+  const handleExperimentViewer = async (
+    req: express.Request,
+    res: express.Response,
+  ): Promise<void> => {
+    if (!experimentService) {
+      res.status(503).json({ error: "Experiment service unavailable" });
+      return;
+    }
+    const projectId = req.params.projectId;
+    const experiment = req.params.experiment;
+    const viewerPath = req.params.viewerPath;
+    if (!projectId || !experiment || !viewerPath) {
+      res.status(404).end();
+      return;
+    }
+    try {
+      const filePath = await experimentService.resolveViewerFile(
+        projectId,
+        experiment,
+        req.params.attempt ?? null,
+        viewerPath,
+      );
+      if (!filePath) {
+        res.status(404).end();
+        return;
+      }
+      res.sendFile(filePath, { dotfiles: "allow" });
+    } catch (error) {
+      logger.warn({ err: error, projectId, experiment, viewerPath }, "Viewer request failed");
+      res.status(404).end();
+    }
+  };
+
+  const experimentViewerApp = express();
+  experimentViewerApp.get(
+    "/view/:projectId/:experiment/:attempt(att_[a-z0-9]+)/:viewerPath(*)",
+    (req, res) => void handleExperimentViewer(req, res),
+  );
+  experimentViewerApp.get(
+    "/view/:projectId/:experiment/:viewerPath(*)",
+    (req, res) => void handleExperimentViewer(req, res),
+  );
+  app.use(experimentViewerApp);
+
   const httpServer = createHTTPServer(app);
+  const experimentViewerHttpServer = createHTTPServer(experimentViewerApp);
 
   // Script proxy WebSocket upgrade handler — must be registered before the
   // VoiceAssistantWebSocketServer attaches its own "upgrade" listener so that
@@ -869,6 +921,7 @@ export async function createPaseoDaemon(
     paseoHome: config.paseoHome,
     workspaceRegistry,
   });
+  experimentService = new ExperimentService(projectRegistry);
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
@@ -1330,6 +1383,7 @@ export async function createPaseoDaemon(
     emitWorkspaceUpdatesForWorkspaceIds: emitWorkspaceUpdatesExternal,
     workspaceRegistry,
     projectRegistry,
+    experimentService,
     createDirectoryWorkspace: async (cwd, title, projectId) => {
       const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
         cwd,
@@ -1509,9 +1563,38 @@ export async function createPaseoDaemon(
 
   logger.info({ elapsed: elapsed() }, "Bootstrap complete, ready to start listening");
 
+  const stopExperimentViewerService = async (): Promise<void> => {
+    serviceProxy.removeInternalService(experimentViewerService.scriptName);
+    if (!experimentViewerHttpServer.listening) return;
+    experimentViewerHttpServer.closeAllConnections();
+    await new Promise<void>((resolve) => experimentViewerHttpServer.close(() => resolve()));
+  };
+
   const start = async () => {
     let mainStarted = false;
     try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+          experimentViewerHttpServer.off("listening", onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          experimentViewerHttpServer.off("error", onError);
+          resolve();
+        };
+        experimentViewerHttpServer.once("error", onError);
+        experimentViewerHttpServer.once("listening", onListening);
+        experimentViewerHttpServer.listen(0, "127.0.0.1");
+      });
+      const viewerAddress = experimentViewerHttpServer.address();
+      if (!viewerAddress || typeof viewerAddress === "string") {
+        throw new Error("Experiment viewer service did not expose a TCP address");
+      }
+      serviceProxy.registerInternalService({
+        serviceName: experimentViewerService.scriptName,
+        port: viewerAddress.port,
+      });
+
       if (serviceProxyListenTarget) {
         const boundServiceProxyTarget = await serviceProxy.startStandalone({
           listenTarget: serviceProxyListenTarget,
@@ -1654,6 +1737,7 @@ export async function createPaseoDaemon(
               pluginRuntime,
               orchestrationSkills,
               workspaceLabelService,
+              experimentService,
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
@@ -1702,6 +1786,7 @@ export async function createPaseoDaemon(
     } catch (error) {
       await pluginRuntime.stopAllPlugins().catch(() => undefined);
       await serviceProxy.stopStandalone().catch(() => undefined);
+      await stopExperimentViewerService().catch(() => undefined);
       if (mainStarted) {
         httpServer.closeAllConnections();
         await new Promise<void>((resolve) => httpServer.close(() => resolve()));
@@ -1726,11 +1811,13 @@ export async function createPaseoDaemon(
     terminalManager.killAll();
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
+    await experimentService.close().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();
     }
     await serviceProxy.stopStandalone();
+    await stopExperimentViewerService();
     // Force-drop remaining sockets so httpServer.close() resolves promptly.
     // We've already closed wsServer (which sent ws-layer close frames) and
     // stopped every other service, so anything still attached is a TCP

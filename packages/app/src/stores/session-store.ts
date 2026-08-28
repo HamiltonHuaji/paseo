@@ -40,6 +40,7 @@ import type {
   WorkspaceDescriptorPayload,
   WorkspaceProjectDescriptorPayload,
 } from "@getpaseo/protocol/messages";
+import type { AgentExperimentTouch } from "@getpaseo/protocol/experiments";
 import {
   normalizeWorkspaceOpaqueId,
   normalizeWorkspacePath,
@@ -102,6 +103,7 @@ export interface Agent {
   parentAgentId: string | null;
   labels: Record<string, string>;
   projectPlacement?: ProjectPlacementPayload | null;
+  experimentTouches?: AgentExperimentTouch[];
 }
 
 export interface WorkspaceDescriptor {

@@ -23,6 +23,7 @@ export interface ServiceProxyRouteEntry extends ServiceProxyRoute {
   localHostname?: string;
   publicHostname?: string | null;
   publicBaseUrl?: string | null;
+  healthCheck?: boolean;
 }
 
 export interface ServiceProxyUrlProjection {
@@ -56,6 +57,13 @@ export interface WorkspaceServiceIdentity {
 export interface RegisterWorkspaceServiceInput extends WorkspaceServiceIdentity {
   port: number;
   publicBaseUrl?: string | null;
+  healthCheck?: boolean;
+}
+
+export interface RegisterInternalServiceInput {
+  serviceName: string;
+  port: number;
+  publicBaseUrl?: string | null;
 }
 
 interface HostClassificationRegistered {
@@ -78,6 +86,8 @@ type HostClassification =
 
 const MAX_DNS_LABEL_LENGTH = 63;
 const HASH_SUFFIX_LENGTH = 8;
+const INTERNAL_SERVICE_WORKSPACE_ID = "__paseo_daemon_internal__";
+const INTERNAL_SERVICE_PROJECT_SLUG = "paseo";
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -445,6 +455,7 @@ export class ServiceProxyRouteRegistry {
       workspaceId: input.workspaceId,
       projectSlug: input.projectSlug,
       scriptName: input.scriptName,
+      ...(input.healthCheck === false ? { healthCheck: false } : {}),
     };
     this.registerRoute(entry);
     return { ...entry };
@@ -588,11 +599,15 @@ export class ServiceProxyRouteRegistry {
   }
 
   getHealthCheckTargets(): ServiceProxyHealthTarget[] {
-    return this.listRoutes().map(toHealthTarget);
+    return this.listRoutes()
+      .filter((route) => route.healthCheck !== false)
+      .map(toHealthTarget);
   }
 
   getWorkspaceHealthTargets(workspaceId: string): ServiceProxyHealthTarget[] {
-    return this.listRoutesForWorkspace(workspaceId).map(toHealthTarget);
+    return this.listRoutesForWorkspace(workspaceId)
+      .filter((route) => route.healthCheck !== false)
+      .map(toHealthTarget);
   }
 
   getHealthTargetForHostname(hostname: string): ServiceProxyHealthTarget | null {
@@ -798,6 +813,9 @@ export function createScriptProxyUpgradeHandler({
 
 export interface ServiceProxySubsystem {
   registerWorkspaceService(input: RegisterWorkspaceServiceInput): ServiceProxyRouteEntry;
+  registerInternalService(input: RegisterInternalServiceInput): ServiceProxyRouteEntry;
+  removeInternalService(serviceName: string): void;
+  resolveInternalService(serviceName: string): ServiceProxyRoute | null;
   removeWorkspaceService(params: { workspaceId: string; scriptName: string }): void;
   removeServiceRoutesByHostnames(hostnames: string[]): void;
   replaceWorkspaceBranchRoutes(params: { workspaceId: string; newBranch: string | null }): boolean;
@@ -860,6 +878,32 @@ class NodeServiceProxySubsystem implements ServiceProxySubsystem {
 
   registerWorkspaceService(input: RegisterWorkspaceServiceInput): ServiceProxyRouteEntry {
     return this.routes.registerWorkspaceService(input);
+  }
+
+  registerInternalService(input: RegisterInternalServiceInput): ServiceProxyRouteEntry {
+    return this.routes.registerWorkspaceService({
+      workspaceId: INTERNAL_SERVICE_WORKSPACE_ID,
+      projectSlug: INTERNAL_SERVICE_PROJECT_SLUG,
+      branchName: null,
+      scriptName: input.serviceName,
+      port: input.port,
+      publicBaseUrl: input.publicBaseUrl,
+      healthCheck: false,
+    });
+  }
+
+  removeInternalService(serviceName: string): void {
+    this.routes.removeRouteForWorkspaceScript({
+      workspaceId: INTERNAL_SERVICE_WORKSPACE_ID,
+      scriptName: serviceName,
+    });
+  }
+
+  resolveInternalService(serviceName: string): ServiceProxyRoute | null {
+    const route = this.routes
+      .listRoutesForWorkspace(INTERNAL_SERVICE_WORKSPACE_ID)
+      .find((entry) => entry.scriptName === serviceName);
+    return route ? { hostname: route.hostname, port: route.port } : null;
   }
 
   removeWorkspaceService(params: { workspaceId: string; scriptName: string }): void {

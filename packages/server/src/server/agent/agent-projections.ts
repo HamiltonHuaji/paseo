@@ -245,6 +245,7 @@ export function buildStoredAgentPayload(
     archivedAt: record.archivedAt ?? null,
     labels: normalizeLabels(record.labels),
     ...(providerAvailable ? {} : { providerUnavailable: true }),
+    ...(record.experimentTouches ? { experimentTouches: record.experimentTouches } : {}),
   };
 }
 
@@ -268,6 +269,7 @@ export function toAgentListItemPayload(agent: AgentSnapshotPayload): AgentListIt
     attentionTimestamp: agent.attentionTimestamp ?? null,
     labels: agent.labels,
     ...(agent.providerUnavailable ? { providerUnavailable: true } : {}),
+    ...(agent.experimentTouches ? { experimentTouches: agent.experimentTouches } : {}),
   };
 }
 

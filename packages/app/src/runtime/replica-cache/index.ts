@@ -187,6 +187,15 @@ const StoredAgentSnapshotSchema = z.strictObject({
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
   attentionTimestamp: IsoDateSchema.nullable().optional(),
   archivedAt: IsoDateSchema.nullable().optional(),
+  experimentTouches: z
+    .array(
+      z.strictObject({
+        experiment: z.string(),
+        attempt: z.string().nullable(),
+        lastTouchedAt: IsoDateSchema,
+      }),
+    )
+    .optional(),
 });
 
 const StoredAgentSchema = z.strictObject({

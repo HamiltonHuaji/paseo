@@ -30,9 +30,17 @@ Workspace archive runs lifecycle teardown from the exact `cwd` but removes only 
 `worktreeRoot` after its last active reference disappears. Worktree recovery recreates that backing
 checkout from `mainRepoRoot`, then restores the relative path from `worktreeRoot` to `cwd`.
 
-Paseo uses **file-based JSON persistence** instead of a traditional database. All data is validated at runtime with Zod schemas. Most stores write atomically (write to temp file, then rename); a few still use plain `writeFile` — see each section. There is no schema-versioning/migration framework — schemas rely on optional fields with defaults for forward compatibility, with a small amount of inline normalization in `persisted-config.ts` for legacy provider/speech entries.
+Host-owned Paseo state uses **file-based JSON persistence**. All data is validated at runtime with
+Zod schemas. Most stores write atomically (write to temp file, then rename); a few still use plain
+`writeFile` — see each section. There is no schema-versioning/migration framework — schemas rely on
+optional fields with defaults for forward compatibility, with a small amount of inline
+normalization in `persisted-config.ts` for legacy provider/speech entries.
 
-All server-side stores live under `$PASEO_HOME` (defaults to `~/.paseo`).
+Experiment coordination is the project-owned exception. It uses SQLite and blobs under
+`<project-root>/.paseo/v1/` so every Workspace for the Project sees the same durable state. See
+[experiments.md](./experiments.md).
+
+All host-owned server stores live under `$PASEO_HOME` (defaults to `~/.paseo`).
 
 ## Store Surface Rules
 
@@ -100,6 +108,7 @@ Each agent is stored as a separate JSON file, grouped by project directory.
 | `attentionTimestamp` | `string?` (ISO 8601)                     | When attention was flagged                                                                                                                                                                                                                                                                                                                                                          |
 | `internal`           | `boolean?`                               | Whether this is a system-internal agent                                                                                                                                                                                                                                                                                                                                             |
 | `archivedAt`         | `string?` (ISO 8601)                     | Soft-delete timestamp                                                                                                                                                                                                                                                                                                                                                               |
+| `experimentTouches`  | `AgentExperimentTouch[]?`                | Latest Experiment/Attempt mutation per Experiment, used to find the Agent sessions involved in project work. See [experiments.md](./experiments.md).                                                                                                                                                                                                                                |
 
 ### Nested: SerializableConfig
 
