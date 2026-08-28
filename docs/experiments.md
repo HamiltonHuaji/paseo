@@ -598,13 +598,14 @@ The Canvas view places Experiment cards on an integer grid. Nullable stored `col
 deterministic default layout: Goals form vertical blocks, cards within a Goal run oldest-to-newest
 from top to bottom, and lineage depth adds a small horizontal indent. Dragging and resizing move
 continuously during the gesture, then snap to the grid and write concrete values when the gesture
-ends. The Canvas extent grows when cards need more room but does not shrink during the mounted
-session, so moving its last card cannot move the page's scroll boundary mid-gesture. Moving a card
-does not change the Experiment's `updated_at`.
+ends. Moving a card does not change the Experiment's `updated_at`.
 
-The Canvas owns a bounded two-axis viewport. The wheel scrolls it vertically; horizontal scrolling
-remains available; dragging empty grid space pans both axes. Card drag and resize gestures keep
-pointer capture until release, including when the pointer outruns the handle or card bounds.
+The Canvas is a fixed clipped viewport over an unbounded world coordinate plane. Keep a local camera
+translation separate from persisted card positions. The wheel translates the camera and dragging
+empty grid space pans it directly; neither operation depends on a ScrollView extent or clamps at a
+content edge. Selecting a card changes the detail surface without resizing the Canvas viewport.
+Card drag and resize gestures keep pointer ownership until release, including when the pointer
+outruns the handle or card bounds.
 
 Render lineage as grid-aligned orthogonal polylines. Routing follows current card edges and uses no
 automatic graph layout or obstacle-avoidance engine. The user can move a card when an edge crosses
