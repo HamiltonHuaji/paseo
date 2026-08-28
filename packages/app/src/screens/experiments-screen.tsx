@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused } from "@react-navigation/native";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { ExternalLink, GitBranch, Grid2X2, List, RefreshCw } from "lucide-react-native";
+import {
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  GitBranch,
+  Grid2X2,
+  List,
+  RefreshCw,
+} from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
 import type {
@@ -486,6 +494,7 @@ function AttemptPanel({
   const [observation, setObservation] = useState(attempt.progress);
   const [progressError, setProgressError] = useState(attempt.progressError);
   const [refreshing, setRefreshing] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     setObservation(attempt.progress);
@@ -510,7 +519,7 @@ function AttemptPanel({
   const handleRefresh = useCallback(() => void refresh(), [refresh]);
 
   useEffect(() => {
-    if (!client || !isFocused || !attempt.progressSource || observation?.ended) return;
+    if (!client || collapsed || !isFocused || !attempt.progressSource || observation?.ended) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
@@ -524,7 +533,15 @@ function AttemptPanel({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [attempt.id, attempt.progressSource, client, isFocused, observation?.ended, refresh]);
+  }, [
+    attempt.id,
+    attempt.progressSource,
+    client,
+    collapsed,
+    isFocused,
+    observation?.ended,
+    refresh,
+  ]);
 
   const viewerQuery = useFetchQuery({
     queryKey: ["experiment-viewers", serverId, projectId, attempt.id],
@@ -533,7 +550,7 @@ function AttemptPanel({
       return (await client.resolveExperimentViewers({ projectId, target: { attempt: attempt.id } }))
         .entries;
     },
-    enabled: Boolean(client),
+    enabled: Boolean(client && !collapsed),
     retry: false,
     dataShape: "list",
     staleTimeMs: 5_000,
@@ -545,6 +562,11 @@ function AttemptPanel({
       inlineUnistylesStyle<ViewStyle>({ width: `${Math.round(ratio * 100)}%` }),
     ],
     [ratio],
+  );
+  const toggleCollapsed = useCallback(() => setCollapsed((current) => !current), []);
+  const resolveDirectUrl = useCallback(
+    (url: string) => client?.resolveDirectHttpUrl(url) ?? null,
+    [client],
   );
   let progressContent = null;
   if (attempt.progressPlan) {
@@ -571,20 +593,72 @@ function AttemptPanel({
 
   return (
     <View style={[styles.attemptPanel, bordered && styles.attemptPanelBorder]}>
-      <Text style={styles.attemptPosition}>
-        Attempt {position} · {formatTimestamp(attempt.createdAt)}
-      </Text>
+      <View style={styles.attemptPositionRow}>
+        <Text style={styles.attemptPosition}>
+          Attempt {position} · {formatTimestamp(attempt.createdAt)}
+        </Text>
+        <Button
+          variant="ghost"
+          size="xs"
+          leftIcon={collapsed ? ChevronRight : ChevronDown}
+          onPress={toggleCollapsed}
+        >
+          {collapsed ? "Expand" : "Collapse"}
+        </Button>
+      </View>
       <View style={styles.attemptHeader}>
         <View style={styles.flexOne}>
           <Text style={styles.attemptTitle}>{attempt.shortDescription}</Text>
           <Text style={styles.description}>{attempt.purpose}</Text>
         </View>
-        {attempt.progressSource ? (
+        {!collapsed && attempt.progressSource ? (
           <Button variant="ghost" size="xs" onPress={handleRefresh} loading={refreshing}>
             Refresh progress
           </Button>
         ) : null}
       </View>
+      <AttemptExpandedContent
+        hidden={collapsed}
+        attempt={attempt}
+        progressContent={progressContent}
+        progressError={progressError}
+        viewerLoading={viewerQuery.isLoading}
+        viewerError={viewerQuery.error}
+        viewerEntries={viewerQuery.data}
+        resolveDirectUrl={resolveDirectUrl}
+        serverId={serverId}
+        relayConnection={activeConnection?.type === "relay" ? activeConnection : null}
+      />
+    </View>
+  );
+}
+
+function AttemptExpandedContent({
+  hidden,
+  attempt,
+  progressContent,
+  progressError,
+  viewerLoading,
+  viewerError,
+  viewerEntries,
+  resolveDirectUrl,
+  serverId,
+  relayConnection,
+}: {
+  hidden: boolean;
+  attempt: ExperimentAttempt;
+  progressContent: ReactNode;
+  progressError: string | null;
+  viewerLoading: boolean;
+  viewerError: unknown;
+  viewerEntries: ResolvedViewerEntry[] | undefined;
+  resolveDirectUrl: (url: string) => string | null;
+  serverId: string;
+  relayConnection: RelayHostConnection | null;
+}) {
+  if (hidden) return null;
+  return (
+    <>
       {progressContent}
       {progressError ? <Text style={styles.errorText}>{progressError}</Text> : null}
       {attempt.resultSummary ? (
@@ -594,25 +668,23 @@ function AttemptPanel({
         </View>
       ) : null}
       <AttemptFields attempt={attempt} />
-      {viewerQuery.isLoading ? <Text style={styles.meta}>Loading viewers…</Text> : null}
-      {viewerQuery.error ? (
-        <Text style={styles.errorText}>{errorMessage(viewerQuery.error)}</Text>
-      ) : null}
-      {viewerQuery.data?.length ? (
+      {viewerLoading ? <Text style={styles.meta}>Loading viewers…</Text> : null}
+      {viewerError ? <Text style={styles.errorText}>{errorMessage(viewerError)}</Text> : null}
+      {viewerEntries?.length ? (
         <View style={styles.viewerBlock}>
           <Text style={styles.sectionTitle}>Viewers</Text>
-          {viewerQuery.data.map((entry) => (
+          {viewerEntries.map((entry) => (
             <ViewerEntry
               key={entry.name}
               entry={entry}
-              directUrl={client?.resolveDirectHttpUrl(entry.url) ?? null}
+              directUrl={resolveDirectUrl(entry.url)}
               serverId={serverId}
-              relayConnection={activeConnection?.type === "relay" ? activeConnection : null}
+              relayConnection={relayConnection}
             />
           ))}
         </View>
       ) : null}
-    </View>
+    </>
   );
 }
 
@@ -841,6 +913,13 @@ const styles = StyleSheet.create((theme) => ({
   },
   attemptPanel: { gap: theme.spacing[4], padding: theme.spacing[4] },
   attemptPanelBorder: { borderTopWidth: 1, borderTopColor: theme.colors.border },
+  attemptPositionRow: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[3],
+  },
   attemptPosition: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   attemptHeader: { flexDirection: "row", alignItems: "flex-start", gap: theme.spacing[3] },
   attemptTitle: { color: theme.colors.foreground, fontSize: theme.fontSize.base },

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PanResponder,
   Pressable,
@@ -75,7 +75,22 @@ export function ExperimentCanvas({
       ),
     [automatic, experiments, localPlacements, persisted],
   );
-  const dimensions = useMemo(() => canvasDimensions(placements), [placements]);
+  const measuredDimensions = useMemo(() => canvasDimensions(placements), [placements]);
+  // A shrinking bottom edge changes the outer ScrollView offset while its last card is dragged.
+  const [minimumDimensions, setMinimumDimensions] = useState(measuredDimensions);
+  const dimensions = useMemo(
+    () => ({
+      width: Math.max(measuredDimensions.width, minimumDimensions.width),
+      height: Math.max(measuredDimensions.height, minimumDimensions.height),
+    }),
+    [measuredDimensions, minimumDimensions],
+  );
+  useEffect(() => {
+    setMinimumDimensions((current) => ({
+      width: Math.max(current.width, measuredDimensions.width),
+      height: Math.max(current.height, measuredDimensions.height),
+    }));
+  }, [measuredDimensions.height, measuredDimensions.width]);
   const previewPlacement = useCallback((placement: ResolvedPlacement) => {
     setLocalPlacements((current) => ({ ...current, [placement.experiment]: placement }));
   }, []);
@@ -158,14 +173,14 @@ function CanvasCard({
           gestureOriginRef.current = placementRef.current;
         },
         onPanResponderMove: (_, gesture) => {
-          previewRef.current(movePlacement(gestureOriginRef.current, gesture));
+          previewRef.current(movePlacement(gestureOriginRef.current, gesture, false));
         },
         onPanResponderRelease: (_, gesture) => {
           if (Math.abs(gesture.dx) < 3 && Math.abs(gesture.dy) < 3) onSelect(experiment.id);
-          else commitRef.current(movePlacement(gestureOriginRef.current, gesture));
+          else commitRef.current(movePlacement(gestureOriginRef.current, gesture, true));
         },
         onPanResponderTerminate: (_, gesture) => {
-          commitRef.current(movePlacement(gestureOriginRef.current, gesture));
+          commitRef.current(movePlacement(gestureOriginRef.current, gesture, true));
         },
       }),
     [experiment.id, onSelect],
@@ -179,13 +194,13 @@ function CanvasCard({
           gestureOriginRef.current = placementRef.current;
         },
         onPanResponderMove: (_, gesture) => {
-          previewRef.current(resizePlacement(gestureOriginRef.current, gesture));
+          previewRef.current(resizePlacement(gestureOriginRef.current, gesture, false));
         },
         onPanResponderRelease: (_, gesture) => {
-          commitRef.current(resizePlacement(gestureOriginRef.current, gesture));
+          commitRef.current(resizePlacement(gestureOriginRef.current, gesture, true));
         },
         onPanResponderTerminate: (_, gesture) => {
-          commitRef.current(resizePlacement(gestureOriginRef.current, gesture));
+          commitRef.current(resizePlacement(gestureOriginRef.current, gesture, true));
         },
       }),
     [],
@@ -326,22 +341,34 @@ const lineagePaletteMapping = (theme: Theme) => ({ lineColor: theme.colors.foreg
 function movePlacement(
   placement: ResolvedPlacement,
   gesture: PanResponderGestureState,
+  snapToGrid: boolean,
 ): ResolvedPlacement {
+  const columnDelta = gesture.dx / GRID_SIZE;
+  const rowDelta = gesture.dy / GRID_SIZE;
   return {
     ...placement,
-    column: Math.max(0, placement.column + Math.round(gesture.dx / GRID_SIZE)),
-    row: Math.max(0, placement.row + Math.round(gesture.dy / GRID_SIZE)),
+    column: Math.max(0, placement.column + (snapToGrid ? Math.round(columnDelta) : columnDelta)),
+    row: Math.max(0, placement.row + (snapToGrid ? Math.round(rowDelta) : rowDelta)),
   };
 }
 
 function resizePlacement(
   placement: ResolvedPlacement,
   gesture: PanResponderGestureState,
+  snapToGrid: boolean,
 ): ResolvedPlacement {
+  const widthDelta = gesture.dx / GRID_SIZE;
+  const heightDelta = gesture.dy / GRID_SIZE;
   return {
     ...placement,
-    width: Math.max(MIN_WIDTH, placement.width + Math.round(gesture.dx / GRID_SIZE)),
-    height: Math.max(MIN_HEIGHT, placement.height + Math.round(gesture.dy / GRID_SIZE)),
+    width: Math.max(
+      MIN_WIDTH,
+      placement.width + (snapToGrid ? Math.round(widthDelta) : widthDelta),
+    ),
+    height: Math.max(
+      MIN_HEIGHT,
+      placement.height + (snapToGrid ? Math.round(heightDelta) : heightDelta),
+    ),
   };
 }
 
