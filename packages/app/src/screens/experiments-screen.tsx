@@ -78,6 +78,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   const [selectedExperiment, setSelectedExperiment] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<ExperimentViewMode>("list");
+  const canvasExpanded = viewMode === "canvas" && selectedExperiment === null;
   const experiments = listQuery.data ?? EMPTY_EXPERIMENTS;
   const detailQueries = useFetchQueries<ExperimentDetail>(
     experiments.map((experiment) => ({
@@ -108,8 +109,8 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   );
 
   useEffect(() => {
-    if (!selectedExperiment || !experiments.some((item) => item.id === selectedExperiment)) {
-      setSelectedExperiment(experiments[0]?.id ?? null);
+    if (selectedExperiment && !experiments.some((item) => item.id === selectedExperiment)) {
+      setSelectedExperiment(null);
     }
   }, [experiments, selectedExperiment]);
 
@@ -175,6 +176,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
     }
   }, [projectId, queryClient, refetchList, serverId]);
   const handleRefresh = useCallback(() => void refreshAll(), [refreshAll]);
+  const clearSelection = useCallback(() => setSelectedExperiment(null), []);
   const viewOptions = useMemo(
     () => [
       { value: "list" as const, label: "List", icon: List },
@@ -208,14 +210,16 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   return (
     <View style={styles.container}>
       <MenuHeader title="Experiments" rightContent={headerAction} />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={[styles.content, optionalStyle(canvasExpanded, styles.contentFill)]}
+      >
         {!connected ? <Message text="Host is offline." /> : null}
         {listQuery.isLoading ? <ThemedLoadingSpinner /> : null}
         {listQuery.error ? <Message text={errorMessage(listQuery.error)} error /> : null}
         {groups.length === 0 && !listQuery.isLoading && !listQuery.error ? (
           <Message text="No experiments in this project." />
         ) : null}
-        <View style={styles.board}>
+        <View style={[styles.board, optionalStyle(canvasExpanded, styles.boardFill)]}>
           {viewMode === "list" ? (
             <View style={styles.listColumn}>
               {groups.map(([goal, goalExperiments]) => (
@@ -242,7 +246,9 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
               ))}
             </View>
           ) : (
-            <View style={styles.canvasColumn}>
+            <View
+              style={[styles.canvasColumn, optionalStyle(canvasExpanded, styles.canvasColumnFill)]}
+            >
               {boardLayoutQuery.error ? (
                 <Message text={errorMessage(boardLayoutQuery.error)} error />
               ) : null}
@@ -251,7 +257,9 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
                 detailByExperiment={detailByExperiment}
                 storedPlacements={boardLayoutQuery.data ?? []}
                 selectedExperiment={selectedExperiment}
+                fillAvailableHeight={canvasExpanded}
                 onSelectExperiment={setSelectedExperiment}
+                onClearSelection={clearSelection}
                 onPersistPlacement={persistPlacement}
               />
             </View>
@@ -844,6 +852,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function optionalStyle(enabled: boolean, style: ViewStyle): ViewStyle | null {
+  return enabled ? style : null;
+}
+
 function mergePlacement(
   placements: ExperimentBoardPlacement[],
   next: ExperimentBoardPlacement,
@@ -857,10 +869,13 @@ const styles = StyleSheet.create((theme) => ({
     padding: { xs: theme.spacing[3], md: theme.spacing[6] },
     gap: theme.spacing[4],
   },
+  contentFill: { flexGrow: 1 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   board: { flexDirection: { xs: "column", lg: "row" }, gap: theme.spacing[6] },
+  boardFill: { flex: 1, minHeight: 0 },
   listColumn: { flex: 1, minWidth: 0, gap: theme.spacing[6] },
   canvasColumn: { flex: 3, minWidth: 0, gap: theme.spacing[2] },
+  canvasColumnFill: { minHeight: 0 },
   detailColumn: {
     flex: 2,
     minWidth: 0,

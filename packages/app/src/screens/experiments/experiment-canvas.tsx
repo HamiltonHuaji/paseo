@@ -5,10 +5,9 @@ import {
   ScrollView,
   Text,
   View,
-  type GestureResponderEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  type PanResponderGestureState,
+  type PointerEvent as RNPointerEvent,
   type ViewStyle,
 } from "react-native";
 import { Grip, Maximize2 } from "lucide-react-native";
@@ -45,7 +44,9 @@ interface ExperimentCanvasProps {
   detailByExperiment: Map<string, ExperimentDetail>;
   storedPlacements: ExperimentBoardPlacement[];
   selectedExperiment: string | null;
+  fillAvailableHeight: boolean;
   onSelectExperiment: (experiment: string) => void;
+  onClearSelection: () => void;
   onPersistPlacement: (placement: ExperimentBoardPlacement) => void;
 }
 
@@ -54,7 +55,9 @@ export function ExperimentCanvas({
   detailByExperiment,
   storedPlacements,
   selectedExperiment,
+  fillAvailableHeight,
   onSelectExperiment,
+  onClearSelection,
   onPersistPlacement,
 }: ExperimentCanvasProps) {
   const persisted = useMemo(
@@ -124,8 +127,7 @@ export function ExperimentCanvas({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: (_, gesture) =>
           Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
-        onPanResponderGrant: (event) => {
-          captureGesturePointer(event);
+        onPanResponderGrant: () => {
           panOriginRef.current = { ...scrollOffsetRef.current };
         },
         onPanResponderMove: (_, gesture) => {
@@ -141,11 +143,29 @@ export function ExperimentCanvas({
       }),
     [],
   );
+  const handleCanvasPointerDown = useWebPointerDrag({
+    onGrant: () => {
+      panOriginRef.current = { ...scrollOffsetRef.current };
+    },
+    onMove: ({ dx, dy }) => {
+      horizontalScrollRef.current?.scrollTo({
+        x: Math.max(0, panOriginRef.current.x - dx),
+        animated: false,
+      });
+      verticalScrollRef.current?.scrollTo({
+        y: Math.max(0, panOriginRef.current.y - dy),
+        animated: false,
+      });
+    },
+    onRelease: ({ dx, dy }) => {
+      if (Math.abs(dx) < 3 && Math.abs(dy) < 3) onClearSelection();
+    },
+  });
 
   return (
     <ScrollView
       ref={verticalScrollRef}
-      style={styles.viewport}
+      style={[styles.viewport, fillAvailableHeight ? styles.viewportFill : styles.viewportBounded]}
       contentContainerStyle={styles.verticalViewportContent}
       onScroll={handleVerticalScroll}
       scrollEventThrottle={16}
@@ -158,7 +178,11 @@ export function ExperimentCanvas({
         scrollEventThrottle={16}
       >
         <View style={canvasStyle}>
-          <View style={styles.panSurface} {...canvasPanResponder.panHandlers} />
+          <View
+            style={styles.panSurface}
+            onPointerDown={handleCanvasPointerDown}
+            {...(!isWeb ? canvasPanResponder.panHandlers : {})}
+          />
           <GridLines width={dimensions.width} height={dimensions.height} />
           <ThemedLineageOverlay
             experiments={experiments}
@@ -220,8 +244,7 @@ function CanvasCard({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: (_, gesture) =>
           Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
-        onPanResponderGrant: (event) => {
-          captureGesturePointer(event);
+        onPanResponderGrant: () => {
           gestureOriginRef.current = placementRef.current;
         },
         onPanResponderMove: (_, gesture) => {
@@ -237,13 +260,24 @@ function CanvasCard({
       }),
     [experiment.id, onSelect],
   );
+  const handleDragPointerDown = useWebPointerDrag({
+    onGrant: () => {
+      gestureOriginRef.current = placementRef.current;
+    },
+    onMove: (gesture) => {
+      previewRef.current(movePlacement(gestureOriginRef.current, gesture, false));
+    },
+    onRelease: (gesture) => {
+      if (Math.abs(gesture.dx) < 3 && Math.abs(gesture.dy) < 3) onSelect(experiment.id);
+      else commitRef.current(movePlacement(gestureOriginRef.current, gesture, true));
+    },
+  });
   const resizeResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          captureGesturePointer(event);
+        onPanResponderGrant: () => {
           gestureOriginRef.current = placementRef.current;
         },
         onPanResponderMove: (_, gesture) => {
@@ -258,6 +292,17 @@ function CanvasCard({
       }),
     [],
   );
+  const handleResizePointerDown = useWebPointerDrag({
+    onGrant: () => {
+      gestureOriginRef.current = placementRef.current;
+    },
+    onMove: (gesture) => {
+      previewRef.current(resizePlacement(gestureOriginRef.current, gesture, false));
+    },
+    onRelease: (gesture) => {
+      commitRef.current(resizePlacement(gestureOriginRef.current, gesture, true));
+    },
+  });
   const cardStyle = useMemo(
     () => [
       styles.card,
@@ -281,7 +326,11 @@ function CanvasCard({
 
   return (
     <View style={cardStyle}>
-      <View style={styles.cardHeader} {...dragResponder.panHandlers}>
+      <View
+        style={styles.cardHeader}
+        onPointerDown={handleDragPointerDown}
+        {...(!isWeb ? dragResponder.panHandlers : {})}
+      >
         <ThemedGrip size={14} uniProps={mutedIconMapping} />
         <Text style={styles.cardTitle} numberOfLines={1}>
           {experiment.shortDescription}
@@ -310,7 +359,11 @@ function CanvasCard({
           </View>
         ) : null}
       </Pressable>
-      <View style={styles.resizeHandle} {...resizeResponder.panHandlers}>
+      <View
+        style={styles.resizeHandle}
+        onPointerDown={handleResizePointerDown}
+        {...(!isWeb ? resizeResponder.panHandlers : {})}
+      >
         <ThemedMaximize2 size={13} uniProps={mutedIconMapping} />
       </View>
     </View>
@@ -394,7 +447,7 @@ const lineagePaletteMapping = (theme: Theme) => ({ lineColor: theme.colors.foreg
 
 function movePlacement(
   placement: ResolvedPlacement,
-  gesture: PanResponderGestureState,
+  gesture: DragDelta,
   snapToGrid: boolean,
 ): ResolvedPlacement {
   const columnDelta = gesture.dx / GRID_SIZE;
@@ -408,7 +461,7 @@ function movePlacement(
 
 function resizePlacement(
   placement: ResolvedPlacement,
-  gesture: PanResponderGestureState,
+  gesture: DragDelta,
   snapToGrid: boolean,
 ): ResolvedPlacement {
   const widthDelta = gesture.dx / GRID_SIZE;
@@ -439,16 +492,62 @@ function geometryStyle(style: ViewStyle): ViewStyle {
   return inlineUnistylesStyle(style);
 }
 
-function captureGesturePointer(event: GestureResponderEvent): void {
-  if (!isWeb) return;
-  const pointerId = (event.nativeEvent as unknown as { pointerId?: number }).pointerId;
-  const element = event.currentTarget as unknown as HTMLElement | null;
-  if (pointerId === undefined || !element) return;
-  try {
-    element.setPointerCapture?.(pointerId);
-  } catch {
-    // The pointer may end between responder negotiation and grant.
-  }
+interface DragDelta {
+  dx: number;
+  dy: number;
+}
+
+function useWebPointerDrag({
+  onGrant,
+  onMove,
+  onRelease,
+}: {
+  onGrant: () => void;
+  onMove: (delta: DragDelta) => void;
+  onRelease: (delta: DragDelta) => void;
+}): (event: RNPointerEvent) => void {
+  const callbacksRef = useRef({ onGrant, onMove, onRelease });
+  callbacksRef.current = { onGrant, onMove, onRelease };
+
+  return useCallback((event: RNPointerEvent) => {
+    if (!isWeb || event.nativeEvent.button !== 0) return;
+    const element = event.currentTarget as unknown as HTMLElement | null;
+    if (!element) return;
+    const pointerId = event.nativeEvent.pointerId;
+    const startX = event.nativeEvent.clientX;
+    const startY = event.nativeEvent.clientY;
+    let latest = { dx: 0, dy: 0 };
+    callbacksRef.current.onGrant();
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      element.setPointerCapture?.(pointerId);
+    } catch {
+      // Window listeners still own the drag if capture races with pointer release.
+    }
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      latest = { dx: moveEvent.clientX - startX, dy: moveEvent.clientY - startY };
+      if (moveEvent.cancelable) moveEvent.preventDefault();
+      callbacksRef.current.onMove(latest);
+    };
+    const finish = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId !== pointerId) return;
+      cleanup();
+      callbacksRef.current.onRelease(latest);
+    };
+    const cleanup = () => {
+      if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId);
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: false });
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }, []);
 }
 
 function percentageWidth(ratio: number): ViewStyle {
@@ -495,12 +594,13 @@ function formatNumber(value: number): string {
 
 const styles = StyleSheet.create((theme) => ({
   viewport: {
-    height: { xs: 480, md: 720 },
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface0,
   },
+  viewportBounded: { height: { xs: 480, md: 720 } },
+  viewportFill: { flex: 1, minHeight: { xs: 360, md: 480 } },
   verticalViewportContent: { alignItems: "flex-start" },
   viewportContent: { alignItems: "flex-start" },
   canvas: { position: "relative", backgroundColor: theme.colors.surface0 },
