@@ -153,6 +153,7 @@ function createAgent(input: Partial<PaseoAgent> = {}): PaseoAgent {
       supportsSessionPersistence: true,
       supportsDynamicModes: false,
       supportsMcpServers: true,
+      supportsNativeConversationFork: false,
       supportsReasoningStream: true,
       supportsRewindBoth: false,
       supportsRewindConversation: false,
