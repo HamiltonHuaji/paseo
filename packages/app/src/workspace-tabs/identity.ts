@@ -59,10 +59,6 @@ function normalizeSimpleWorkspaceTabTarget(value: WorkspaceTabTarget): Workspace
     case "files":
     case "pull_request":
       return { kind: value.kind };
-    case "experiments": {
-      const projectId = trimNonEmpty(value.projectId);
-      return projectId ? { kind: "experiments", projectId } : null;
-    }
     case "setup": {
       const workspaceId = trimNonEmpty(value.workspaceId);
       return workspaceId ? { kind: "setup", workspaceId } : null;
@@ -153,9 +149,6 @@ function secondaryWorkspaceTabTargetsEqual(
   if (left.kind === "pull_request" && right.kind === "pull_request") {
     return true;
   }
-  if (left.kind === "experiments" && right.kind === "experiments") {
-    return left.projectId === right.projectId;
-  }
   if (left.kind === "setup" && right.kind === "setup") {
     return left.workspaceId === right.workspaceId;
   }
@@ -228,9 +221,6 @@ export function buildDeterministicWorkspaceTabId(target: WorkspaceTabTarget): st
   }
   if (target.kind === "changes_tree" || target.kind === "files" || target.kind === "pull_request") {
     return target.kind;
-  }
-  if (target.kind === "experiments") {
-    return `experiments_${target.projectId}`;
   }
   if (target.kind === "plugin") {
     const identity = `${target.pluginId.length}_${target.pluginId}_${target.panelId.length}_${target.panelId}`;
