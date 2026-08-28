@@ -33,6 +33,7 @@ import {
 } from "./experiment-canvas-layout";
 
 const GRID_SIZE = EXPERIMENT_CANVAS_GRID_SIZE;
+const PAN_MARGIN = GRID_SIZE * 12;
 const MIN_WIDTH = 9;
 const MIN_HEIGHT = 6;
 const ThemedGrip = withUnistyles(Grip);
@@ -44,7 +45,6 @@ interface ExperimentCanvasProps {
   detailByExperiment: Map<string, ExperimentDetail>;
   storedPlacements: ExperimentBoardPlacement[];
   selectedExperiment: string | null;
-  fillAvailableHeight: boolean;
   onSelectExperiment: (experiment: string) => void;
   onClearSelection: () => void;
   onPersistPlacement: (placement: ExperimentBoardPlacement) => void;
@@ -55,7 +55,6 @@ export function ExperimentCanvas({
   detailByExperiment,
   storedPlacements,
   selectedExperiment,
-  fillAvailableHeight,
   onSelectExperiment,
   onClearSelection,
   onPersistPlacement,
@@ -95,6 +94,13 @@ export function ExperimentCanvas({
     }),
     [measuredDimensions, minimumDimensions],
   );
+  const surfaceDimensions = useMemo(
+    () => ({
+      width: dimensions.width + PAN_MARGIN * 2,
+      height: dimensions.height + PAN_MARGIN * 2,
+    }),
+    [dimensions.height, dimensions.width],
+  );
   useEffect(() => {
     setMinimumDimensions((current) => ({
       width: Math.max(current.width, measuredDimensions.width),
@@ -112,7 +118,22 @@ export function ExperimentCanvas({
     [onPersistPlacement, previewPlacement],
   );
   const canvasStyle = useMemo(
-    () => [styles.canvas, geometryStyle({ width: dimensions.width, height: dimensions.height })],
+    () => [
+      styles.canvas,
+      geometryStyle({ width: surfaceDimensions.width, height: surfaceDimensions.height }),
+    ],
+    [surfaceDimensions.height, surfaceDimensions.width],
+  );
+  const contentLayerStyle = useMemo(
+    () => [
+      styles.contentLayer,
+      geometryStyle({
+        left: PAN_MARGIN,
+        top: PAN_MARGIN,
+        width: dimensions.width,
+        height: dimensions.height,
+      }),
+    ],
     [dimensions.height, dimensions.width],
   );
   const handleHorizontalScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -120,6 +141,11 @@ export function ExperimentCanvas({
   }, []);
   const handleVerticalScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     scrollOffsetRef.current.y = event.nativeEvent.contentOffset.y;
+  }, []);
+  useEffect(() => {
+    scrollOffsetRef.current = { x: PAN_MARGIN, y: PAN_MARGIN };
+    horizontalScrollRef.current?.scrollTo({ x: PAN_MARGIN, animated: false });
+    verticalScrollRef.current?.scrollTo({ y: PAN_MARGIN, animated: false });
   }, []);
   const canvasPanResponder = useMemo(
     () =>
@@ -165,7 +191,7 @@ export function ExperimentCanvas({
   return (
     <ScrollView
       ref={verticalScrollRef}
-      style={[styles.viewport, fillAvailableHeight ? styles.viewportFill : styles.viewportBounded]}
+      style={styles.viewport}
       contentContainerStyle={styles.verticalViewportContent}
       onScroll={handleVerticalScroll}
       scrollEventThrottle={16}
@@ -183,30 +209,32 @@ export function ExperimentCanvas({
             onPointerDown={handleCanvasPointerDown}
             {...(!isWeb ? canvasPanResponder.panHandlers : {})}
           />
-          <GridLines width={dimensions.width} height={dimensions.height} />
-          <ThemedLineageOverlay
-            experiments={experiments}
-            placements={placements}
-            width={dimensions.width}
-            height={dimensions.height}
-            uniProps={lineagePaletteMapping}
-          />
-          {experiments.map((experiment) => {
-            const placement = placements.get(experiment.id);
-            if (!placement) return null;
-            return (
-              <CanvasCard
-                key={experiment.id}
-                experiment={experiment}
-                detail={detailByExperiment.get(experiment.id) ?? null}
-                placement={placement}
-                selected={experiment.id === selectedExperiment}
-                onSelect={onSelectExperiment}
-                onPreviewPlacement={previewPlacement}
-                onCommitPlacement={commitPlacement}
-              />
-            );
-          })}
+          <GridLines width={surfaceDimensions.width} height={surfaceDimensions.height} />
+          <View pointerEvents="box-none" style={contentLayerStyle}>
+            <ThemedLineageOverlay
+              experiments={experiments}
+              placements={placements}
+              width={dimensions.width}
+              height={dimensions.height}
+              uniProps={lineagePaletteMapping}
+            />
+            {experiments.map((experiment) => {
+              const placement = placements.get(experiment.id);
+              if (!placement) return null;
+              return (
+                <CanvasCard
+                  key={experiment.id}
+                  experiment={experiment}
+                  detail={detailByExperiment.get(experiment.id) ?? null}
+                  placement={placement}
+                  selected={experiment.id === selectedExperiment}
+                  onSelect={onSelectExperiment}
+                  onPreviewPlacement={previewPlacement}
+                  onCommitPlacement={commitPlacement}
+                />
+              );
+            })}
+          </View>
         </View>
       </ScrollView>
     </ScrollView>
@@ -594,17 +622,18 @@ function formatNumber(value: number): string {
 
 const styles = StyleSheet.create((theme) => ({
   viewport: {
+    flex: 1,
+    minHeight: { xs: 360, md: 480 },
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface0,
   },
-  viewportBounded: { height: { xs: 480, md: 720 } },
-  viewportFill: { flex: 1, minHeight: { xs: 360, md: 480 } },
   verticalViewportContent: { alignItems: "flex-start" },
   viewportContent: { alignItems: "flex-start" },
   canvas: { position: "relative", backgroundColor: theme.colors.surface0 },
   panSurface: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
+  contentLayer: { position: "absolute", zIndex: 2 },
   grid: { ...StyleSheet.absoluteFillObject },
   gridVertical: {
     position: "absolute",
