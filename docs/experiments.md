@@ -566,6 +566,10 @@ Agent rather than the short-lived reporting Agent. Ordinary agent tools cannot s
 
 ## Client
 
+Open Experiments as a workspace tab. It shares the workspace header and tab strip with Agent,
+Terminal, file, and other workspace tabs; closing it returns to the adjacent tab without losing the
+workspace tab set. The standalone host route remains available for direct links and diagnostics.
+
 The List view groups Experiments by Goal name and includes an Ungrouped section. Goal grouping,
 lineage, and Attempt containment are separate projections. Keep this view available while the
 Canvas view evolves.
@@ -583,11 +587,12 @@ An Experiment row shows:
 The Experiment detail shows its description, lineage, conclusion, Attempts, Agent sessions, and
 resolved viewer entries. Attempts form one oldest-first record with an explicit sequence number and
 creation time. Render every Attempt in that record at once; do not hide them behind an exclusive
-picker. Each entry expands and collapses independently, starts expanded, and keeps its sequence,
-time, title, and purpose visible while collapsed. An expanded entry shows direct W&B, job, output
-directory, result, blob directory, viewer entries, a schedule drawn on its progress axis, latest
-observation, refresh error, and staleness. Each schedule draws only that Attempt's observation;
-cross-Attempt overlays are a separate future surface.
+picker. Each entry expands and collapses independently. The newest Attempt starts expanded and the
+others start collapsed. Remember expansion overrides while the Experiments tab remains mounted, and
+keep sequence, time, title, and purpose visible while collapsed. An expanded entry shows direct W&B,
+job, output directory, result, blob directory, viewer entries, a schedule drawn on its progress
+axis, latest observation, refresh error, and staleness. Each schedule draws only that Attempt's
+observation; cross-Attempt overlays are a separate future surface.
 
 When a progress plan has additional units, show a unit dropdown on that Attempt. Switching units
 changes the axis, tracks, segments, total, and projected current marker together. Units are local to

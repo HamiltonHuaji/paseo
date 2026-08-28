@@ -58,6 +58,11 @@ const manifests = {
     supportedHosts: ["main", "explorer"],
     resourceKey: () => "pull_request",
   },
+  experiments: {
+    kind: "experiments",
+    supportedHosts: ["main"],
+    resourceKey: (target) => target.projectId,
+  },
   file: {
     kind: "file",
     supportedHosts: ["main", "explorer"],
