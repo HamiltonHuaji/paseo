@@ -329,7 +329,7 @@ export async function openDesktopSettings(page: Page, serverId: string): Promise
 export async function openDesktopAboutSettings(page: Page): Promise<void> {
   await openSettings(page);
   await openSettingsSection(page, "about");
-  await expect(page.getByText("App updates", { exact: true })).toBeVisible();
+  await expect(page.getByText("Fork updates", { exact: true })).toBeVisible();
 }
 
 export async function expectUpdateBanner(page: Page, version: string): Promise<void> {
