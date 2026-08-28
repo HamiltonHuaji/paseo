@@ -339,7 +339,7 @@ export async function expectUpdateBanner(page: Page, version: string): Promise<v
 }
 
 export async function clickCheckForUpdates(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Check" }).click();
+  await page.getByRole("button", { name: "Check", exact: true }).click();
 }
 
 export async function expectPendingUpdateCheckResult(page: Page, version: string): Promise<void> {
