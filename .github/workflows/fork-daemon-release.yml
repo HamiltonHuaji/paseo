@@ -73,6 +73,14 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Restore Metro transform cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/metro-cache
+          key: metro-${{ runner.os }}-browser-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-${{ github.sha }}
+          restore-keys: |
+            metro-${{ runner.os }}-browser-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-
+
       - name: Install dependencies
         run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
 

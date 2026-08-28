@@ -225,6 +225,14 @@ jobs:
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
 
+      - name: Restore Metro transform cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/metro-cache
+          key: metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-${{ github.sha }}
+          restore-keys: |
+            metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-
+
       - name: Install JS dependencies
         run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
         env:
@@ -331,6 +339,14 @@ jobs:
           cache-dependency-path: package-lock.json
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
+
+      - name: Restore Metro transform cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/metro-cache
+          key: metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-${{ github.sha }}
+          restore-keys: |
+            metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-
 
       - name: Install JS dependencies
         run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
