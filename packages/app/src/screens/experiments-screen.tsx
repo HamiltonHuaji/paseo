@@ -12,6 +12,7 @@ import {
   Grid2X2,
   List,
   RefreshCw,
+  X,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
@@ -60,23 +61,28 @@ interface ExperimentsScreenProps {
   serverId: string;
   projectId: string;
   embedded?: boolean;
+  active?: boolean;
+  onClose?: () => void;
 }
 
 export function ExperimentsScreen({
   serverId,
   projectId,
   embedded = false,
+  active = true,
+  onClose,
 }: ExperimentsScreenProps) {
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const queryClient = useQueryClient();
+  const fetchEnabled = canFetchExperiments(active, Boolean(client), connected, Boolean(projectId));
   const listQuery = useFetchQuery({
     queryKey: ["experiments", serverId, projectId],
     queryFn: async () => {
       if (!client) throw new Error("Daemon is unavailable");
       return (await client.listExperiments({ projectId, includeClosed: true })).experiments;
     },
-    enabled: Boolean(client && connected && projectId),
+    enabled: fetchEnabled,
     retry: false,
     dataShape: "list",
     staleTimeMs: 5_000,
@@ -94,7 +100,7 @@ export function ExperimentsScreen({
         if (!client) throw new Error("Daemon is unavailable");
         return (await client.getExperiment({ projectId, experiment: experiment.id })).detail;
       },
-      enabled: Boolean(client && connected),
+      enabled: fetchEnabled,
       retry: false,
       dataShape: "value",
       staleTimeMs: 5_000,
@@ -128,7 +134,7 @@ export function ExperimentsScreen({
       if (!client) throw new Error("Daemon is unavailable");
       return (await client.getExperimentBoardLayout({ projectId })).placements;
     },
-    enabled: Boolean(client && connected && projectId && viewMode === "canvas"),
+    enabled: canFetchExperimentCanvas(fetchEnabled, viewMode),
     retry: false,
     dataShape: "list",
     staleTimeMs: 5_000,
@@ -226,7 +232,7 @@ export function ExperimentsScreen({
       <ScrollView
         contentContainerStyle={[styles.content, optionalStyle(canvasMode, styles.contentFill)]}
       >
-        <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} />
+        <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} onClose={onClose} />
         {!connected ? <Message text="Host is offline." /> : null}
         {listQuery.isLoading ? <ThemedLoadingSpinner /> : null}
         {listQuery.error ? <Message text={errorMessage(listQuery.error)} error /> : null}
@@ -284,6 +290,7 @@ export function ExperimentsScreen({
               onSelectExperiment={setSelectedExperiment}
               attemptExpansionById={attemptExpansionById}
               onAttemptExpandedChange={setAttemptExpanded}
+              active={active}
             />
           ) : null}
         </View>
@@ -300,12 +307,23 @@ function ExperimentsHeader({ embedded, actions }: { embedded: boolean; actions: 
 function EmbeddedExperimentsActions({
   embedded,
   actions,
+  onClose,
 }: {
   embedded: boolean;
   actions: ReactNode;
+  onClose?: () => void;
 }) {
   if (!embedded) return null;
-  return <View style={styles.embeddedActions}>{actions}</View>;
+  return (
+    <View style={styles.embeddedActions}>
+      {actions}
+      {onClose ? (
+        <Button variant="ghost" size="sm" leftIcon={X} onPress={onClose}>
+          Back to tabs
+        </Button>
+      ) : null}
+    </View>
+  );
 }
 
 function ExperimentRow({
@@ -371,6 +389,7 @@ function ExperimentDetailPanel({
   onSelectExperiment,
   attemptExpansionById,
   onAttemptExpandedChange,
+  active,
 }: {
   serverId: string;
   projectId: string;
@@ -379,6 +398,7 @@ function ExperimentDetailPanel({
   onSelectExperiment: (experiment: string) => void;
   attemptExpansionById: Record<string, boolean>;
   onAttemptExpandedChange: (attemptId: string, expanded: boolean) => void;
+  active: boolean;
 }) {
   const client = useHostRuntimeClient(serverId);
   const detailQuery = useFetchQuery({
@@ -387,7 +407,7 @@ function ExperimentDetailPanel({
       if (!client) throw new Error("Daemon is unavailable");
       return (await client.getExperiment({ projectId, experiment })).detail;
     },
-    enabled: Boolean(client),
+    enabled: canFetchExperimentDetail(active, Boolean(client)),
     retry: false,
     dataShape: "value",
     staleTimeMs: 5_000,
@@ -485,6 +505,7 @@ function ExperimentDetailPanel({
                 bordered={index > 0}
                 expanded={resolveAttemptExpanded(attempt.id, latestAttemptId, attemptExpansionById)}
                 onExpandedChange={onAttemptExpandedChange}
+                screenActive={active}
               />
             ))}
           </View>
@@ -522,6 +543,7 @@ function AttemptPanel({
   bordered,
   expanded,
   onExpandedChange,
+  screenActive,
 }: {
   serverId: string;
   projectId: string;
@@ -530,6 +552,7 @@ function AttemptPanel({
   bordered: boolean;
   expanded: boolean;
   onExpandedChange: (attemptId: string, expanded: boolean) => void;
+  screenActive: boolean;
 }) {
   const client = useHostRuntimeClient(serverId);
   const hosts = useHosts();
@@ -567,7 +590,15 @@ function AttemptPanel({
   const handleRefresh = useCallback(() => void refresh(), [refresh]);
 
   useEffect(() => {
-    if (!client || collapsed || !isFocused || !attempt.progressSource || observation?.ended) return;
+    if (
+      !client ||
+      collapsed ||
+      !isFocused ||
+      !screenActive ||
+      !attempt.progressSource ||
+      observation?.ended
+    )
+      return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
@@ -589,6 +620,7 @@ function AttemptPanel({
     isFocused,
     observation?.ended,
     refresh,
+    screenActive,
   ]);
 
   const viewerQuery = useFetchQuery({
@@ -598,7 +630,7 @@ function AttemptPanel({
       return (await client.resolveExperimentViewers({ projectId, target: { attempt: attempt.id } }))
         .entries;
     },
-    enabled: Boolean(client && !collapsed),
+    enabled: Boolean(client && screenActive && !collapsed),
     retry: false,
     dataShape: "list",
     staleTimeMs: 5_000,
@@ -839,6 +871,23 @@ function groupExperiments(experiments: ExperimentRecord[]): Array<[string, Exper
   return [...groups.entries()];
 }
 
+function canFetchExperiments(
+  active: boolean,
+  hasClient: boolean,
+  connected: boolean,
+  hasProject: boolean,
+): boolean {
+  return active && hasClient && connected && hasProject;
+}
+
+function canFetchExperimentCanvas(fetchEnabled: boolean, viewMode: ExperimentViewMode): boolean {
+  return fetchEnabled && viewMode === "canvas";
+}
+
+function canFetchExperimentDetail(active: boolean, hasClient: boolean): boolean {
+  return active && hasClient;
+}
+
 function findLatestProgressAttempt(attempts: ExperimentAttempt[]): ExperimentAttempt | null {
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
     const attempt = attempts[index];
@@ -914,7 +963,12 @@ const styles = StyleSheet.create((theme) => ({
   },
   contentFill: { flexGrow: 1 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
-  embeddedActions: { flexDirection: "row", justifyContent: "flex-end" },
+  embeddedActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: theme.spacing[2],
+  },
   board: { flexDirection: { xs: "column", lg: "row" }, gap: theme.spacing[6] },
   boardFill: { flex: 1, minHeight: 0 },
   listColumn: { flex: 1, minWidth: 0, gap: theme.spacing[6] },

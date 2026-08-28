@@ -11,14 +11,6 @@ describe("panel manifest", () => {
     expect(panelSupportsHost("files", "explorer")).toBe(true);
     expect(panelSupportsHost("files", "main")).toBe(false);
     expect(panelSupportsHost("setup", "explorer")).toBe(false);
-    expect(panelSupportsHost("experiments", "main")).toBe(true);
-    expect(panelSupportsHost("experiments", "explorer")).toBe(false);
-  });
-
-  it("scopes experiment panels by project", () => {
-    expect(panelResourceKey({ kind: "experiments", projectId: "project-a" })).toBe(
-      "experiments:project-a",
-    );
   });
 
   it("keeps durable resource identity separate from transient target input", () => {

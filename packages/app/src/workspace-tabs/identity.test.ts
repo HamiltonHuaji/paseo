@@ -105,24 +105,6 @@ describe("workspace utility panel identity", () => {
   );
 });
 
-describe("experiments tab identity", () => {
-  it("normalizes and keys one tab per project", () => {
-    const target = normalizeWorkspaceTabTarget({
-      kind: "experiments",
-      projectId: " project-a ",
-    });
-
-    expect(target).toEqual({ kind: "experiments", projectId: "project-a" });
-    expect(target && buildDeterministicWorkspaceTabId(target)).toBe("experiments_project-a");
-    expect(
-      target && workspaceTabTargetsEqual(target, { kind: "experiments", projectId: "project-a" }),
-    ).toBe(true);
-    expect(
-      target && workspaceTabTargetsEqual(target, { kind: "experiments", projectId: "project-b" }),
-    ).toBe(false);
-  });
-});
-
 describe("commit diff tab identity", () => {
   it("keys a commit diff tab by its sha", () => {
     expect(buildDeterministicWorkspaceTabId({ kind: "commit_diff", sha: "abc123" })).toBe(
