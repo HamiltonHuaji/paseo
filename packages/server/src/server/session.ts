@@ -2605,8 +2605,12 @@ export class Session {
       | { scope: "attempt"; attempt: string };
     if (msg.scope === "shared") input = { scope: "shared" };
     else if (msg.scope === "experiment") {
+      if (!msg.experiment) throw new Error("experiment is required for experiment storage");
       input = { scope: "experiment", experiment: msg.experiment };
-    } else input = { scope: "attempt", attempt: msg.attempt };
+    } else {
+      if (!msg.attempt) throw new Error("attempt is required for attempt storage");
+      input = { scope: "attempt", attempt: msg.attempt };
+    }
     const resolvedPath = await this.experimentService.resolveStorage(msg.projectId, input);
     this.emit({
       type: "experiment.storage.resolve.response",
