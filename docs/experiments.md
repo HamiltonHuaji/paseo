@@ -562,10 +562,12 @@ An Experiment row shows:
 - whether a conclusion exists.
 
 The Experiment detail shows its description, lineage, conclusion, Attempts, Agent sessions, and
-resolved viewer entries. Attempt detail shows direct W&B, job, output directory, result, blob
-directory, viewer entries, a schedule drawn on its progress axis, latest observation, refresh
-error, and staleness. Attempt detail draws only that Attempt's observation; comparison is a
-separate future surface.
+resolved viewer entries. Attempts form one oldest-first record with an explicit sequence number and
+creation time. Render every Attempt in that record at once; do not hide them behind an exclusive
+picker. Each entry shows direct W&B, job, output directory, result, blob directory, viewer entries,
+a schedule drawn on its progress axis, latest observation, refresh error, and staleness. Each
+schedule draws only that Attempt's observation; cross-Attempt overlays are a separate future
+surface.
 
 The Canvas view places Experiment cards on an integer grid. Nullable stored `column`, `row`,
 `width`, and `height` values are user overrides. The client supplies missing values with a
