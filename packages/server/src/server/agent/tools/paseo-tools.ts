@@ -3272,7 +3272,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         title: "Create attempt",
         description:
           "Create one concrete probe, run, retry, evaluation, or deployment. A retry is a new Attempt.",
-        inputSchema: CreateAttemptInputSchema,
+        inputSchema: CreateAttemptInputSchema.omit({ progressPlan: true }),
       },
       async (input) => {
         const attempt = await requireExperimentService().createAttempt(
@@ -3290,7 +3290,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         title: "Update attempt",
         description:
           "Patch Attempt metadata or record its result. Do not report lifecycle state or timestamps.",
-        inputSchema: UpdateAttemptInputSchema,
+        inputSchema: UpdateAttemptInputSchema.omit({ progressPlan: true }),
       },
       async (input) => {
         const attempt = await requireExperimentService().updateAttempt(

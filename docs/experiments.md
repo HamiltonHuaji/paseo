@@ -118,7 +118,7 @@ attempts
   wandb_id              nullable text
   job_id                nullable text
   output_dir            nullable text
-  progress_plan_json    nullable ProgressPlan
+  progress_plans_json   nullable ProgressPlanSet
   progress_source_json  nullable ProgressSource
   viewer_config_json    nullable ViewerConfig
   blob_relpath          text relative to `.paseo/v1/`
@@ -171,7 +171,7 @@ For every update input:
 - daemon-owned fields cannot appear.
 
 Experiment nullable initial fields are `goal`, `basedOn`, `viewerSource`, and `conclusion`. Attempt
-nullable initial fields are `resultSummary`, `wandbId`, `jobId`, `outputDir`, `progressPlan`, and
+nullable initial fields are `resultSummary`, `wandbId`, `jobId`, `outputDir`, `progressPlans`, and
 `progressSource`. Viewer configuration is changed through its focused tool.
 
 Setting a non-null Experiment conclusion causes the daemon to set `closed_at`. Clearing the
@@ -184,14 +184,27 @@ source once; it does not poll logs, W&B, a scheduler, or another service on the 
 The daemon understands a small progress observation contract and no vendor API.
 
 ```ts
-interface ProgressPlan {
+interface ProgressPlanSet {
+  sourceUnit: string;
+  units: ProgressUnitPlan[];
+}
+
+interface ProgressUnitPlan {
   unit: string;
   total: number;
   segments?: ProgressSegment[];
-  tracks?: Array<{
-    label: string;
-    segments: ProgressSegment[];
+  tracks?: ProgressTrack[];
+  projection?: Array<{
+    sourceStart: number;
+    sourceEnd: number;
+    targetStart: number;
+    targetEnd: number;
   }>;
+}
+
+interface ProgressTrack {
+  label: string;
+  segments: ProgressSegment[];
 }
 
 interface ProgressSegment {
@@ -202,13 +215,19 @@ interface ProgressSegment {
 ```
 
 `unit` is any project-defined non-empty string. The daemon does not maintain a unit catalog or
-interpret `step`, `sample`, `frame`, `token`, or a project-specific unit. Source observations and
-every segment boundary use that same coordinate.
+interpret `step`, `sample`, `frame`, `token`, or a project-specific unit. `sourceUnit` names the
+unit emitted by the progress source and must have a plan in `units`.
+
+Every unit plan has its own total, tracks, and segment boundaries. A non-source unit's optional
+`projection` maps covered intervals of `sourceUnit` to that unit with piecewise-linear ranges.
+Ranges are ordered, non-overlapping, increasing, and bounded by both totals. Leave gaps when no
+conversion is known; the client shows the selected schedule without an actual marker in an
+uncovered interval. Do not infer another unit from the ratio between totals.
 
 Tracks describe schedule dimensions that vary in parallel, such as data source, sequence length,
 and noise distribution. Segments must be ordered and non-overlapping within one track and stay
-within `0..total`; segments in different tracks may overlap. The legacy `segments` field is a
-single unnamed track. Do not set both forms.
+within `0..total`; segments in different tracks may overlap. The `segments` shorthand is a single
+unnamed track. Do not set both forms.
 
 Progress comes from either a log or a command:
 
@@ -570,6 +589,10 @@ directory, result, blob directory, viewer entries, a schedule drawn on its progr
 observation, refresh error, and staleness. Each schedule draws only that Attempt's observation;
 cross-Attempt overlays are a separate future surface.
 
+When a progress plan has additional units, show a unit dropdown on that Attempt. Switching units
+changes the axis, tracks, segments, total, and projected current marker together. Units are local to
+the Attempt and do not come from a global catalog.
+
 The Canvas view places Experiment cards on an integer grid. Nullable stored `column`, `row`,
 `width`, and `height` values are user overrides. The client supplies missing values with a
 deterministic default layout: Goals form vertical blocks, cards within a Goal run oldest-to-newest
@@ -578,6 +601,10 @@ continuously during the gesture, then snap to the grid and write concrete values
 ends. The Canvas extent grows when cards need more room but does not shrink during the mounted
 session, so moving its last card cannot move the page's scroll boundary mid-gesture. Moving a card
 does not change the Experiment's `updated_at`.
+
+The Canvas owns a bounded two-axis viewport. The wheel scrolls it vertically; horizontal scrolling
+remains available; dragging empty grid space pans both axes. Card drag and resize gestures keep
+pointer capture until release, including when the pointer outruns the handle or card bounds.
 
 Render lineage as grid-aligned orthogonal polylines. Routing follows current card edges and uses no
 automatic graph layout or obstacle-avoidance engine. The user can move a card when an edge crosses
@@ -733,7 +760,7 @@ mutable field is optional. It does not accept `closedAt`, `archivedAt`, or times
   wandbId?: string | null;
   jobId?: string | null;
   outputDir?: string | null;
-  progressPlan?: ProgressPlan | null;
+  progressPlans?: ProgressPlanSet | null;
   progressSource?: ProgressSource | null;
 }
 ```
@@ -773,7 +800,7 @@ with empty `mounts` and `entries` explicitly disables viewers at that target.
 ```
 
 The progress-refresh RPC is deliberately absent from the agent tool catalog. Agents configure
-`progressPlan` and `progressSource`; clients request observations from the daemon.
+`progressPlans` and `progressSource`; clients request observations from the daemon.
 
 Ship a `track-experiments` orchestration skill. It teaches agents to:
 

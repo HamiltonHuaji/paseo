@@ -293,7 +293,7 @@ export class ExperimentService {
     const observation = values
       ? {
           ...values,
-          total: values.total ?? attempt.progressPlan?.total ?? null,
+          total: values.total ?? sourceProgressTotal(attempt),
           refreshedAt,
         }
       : null;
@@ -336,7 +336,7 @@ export class ExperimentService {
     }
     const observation: ProgressObservation = {
       current: parsed.current,
-      total: parsed.total ?? attempt.progressPlan?.total ?? null,
+      total: parsed.total ?? sourceProgressTotal(attempt),
       ended: parsed.ended,
       phase: parsed.phase ?? null,
       message: parsed.message ?? null,
@@ -468,6 +468,11 @@ function parseEnded(value: string | undefined): boolean {
   if (value === "true" || value === "1") return true;
   if (value === "false" || value === "0") return false;
   throw new Error("ended must be true, false, 1, or 0");
+}
+
+function sourceProgressTotal(attempt: ExperimentAttempt): number | null {
+  const plans = attempt.progressPlans;
+  return plans?.units.find((plan) => plan.unit === plans.sourceUnit)?.total ?? null;
 }
 
 function compileRegex(source: string, label: string): RegExp {

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Command } from "commander";
 import {
-  ProgressPlanSchema,
+  ProgressPlanSetSchema,
   ProgressSourceSchema,
   ViewerConfigSchema,
   type ExperimentAttempt,
@@ -271,7 +271,7 @@ export function createExperimentCommand(): Command {
         const client = await connect(options);
         try {
           const callerAgentId = resolveExperimentCallerAgentId();
-          const progressPlan = await parseJsonOption(options.progressPlan, ProgressPlanSchema);
+          const progressPlans = await parseJsonOption(options.progressPlan, ProgressPlanSetSchema);
           const progressSource = await parseJsonOption(
             options.progressSource,
             ProgressSourceSchema,
@@ -285,7 +285,7 @@ export function createExperimentCommand(): Command {
             ...(options.wandbId ? { wandbId: options.wandbId } : {}),
             ...(options.jobId ? { jobId: options.jobId } : {}),
             ...(options.outputDir ? { outputDir: options.outputDir } : {}),
-            ...(progressPlan ? { progressPlan } : {}),
+            ...(progressPlans ? { progressPlans } : {}),
             ...(progressSource ? { progressSource } : {}),
             ...(callerAgentId ? { callerAgentId } : {}),
           });

@@ -47,23 +47,47 @@ describe("project Experiments", () => {
         wandbId: "entity/project/run-7",
         jobId: "81273",
         outputDir,
-        progressPlan: {
-          unit: "effective-frame",
-          total: 500,
-          tracks: [
+        progressPlans: {
+          sourceUnit: "effective-frame",
+          units: [
             {
-              label: "data",
-              segments: [
-                { label: "short", start: 0, end: 100 },
-                { label: "mixed", start: 100, end: 300 },
-                { label: "long", start: 300, end: 500 },
+              unit: "effective-frame",
+              total: 500,
+              tracks: [
+                {
+                  label: "data",
+                  segments: [
+                    { label: "short", start: 0, end: 100 },
+                    { label: "mixed", start: 100, end: 300 },
+                    { label: "long", start: 300, end: 500 },
+                  ],
+                },
+                {
+                  label: "noise",
+                  segments: [
+                    { label: "pure", start: 0, end: 200 },
+                    { label: "shifted", start: 200, end: 500 },
+                  ],
+                },
               ],
             },
             {
-              label: "noise",
-              segments: [
-                { label: "pure", start: 0, end: 200 },
-                { label: "shifted", start: 200, end: 500 },
+              unit: "seen-frame",
+              total: 2_000,
+              tracks: [
+                {
+                  label: "data",
+                  segments: [
+                    { label: "short", start: 0, end: 200 },
+                    { label: "mixed", start: 200, end: 1_000 },
+                    { label: "long", start: 1_000, end: 2_000 },
+                  ],
+                },
+              ],
+              projection: [
+                { sourceStart: 0, sourceEnd: 100, targetStart: 0, targetEnd: 200 },
+                { sourceStart: 100, sourceEnd: 300, targetStart: 200, targetEnd: 1_000 },
+                { sourceStart: 300, sourceEnd: 500, targetStart: 1_000, targetEnd: 2_000 },
               ],
             },
           ],
@@ -77,21 +101,30 @@ describe("project Experiments", () => {
         callerAgentId: caller.id,
       });
       const attempt = attemptResult.attempt;
+      expect(attempt.progressPlans?.units[1]).toMatchObject({
+        unit: "seen-frame",
+        total: 2_000,
+      });
       await expect(
         ctx.client.createExperimentAttempt({
           projectId,
           experiment: created.experiment.id,
           shortDescription: "Invalid overlapping schedule",
           purpose: "Verify per-track schedule validation.",
-          progressPlan: {
-            unit: "effective-frame",
-            total: 500,
-            tracks: [
+          progressPlans: {
+            sourceUnit: "effective-frame",
+            units: [
               {
-                label: "data",
-                segments: [
-                  { label: "first", start: 0, end: 300 },
-                  { label: "overlap", start: 200, end: 500 },
+                unit: "effective-frame",
+                total: 500,
+                tracks: [
+                  {
+                    label: "data",
+                    segments: [
+                      { label: "first", start: 0, end: 300 },
+                      { label: "overlap", start: 200, end: 500 },
+                    ],
+                  },
                 ],
               },
             ],

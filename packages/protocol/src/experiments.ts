@@ -20,11 +20,32 @@ export const ProgressTrackSchema = z.object({
   segments: z.array(ProgressSegmentSchema),
 });
 
+export const ProgressProjectionRangeSchema = z.object({
+  sourceStart: z.number().nonnegative(),
+  sourceEnd: z.number().positive(),
+  targetStart: z.number().nonnegative(),
+  targetEnd: z.number().positive(),
+});
+
+export const ProgressUnitPlanSchema = z.object({
+  unit: z.string().min(1),
+  total: z.number().positive(),
+  segments: z.array(ProgressSegmentSchema).optional(),
+  tracks: z.array(ProgressTrackSchema).optional(),
+  projection: z.array(ProgressProjectionRangeSchema).optional(),
+});
+
+// COMPAT(experimentProgressPlans): legacy single-unit wire shape; remove after 2027-02-28.
 export const ProgressPlanSchema = z.object({
   unit: z.string().min(1),
   total: z.number().positive(),
   segments: z.array(ProgressSegmentSchema).optional(),
   tracks: z.array(ProgressTrackSchema).optional(),
+});
+
+export const ProgressPlanSetSchema = z.object({
+  sourceUnit: z.string().min(1),
+  units: z.array(ProgressUnitPlanSchema).min(1),
 });
 
 export const ExperimentBoardPlacementSchema = z.object({
@@ -84,6 +105,7 @@ export const ExperimentAttemptSchema = z.object({
   jobId: z.string().nullable(),
   outputDir: z.string().nullable(),
   progressPlan: ProgressPlanSchema.nullable(),
+  progressPlans: ProgressPlanSetSchema.nullable().optional(),
   progressSource: ProgressSourceSchema.nullable(),
   viewer: ViewerConfigSchema.nullable(),
   blobRelpath: z.string(),
@@ -144,6 +166,7 @@ export const CreateAttemptInputSchema = z.object({
   jobId: z.string().min(1).nullable().optional(),
   outputDir: z.string().min(1).nullable().optional(),
   progressPlan: ProgressPlanSchema.nullable().optional(),
+  progressPlans: ProgressPlanSetSchema.nullable().optional(),
   progressSource: ProgressSourceSchema.nullable().optional(),
 });
 
@@ -156,6 +179,7 @@ export const UpdateAttemptInputSchema = z.object({
   jobId: z.string().min(1).nullable().optional(),
   outputDir: z.string().min(1).nullable().optional(),
   progressPlan: ProgressPlanSchema.nullable().optional(),
+  progressPlans: ProgressPlanSetSchema.nullable().optional(),
   progressSource: ProgressSourceSchema.nullable().optional(),
 });
 
@@ -332,6 +356,9 @@ export const ExperimentViewerResolveResponseSchema = z.object({
 });
 
 export type ProgressPlan = z.infer<typeof ProgressPlanSchema>;
+export type ProgressPlanSet = z.infer<typeof ProgressPlanSetSchema>;
+export type ProgressUnitPlan = z.infer<typeof ProgressUnitPlanSchema>;
+export type ProgressProjectionRange = z.infer<typeof ProgressProjectionRangeSchema>;
 export type ProgressSegment = z.infer<typeof ProgressSegmentSchema>;
 export type ProgressTrack = z.infer<typeof ProgressTrackSchema>;
 export type ExperimentBoardPlacement = z.infer<typeof ExperimentBoardPlacementSchema>;

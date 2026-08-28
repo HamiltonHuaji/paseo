@@ -1,15 +1,24 @@
-import { useMemo } from "react";
-import { Text, View, type ViewStyle } from "react-native";
-import { StyleSheet } from "react-native-unistyles";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Text, View, type PressableStateCallbackType, type ViewStyle } from "react-native";
+import { ChevronDown } from "lucide-react-native";
+import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type {
   ProgressObservation,
-  ProgressPlan,
+  ProgressPlanSet,
   ProgressSegment,
 } from "@getpaseo/protocol/experiments";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
+import type { Theme } from "@/styles/theme";
+import { projectProgressCurrent } from "./experiment-progress-units";
 
 interface ExperimentProgressScheduleProps {
-  plan: ProgressPlan;
+  plan: ProgressPlanSet;
   observation: ProgressObservation | null;
 }
 
@@ -18,25 +27,79 @@ interface DisplayTrack {
   segments: ProgressSegment[];
 }
 
+const ThemedChevronDown = withUnistyles(ChevronDown);
+const mutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
 export function ExperimentProgressSchedule({ plan, observation }: ExperimentProgressScheduleProps) {
+  const unitPlans = plan.units;
+  const [selectedUnit, setSelectedUnit] = useState(plan.sourceUnit);
+  useEffect(() => {
+    if (!unitPlans.some((candidate) => candidate.unit === selectedUnit)) {
+      setSelectedUnit(plan.sourceUnit);
+    }
+  }, [plan.sourceUnit, selectedUnit, unitPlans]);
+  const selectedPlan =
+    unitPlans.find((candidate) => candidate.unit === selectedUnit) ?? unitPlans[0]!;
   const tracks = useMemo<DisplayTrack[]>(() => {
-    if (plan.tracks) return plan.tracks;
-    if (plan.segments) return [{ label: "Schedule", segments: plan.segments }];
+    if (selectedPlan.tracks) return selectedPlan.tracks;
+    if (selectedPlan.segments) return [{ label: "Schedule", segments: selectedPlan.segments }];
     return [];
-  }, [plan.segments, plan.tracks]);
-  const current = observation?.current ?? 0;
-  const ratio = clamp(current / plan.total, 0, 1);
-  const fillStyle = useMemo(() => [styles.actualFill, percentWidth(ratio)], [ratio]);
-  const markerStyle = useMemo(() => [styles.actualMarker, percentLeft(ratio)], [ratio]);
+  }, [selectedPlan.segments, selectedPlan.tracks]);
+  const current = observation
+    ? projectProgressCurrent(observation.current, plan.sourceUnit, selectedPlan)
+    : null;
+  const ratio = current === null ? null : clamp(current / selectedPlan.total, 0, 1);
+  const fillStyle = useMemo(() => [styles.actualFill, percentWidth(ratio ?? 0)], [ratio]);
+  const markerStyle = useMemo(() => [styles.actualMarker, percentLeft(ratio ?? 0)], [ratio]);
+  let observationSummary = (
+    <Text style={styles.mutedText}>Waiting for the first progress observation.</Text>
+  );
+  if (observation && current === null) {
+    observationSummary = (
+      <Text style={styles.mutedText}>Current position is unavailable in {selectedPlan.unit}.</Text>
+    );
+  } else if (observation && current !== null && ratio !== null) {
+    observationSummary = (
+      <Text style={styles.observationText}>
+        {formatNumber(current)} / {formatNumber(selectedPlan.total)} {selectedPlan.unit}
+        {` · ${Math.round(ratio * 100)}%`}
+        {observation.ended ? " · ended" : ""}
+      </Text>
+    );
+  }
 
   return (
     <View style={styles.container}>
+      {unitPlans.length > 1 ? (
+        <View style={styles.unitRow}>
+          <Text style={styles.unitLabel}>Progress unit</Text>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              style={unitTriggerStyle}
+              accessibilityLabel={`Progress unit: ${selectedPlan.unit}`}
+            >
+              <Text style={styles.unitTriggerText}>{selectedPlan.unit}</Text>
+              <ThemedChevronDown size={14} uniProps={mutedIconMapping} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="bottom" align="end" width={180}>
+              {unitPlans.map((candidate) => (
+                <ProgressUnitMenuItem
+                  key={candidate.unit}
+                  unit={candidate.unit}
+                  selected={candidate.unit === selectedPlan.unit}
+                  onSelect={setSelectedUnit}
+                />
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </View>
+      ) : null}
       <View style={styles.axisRow}>
         <View style={styles.labelSpacer} />
         <View style={styles.axisLabels}>
           <Text style={styles.axisText}>0</Text>
           <Text style={styles.axisText}>
-            {formatNumber(plan.total)} {plan.unit}
+            {formatNumber(selectedPlan.total)} {selectedPlan.unit}
           </Text>
         </View>
       </View>
@@ -52,7 +115,7 @@ export function ExperimentProgressSchedule({ plan, observation }: ExperimentProg
                 style={[
                   styles.segment,
                   segmentIndex % 2 === 0 ? styles.segmentEven : styles.segmentOdd,
-                  segmentGeometry(segment, plan.total),
+                  segmentGeometry(segment, selectedPlan.total),
                 ]}
               >
                 <Text style={styles.segmentLabel} numberOfLines={1}>
@@ -69,21 +132,13 @@ export function ExperimentProgressSchedule({ plan, observation }: ExperimentProg
         </Text>
         <View style={styles.actualTrack}>
           <View style={fillStyle} />
-          {observation ? <View style={markerStyle} /> : null}
+          {current !== null ? <View style={markerStyle} /> : null}
         </View>
       </View>
       <View style={styles.observationRow}>
         <View style={styles.labelSpacer} />
         <View style={styles.observationTextBlock}>
-          {observation ? (
-            <Text style={styles.observationText}>
-              {formatNumber(observation.current)} / {formatNumber(plan.total)} {plan.unit}
-              {` · ${Math.round(ratio * 100)}%`}
-              {observation.ended ? " · ended" : ""}
-            </Text>
-          ) : (
-            <Text style={styles.mutedText}>Waiting for the first progress observation.</Text>
-          )}
+          {observationSummary}
           {observation?.phase ? <Text style={styles.mutedText}>{observation.phase}</Text> : null}
           {observation?.message ? (
             <Text style={styles.mutedText}>{observation.message}</Text>
@@ -92,6 +147,27 @@ export function ExperimentProgressSchedule({ plan, observation }: ExperimentProg
       </View>
     </View>
   );
+}
+
+function ProgressUnitMenuItem({
+  unit,
+  selected,
+  onSelect,
+}: {
+  unit: string;
+  selected: boolean;
+  onSelect: (unit: string) => void;
+}) {
+  const handleSelect = useCallback(() => onSelect(unit), [onSelect, unit]);
+  return (
+    <DropdownMenuItem selected={selected} onSelect={handleSelect}>
+      {unit}
+    </DropdownMenuItem>
+  );
+}
+
+function unitTriggerStyle({ pressed }: PressableStateCallbackType) {
+  return [styles.unitTrigger, pressed ? styles.unitTriggerPressed : null];
 }
 
 function segmentGeometry(segment: ProgressSegment, total: number): ViewStyle {
@@ -123,6 +199,28 @@ function formatNumber(value: number): string {
 
 const styles = StyleSheet.create((theme) => ({
   container: { gap: theme.spacing[2] },
+  unitRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
+  unitLabel: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  unitTrigger: {
+    minHeight: 28,
+    minWidth: 120,
+    paddingHorizontal: theme.spacing[2],
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface1,
+  },
+  unitTriggerPressed: { backgroundColor: theme.colors.surface2 },
+  unitTriggerText: { color: theme.colors.foreground, fontSize: theme.fontSize.sm },
   axisRow: { flexDirection: "row", alignItems: "center" },
   labelSpacer: { width: 84 },
   axisLabels: { flex: 1, flexDirection: "row", justifyContent: "space-between" },

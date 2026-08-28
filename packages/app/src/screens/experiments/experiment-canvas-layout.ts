@@ -7,7 +7,7 @@ import type {
 export const EXPERIMENT_CANVAS_GRID_SIZE = 24;
 export const EXPERIMENT_CANVAS_MIN_ROWS = 30;
 const DEFAULT_WIDTH = 12;
-const DEFAULT_HEIGHT = 8;
+const DEFAULT_HEIGHT = 7;
 const MIN_COLUMNS = 58;
 const LINEAGE_INDENT = 3;
 
@@ -61,9 +61,9 @@ export function buildAutomaticLayout(
         width: size.width,
         height: size.height,
       });
-      row += size.height + 2;
+      row += size.height + 1;
     }
-    groupRow = row + 2;
+    groupRow = row + 1;
   }
   return result;
 }
@@ -150,9 +150,12 @@ function automaticCardSize(
 ): Pick<ResolvedPlacement, "width" | "height"> {
   const width = experiment.shortDescription.length > 48 ? 14 : DEFAULT_WIDTH;
   const hasProgress = detail?.attempts.some(
-    (attempt) => attempt.progress !== null || attempt.progressSource !== null,
+    (attempt) =>
+      attempt.progress !== null ||
+      attempt.progressSource !== null ||
+      Boolean(attempt.progressPlans),
   );
-  return { width, height: hasProgress ? 9 : DEFAULT_HEIGHT };
+  return { width, height: hasProgress ? 8 : DEFAULT_HEIGHT };
 }
 
 function compareExperiments(left: ExperimentRecord, right: ExperimentRecord): number {
