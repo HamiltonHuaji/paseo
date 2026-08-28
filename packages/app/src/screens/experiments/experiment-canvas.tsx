@@ -441,14 +441,14 @@ function geometryStyle(style: ViewStyle): ViewStyle {
 
 function captureGesturePointer(event: GestureResponderEvent): void {
   if (!isWeb) return;
-  const nativeEvent = event.nativeEvent as unknown as {
-    identifier?: number | string;
-    pointerId?: number;
-  };
-  const pointerId = nativeEvent.pointerId ?? Number(nativeEvent.identifier);
+  const pointerId = (event.nativeEvent as unknown as { pointerId?: number }).pointerId;
   const element = event.currentTarget as unknown as HTMLElement | null;
-  if (!Number.isFinite(pointerId) || !element) return;
-  element.setPointerCapture?.(pointerId);
+  if (pointerId === undefined || !element) return;
+  try {
+    element.setPointerCapture?.(pointerId);
+  } catch {
+    // The pointer may end between responder negotiation and grant.
+  }
 }
 
 function percentageWidth(ratio: number): ViewStyle {
