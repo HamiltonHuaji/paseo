@@ -43,6 +43,7 @@ import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { RelayHostConnection } from "@/types/host-connection";
 import { ExperimentCanvas } from "@/screens/experiments/experiment-canvas";
 import { ExperimentProgressSchedule } from "@/screens/experiments/experiment-progress-schedule";
+import { resolveAttemptExpanded } from "@/screens/experiments/experiment-attempt-expansion";
 
 const EMPTY_ATTEMPTS: ExperimentAttempt[] = [];
 const EMPTY_EXPERIMENTS: ExperimentRecord[] = [];
@@ -58,9 +59,14 @@ const ThemedExternalLink = withUnistyles(ExternalLink, (theme) => ({
 interface ExperimentsScreenProps {
   serverId: string;
   projectId: string;
+  embedded?: boolean;
 }
 
-export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProps) {
+export function ExperimentsScreen({
+  serverId,
+  projectId,
+  embedded = false,
+}: ExperimentsScreenProps) {
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const queryClient = useQueryClient();
@@ -78,6 +84,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   const [selectedExperiment, setSelectedExperiment] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<ExperimentViewMode>("list");
+  const [attemptExpansionById, setAttemptExpansionById] = useState<Record<string, boolean>>({});
   const canvasMode = viewMode === "canvas";
   const experiments = listQuery.data ?? EMPTY_EXPERIMENTS;
   const detailQueries = useFetchQueries<ExperimentDetail>(
@@ -177,6 +184,12 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   }, [projectId, queryClient, refetchList, serverId]);
   const handleRefresh = useCallback(() => void refreshAll(), [refreshAll]);
   const clearSelection = useCallback(() => setSelectedExperiment(null), []);
+  const setAttemptExpanded = useCallback((attemptId: string, expanded: boolean) => {
+    setAttemptExpansionById((current) => {
+      if (current[attemptId] === expanded) return current;
+      return { ...current, [attemptId]: expanded };
+    });
+  }, []);
   const viewOptions = useMemo(
     () => [
       { value: "list" as const, label: "List", icon: List },
@@ -209,10 +222,11 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
 
   return (
     <View style={styles.container}>
-      <MenuHeader title="Experiments" rightContent={headerAction} />
+      <ExperimentsHeader embedded={embedded} actions={headerAction} />
       <ScrollView
         contentContainerStyle={[styles.content, optionalStyle(canvasMode, styles.contentFill)]}
       >
+        <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} />
         {!connected ? <Message text="Host is offline." /> : null}
         {listQuery.isLoading ? <ThemedLoadingSpinner /> : null}
         {listQuery.error ? <Message text={errorMessage(listQuery.error)} error /> : null}
@@ -268,12 +282,30 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
               experiment={selectedExperiment}
               experimentById={experimentById}
               onSelectExperiment={setSelectedExperiment}
+              attemptExpansionById={attemptExpansionById}
+              onAttemptExpandedChange={setAttemptExpanded}
             />
           ) : null}
         </View>
       </ScrollView>
     </View>
   );
+}
+
+function ExperimentsHeader({ embedded, actions }: { embedded: boolean; actions: ReactNode }) {
+  if (embedded) return null;
+  return <MenuHeader title="Experiments" rightContent={actions} />;
+}
+
+function EmbeddedExperimentsActions({
+  embedded,
+  actions,
+}: {
+  embedded: boolean;
+  actions: ReactNode;
+}) {
+  if (!embedded) return null;
+  return <View style={styles.embeddedActions}>{actions}</View>;
 }
 
 function ExperimentRow({
@@ -337,12 +369,16 @@ function ExperimentDetailPanel({
   experiment,
   experimentById,
   onSelectExperiment,
+  attemptExpansionById,
+  onAttemptExpandedChange,
 }: {
   serverId: string;
   projectId: string;
   experiment: string;
   experimentById: Map<string, ExperimentRecord>;
   onSelectExperiment: (experiment: string) => void;
+  attemptExpansionById: Record<string, boolean>;
+  onAttemptExpandedChange: (attemptId: string, expanded: boolean) => void;
 }) {
   const client = useHostRuntimeClient(serverId);
   const detailQuery = useFetchQuery({
@@ -360,6 +396,7 @@ function ExperimentDetailPanel({
     () => [...(detailQuery.data?.attempts ?? EMPTY_ATTEMPTS)].sort(compareAttempts),
     [detailQuery.data?.attempts],
   );
+  const latestAttemptId = attempts.at(-1)?.id ?? null;
   const involvedAgents = useSessionStore(
     useShallow((state) => {
       const agents = state.sessions[serverId]?.agents;
@@ -446,6 +483,8 @@ function ExperimentDetailPanel({
                 attempt={attempt}
                 position={index + 1}
                 bordered={index > 0}
+                expanded={resolveAttemptExpanded(attempt.id, latestAttemptId, attemptExpansionById)}
+                onExpandedChange={onAttemptExpandedChange}
               />
             ))}
           </View>
@@ -481,12 +520,16 @@ function AttemptPanel({
   attempt,
   position,
   bordered,
+  expanded,
+  onExpandedChange,
 }: {
   serverId: string;
   projectId: string;
   attempt: ExperimentAttempt;
   position: number;
   bordered: boolean;
+  expanded: boolean;
+  onExpandedChange: (attemptId: string, expanded: boolean) => void;
 }) {
   const client = useHostRuntimeClient(serverId);
   const hosts = useHosts();
@@ -499,7 +542,7 @@ function AttemptPanel({
   const [observation, setObservation] = useState(attempt.progress);
   const [progressError, setProgressError] = useState(attempt.progressError);
   const [refreshing, setRefreshing] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = !expanded;
 
   useEffect(() => {
     setObservation(attempt.progress);
@@ -568,7 +611,10 @@ function AttemptPanel({
     ],
     [ratio],
   );
-  const toggleCollapsed = useCallback(() => setCollapsed((current) => !current), []);
+  const toggleCollapsed = useCallback(
+    () => onExpandedChange(attempt.id, !expanded),
+    [attempt.id, expanded, onExpandedChange],
+  );
   const resolveDirectUrl = useCallback(
     (url: string) => client?.resolveDirectHttpUrl(url) ?? null,
     [client],
@@ -868,6 +914,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   contentFill: { flexGrow: 1 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  embeddedActions: { flexDirection: "row", justifyContent: "flex-end" },
   board: { flexDirection: { xs: "column", lg: "row" }, gap: theme.spacing[6] },
   boardFill: { flex: 1, minHeight: 0 },
   listColumn: { flex: 1, minWidth: 0, gap: theme.spacing[6] },

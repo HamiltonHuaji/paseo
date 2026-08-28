@@ -192,6 +192,7 @@ import { supportsDesktopPaneSplits, useIsCompactFormFactor } from "@/constants/l
 import { getIsElectron, isNative, isWeb } from "@/constants/platform";
 import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
 import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
+import { useHostFeature } from "@/runtime/host-features";
 import { useWorkspaceTerminals } from "@/screens/workspace/terminals/use-workspace-terminals";
 import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import {
@@ -221,6 +222,18 @@ function getWorkspaceScripts(
   return workspaceDescriptor?.scripts ?? EMPTY_WORKSPACE_SCRIPTS;
 }
 
+function getWorkspaceProjectId(
+  workspaceDescriptor: WorkspaceDescriptor | null | undefined,
+): string | undefined {
+  return workspaceDescriptor?.projectId;
+}
+
+function canShowWorkspaceExperiments(
+  supportsExperiments: boolean,
+  projectId: string | undefined,
+): boolean {
+  return Boolean(supportsExperiments && projectId);
+}
 interface WorkspaceFileLocationFields {
   path: string | null;
   lineStart?: number;
@@ -314,6 +327,7 @@ function getFallbackTabOptionLabel(
     changes: string;
     files: string;
     pullRequest: string;
+    experiments: string;
   },
 ): string {
   if (tab.target.kind === "new_tab") {
@@ -343,6 +357,9 @@ function getFallbackTabOptionLabel(
   if (tab.target.kind === "pull_request") {
     return labels.pullRequest;
   }
+  if (tab.target.kind === "experiments") {
+    return labels.experiments;
+  }
   if (tab.target.kind === "commit_diff") {
     return tab.target.sha.slice(0, 7);
   }
@@ -361,6 +378,7 @@ function getFallbackTabOptionDescription(
     changes: string;
     files: string;
     pullRequest: string;
+    experiments: string;
   },
 ): string {
   if (tab.target.kind === "new_tab") {
@@ -395,6 +413,9 @@ function getFallbackTabOptionDescription(
   }
   if (tab.target.kind === "pull_request") {
     return labels.pullRequest;
+  }
+  if (tab.target.kind === "experiments") {
+    return labels.experiments;
   }
   if (tab.target.kind === "plugin") {
     return tab.target.panelId;
@@ -607,6 +628,7 @@ function MobileWorkspaceTabOption({
       changes: t("panels.diff.changesLabel"),
       files: t("panels.files.label"),
       pullRequest: t("panels.pullRequest.label"),
+      experiments: "Experiments",
     }),
     [t],
   );
@@ -1595,6 +1617,9 @@ function WorkspaceScreenContent({
       .catch(() => undefined);
   }, [normalizedServerId, normalizedWorkspaceId, workspaceDescriptor]);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
+  const experimentProjectId = getWorkspaceProjectId(workspaceDescriptor);
+  const supportsExperiments = useHostFeature(normalizedServerId, "experiments");
+  const showExperiments = canShowWorkspaceExperiments(supportsExperiments, experimentProjectId);
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
 
@@ -1657,6 +1682,14 @@ function WorkspaceScreenContent({
       openTab({ workspaceKey, target, intent: "reveal", placement }),
     [openTab],
   );
+  const handleOpenExperiments = useCallback(() => {
+    if (!persistenceKey || !experimentProjectId || !supportsExperiments) return;
+    openWorkspaceTabFocused(
+      persistenceKey,
+      { kind: "experiments", projectId: experimentProjectId },
+      FOCUSED_PANE_PLACEMENT,
+    );
+  }, [experimentProjectId, openWorkspaceTabFocused, persistenceKey, supportsExperiments]);
   const createWorkspaceTab = useCallback(
     (
       workspaceKey: string,
@@ -2398,6 +2431,7 @@ function WorkspaceScreenContent({
       changes: t("panels.diff.changesLabel"),
       files: t("panels.files.label"),
       pullRequest: t("panels.pullRequest.label"),
+      experiments: "Experiments",
     }),
     [t],
   );
