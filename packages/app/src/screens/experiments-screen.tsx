@@ -343,8 +343,10 @@ function ExperimentDetailPanel({
     dataShape: "value",
     staleTimeMs: 5_000,
   });
-  const [selectedAttempt, setSelectedAttempt] = useState<string | null>(null);
-  const attempts = detailQuery.data?.attempts ?? EMPTY_ATTEMPTS;
+  const attempts = useMemo(
+    () => [...(detailQuery.data?.attempts ?? EMPTY_ATTEMPTS)].sort(compareAttempts),
+    [detailQuery.data?.attempts],
+  );
   const involvedAgents = useSessionStore(
     useShallow((state) => {
       const agents = state.sessions[serverId]?.agents;
@@ -361,17 +363,11 @@ function ExperimentDetailPanel({
     }),
   );
 
-  useEffect(() => {
-    if (!selectedAttempt || !attempts.some((attempt) => attempt.id === selectedAttempt)) {
-      setSelectedAttempt(attempts.at(-1)?.id ?? null);
-    }
-  }, [attempts, selectedAttempt]);
   const basedOnId = detailQuery.data?.experiment.basedOn ?? null;
   const selectBasedOn = useCallback(() => {
     if (basedOnId) onSelectExperiment(basedOnId);
   }, [basedOnId, onSelectExperiment]);
 
-  const attempt = attempts.find((item) => item.id === selectedAttempt) ?? null;
   if (detailQuery.isLoading) return <ThemedLoadingSpinner />;
   if (detailQuery.error) return <Message text={errorMessage(detailQuery.error)} error />;
   if (!detailQuery.data) return null;
@@ -422,18 +418,25 @@ function ExperimentDetailPanel({
         </View>
       ) : null}
       {attempts.length === 0 ? <Message text="No attempts yet." /> : null}
-      <View style={styles.attemptTabs}>
-        {attempts.map((item) => (
-          <AttemptSelector
-            key={item.id}
-            attempt={item}
-            selected={item.id === selectedAttempt}
-            onSelect={setSelectedAttempt}
-          />
-        ))}
-      </View>
-      {attempt ? (
-        <AttemptPanel serverId={serverId} projectId={projectId} attempt={attempt} />
+      {attempts.length > 0 ? (
+        <View style={styles.attemptSection}>
+          <View style={styles.attemptSectionHeader}>
+            <Text style={styles.sectionTitle}>Attempts</Text>
+            <Text style={styles.meta}>{formatAttemptCount(attempts.length)} · oldest first</Text>
+          </View>
+          <View style={styles.attemptList}>
+            {attempts.map((attempt, index) => (
+              <AttemptPanel
+                key={attempt.id}
+                serverId={serverId}
+                projectId={projectId}
+                attempt={attempt}
+                position={index + 1}
+                bordered={index > 0}
+              />
+            ))}
+          </View>
+        </View>
       ) : null}
     </View>
   );
@@ -459,31 +462,18 @@ function InvolvedAgentButton({
   );
 }
 
-function AttemptSelector({
-  attempt,
-  selected,
-  onSelect,
-}: {
-  attempt: ExperimentAttempt;
-  selected: boolean;
-  onSelect: (attempt: string) => void;
-}) {
-  const onPress = useCallback(() => onSelect(attempt.id), [attempt.id, onSelect]);
-  return (
-    <Button size="xs" variant={selected ? "secondary" : "ghost"} onPress={onPress}>
-      {attempt.shortDescription}
-    </Button>
-  );
-}
-
 function AttemptPanel({
   serverId,
   projectId,
   attempt,
+  position,
+  bordered,
 }: {
   serverId: string;
   projectId: string;
   attempt: ExperimentAttempt;
+  position: number;
+  bordered: boolean;
 }) {
   const client = useHostRuntimeClient(serverId);
   const hosts = useHosts();
@@ -580,7 +570,10 @@ function AttemptPanel({
   }
 
   return (
-    <View style={styles.attemptPanel}>
+    <View style={[styles.attemptPanel, bordered && styles.attemptPanelBorder]}>
+      <Text style={styles.attemptPosition}>
+        Attempt {position} · {formatTimestamp(attempt.createdAt)}
+      </Text>
       <View style={styles.attemptHeader}>
         <View style={styles.flexOne}>
           <Text style={styles.attemptTitle}>{attempt.shortDescription}</Text>
@@ -731,6 +724,10 @@ function findLatestProgressAttempt(attempts: ExperimentAttempt[]): ExperimentAtt
   return null;
 }
 
+function compareAttempts(left: ExperimentAttempt, right: ExperimentAttempt): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
 function latestMeaningfulUpdateAt(
   experiment: ExperimentRecord,
   attempts: ExperimentAttempt[],
@@ -828,7 +825,23 @@ const styles = StyleSheet.create((theme) => ({
   description: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.base },
   attemptTabs: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[2] },
   involvedAgents: { gap: theme.spacing[2] },
-  attemptPanel: { gap: theme.spacing[4], paddingTop: theme.spacing[2] },
+  attemptSection: { gap: theme.spacing[2] },
+  attemptSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: theme.spacing[3],
+  },
+  attemptList: {
+    backgroundColor: theme.colors.surface1,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    overflow: "hidden",
+  },
+  attemptPanel: { gap: theme.spacing[4], padding: theme.spacing[4] },
+  attemptPanelBorder: { borderTopWidth: 1, borderTopColor: theme.colors.border },
+  attemptPosition: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   attemptHeader: { flexDirection: "row", alignItems: "flex-start", gap: theme.spacing[3] },
   attemptTitle: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
   flexOne: { flex: 1, minWidth: 0, gap: theme.spacing[1] },
