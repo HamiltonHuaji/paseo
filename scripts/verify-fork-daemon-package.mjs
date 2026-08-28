@@ -69,8 +69,44 @@ try {
   if (installed?.["@getpaseo/cli"]?.version !== "999.0.0") {
     throw new Error("The official CLI fixture did not remain installed beside the fork");
   }
+
+  const { stdout: globalRootOutput } = await runNpm(["root", "-g", "--prefix", prefix]);
+  const forkPackageRoot = path.join(globalRootOutput.trim(), "@hamiltonhuaji", "paseo-fork");
+  const terminalModulePath = path.join(
+    forkPackageRoot,
+    "node_modules",
+    "@getpaseo",
+    "server",
+    "dist",
+    "server",
+    "terminal",
+    "terminal.js",
+  );
+  const probeEnvironment = { ...process.env };
+  delete probeEnvironment.PASEO_CLI;
+  const { stdout: resolvedCliOutput } = await execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      'const { pathToFileURL } = await import("node:url"); const module = await import(pathToFileURL(process.argv[1]).href); console.log(module.resolvePaseoCliExecutablePath());',
+      terminalModulePath,
+    ],
+    { cwd: testRoot, env: probeEnvironment, maxBuffer: 10 * 1024 * 1024 },
+  );
+  const expectedBundledCli = path.join(forkPackageRoot, "bin", "paseo");
+  if (resolvedCliOutput.trim() !== expectedBundledCli) {
+    throw new Error(
+      `Expected bundled daemon to resolve ${expectedBundledCli}, got ${resolvedCliOutput.trim()}`,
+    );
+  }
   process.stdout.write(
-    `${JSON.stringify({ verified: true, version: forkVersion, officialCliStillInstalled: true })}\n`,
+    `${JSON.stringify({
+      verified: true,
+      version: forkVersion,
+      officialCliStillInstalled: true,
+      bundledCli: resolvedCliOutput.trim(),
+    })}\n`,
   );
 } finally {
   await rm(testRoot, { recursive: true, force: true });

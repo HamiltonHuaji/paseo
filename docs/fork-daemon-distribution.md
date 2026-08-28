@@ -21,6 +21,10 @@ The outer package is `@hamiltonhuaji/paseo-fork`; its executable stays `paseo`. 
 bundled internal workspace before loading the CLI, so an official package elsewhere in the global
 npm prefix cannot satisfy a missing fork dependency.
 
+The bundled daemon also injects that outer `paseo` executable into agent terminals and hooks. It
+must not resolve a separately installed `@getpaseo/cli`; otherwise a restart from an agent can
+replace the running fork daemon with the official daemon.
+
 The generated distribution manifest records the fork version, official daemon baseline, and
 install URL. Daemon self-update reads that manifest and updates the same distribution. An official
 installation without a manifest keeps using `@getpaseo/cli@latest`.
