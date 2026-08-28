@@ -12,9 +12,11 @@ machine-learning experiments directly because that is the first target workflow.
 Use three concepts:
 
 - **Goal** groups experiments in the client. It is an Experiment property, not a parent work item.
-- **Experiment** records an intent: what to change, why, and what was learned.
-- **Attempt** records an action taken for an Experiment: a probe, implementation, launch,
-  evaluation, deployment, or other concrete execution.
+- **Experiment** is a durable, independently meaningful unit of work with a stable subject,
+  intended outcome, and completion criterion.
+- **Attempt** is an append-only record of one concrete operation toward an Experiment. It may be a
+  short probe, debug reproduction, build, launch, evaluation, retry, resume, visualization, or
+  artifact-generation step.
 
 Containment and lineage stay separate:
 
@@ -27,6 +29,11 @@ Goal <- Experiment -> Attempt
 An Experiment may have several Attempts at once. An agent may be changing evaluation code while a
 probe waits for a cluster and a formal run continues. Do not represent development, debugging,
 running, and evaluation as one Experiment status enum.
+
+Create a new Experiment when the intended result changes identity: its target configuration,
+artifact, implementation variant, input protocol, or completion criterion can stand on its own.
+Create another Attempt for each operation toward the same result, including temporary diagnostics.
+A diagnostic action is a separate Experiment only when its result is independently meaningful.
 
 Codex plans remain inside their agent sessions. Project state keeps only information that remains
 useful across sessions and days.
@@ -145,8 +152,9 @@ Experiment timestamps and are not exposed through agent tools.
 The first design stores `wandb_id`, `job_id`, and `output_dir` directly. Do not wrap them in a
 generic Resource, Reference, Artifact, or adapter layer. Non-ML work leaves them null.
 
-One Attempt represents one concrete submission or execution. A retry creates another Attempt rather
-than replacing the previous `job_id`.
+One Attempt represents one concrete operation. It does not need to execute the whole Experiment or
+constitute a formal run. A retry creates another Attempt rather than replacing the previous
+`job_id`.
 
 Do not ask agents to maintain `pending`, `active`, or `finished` state. Short Attempts are useful as
 an ordered record even when they have no result summary. Setting `result_summary` records a result
