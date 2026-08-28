@@ -1,4 +1,4 @@
-name: Desktop Rollout
+name: Fork Desktop Rollout
 
 on:
   workflow_dispatch:
@@ -11,9 +11,14 @@ on:
         description: "Total rollout duration since the original release date, in hours. Use 0 to admit everyone immediately."
         required: true
         type: string
+      checkout_ref:
+        description: "Fork ref containing the rollout scripts."
+        required: false
+        default: "overlay"
+        type: string
 
 concurrency:
-  group: desktop-rollout-${{ inputs.tag }}
+  group: fork-desktop-rollout-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
@@ -32,6 +37,7 @@ jobs:
             package.json
             package-lock.json
             scripts
+          ref: ${{ inputs.checkout_ref || 'overlay' }}
 
       - name: Resolve release metadata
         shell: bash

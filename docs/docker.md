@@ -203,28 +203,10 @@ docker build \
   .
 ```
 
-The Docker workflow builds the image on pull requests and on `main` as a
-non-publishing check. Stable `vX.Y.Z` tag pushes publish
-`ghcr.io/getpaseo/paseo:X.Y.Z` and `ghcr.io/getpaseo/paseo:latest`. Beta tags
-publish only the exact prerelease tag, such as
-`ghcr.io/getpaseo/paseo:0.1.102-beta.1`, and do not update `latest`.
-
-To replace a Docker image in place without rebuilding desktop, APK, or EAS
-mobile release artifacts, dispatch the Docker workflow manually instead of
-pushing a `v*` release tag:
-
-```bash
-gh workflow run docker.yml \
-  --ref main \
-  -f paseo_version=0.1.102-beta.1 \
-  -f publish=true
-```
-
-Manual Docker publishes require an explicit `paseo_version`. The workflow builds
-from the checked-out source tree and publishes only the exact prerelease image
-tag for prerelease versions.
-
-The published image is multi-arch for `linux/amd64` and `linux/arm64`.
+The overlay Docker workflow is a non-publishing pull-request check targeting
+`overlay`. It builds `linux/amd64` and `linux/arm64`; fork releases do not push a
+container image. Build and publish one manually outside the release workflow if
+you decide to add a fork-owned container distribution later.
 
 ## Troubleshooting
 

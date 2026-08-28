@@ -162,18 +162,15 @@ Keep `react` and `react-dom` pinned to the React version embedded by the current
 adb exec-out screencap -p > screenshot.png
 ```
 
-## Cloud build + submit (EAS)
+## Fork cloud build
 
-Stable tag pushes like `v0.1.0` trigger:
+The overlay does not use the official tag-driven EAS or Play Store pipeline. Android fork builds
+run only when `fork-android-release.yml` is dispatched explicitly. The workflow checks out the
+requested fork tag, uses the `fork-apk` EAS profile and fork-owned signing credentials, then
+attaches the APK to the fork GitHub release.
 
-- The EAS GitHub app on Expo servers (iOS + Android production builds + store submit). There is no workflow file in this repo for it.
-- `.github/workflows/android-apk-release.yml` on GitHub Actions (APK asset on GitHub Release).
-
-iOS auto-submits to App Store review via a Fastlane lane after EAS uploads to TestFlight. Android auto-submits to the Play Store via EAS-managed credentials.
-
-Beta tags like `v0.1.1-beta.1` only trigger the GitHub APK workflow. They publish a GitHub prerelease APK for testing and do not submit to the stores.
-
-`android-v*` tags also trigger only the GitHub APK workflow — useful when you want to ship an APK without going through stores. The GitHub APK workflow supports `workflow_dispatch` with an existing `tag` input so you can rebuild without cutting a new tag.
+Android is not part of the default fork artifact set. See [release.md](release.md) for the opt-in
+dispatch command.
 
 ### Useful commands
 
@@ -183,11 +180,6 @@ cd packages/app
 # Recent builds
 npx eas build:list --limit 10 --non-interactive --json | jq '.[] | {platform, status, appVersion, gitCommitHash}'
 
-# Inspect a build (the printed `Logs` URL opens the build's Expo dashboard page,
-# which has a Submissions section showing the auto-submit to the Play Store).
+# Inspect a build and its cloud logs.
 npx eas build:view <build-id>
 ```
-
-The Play Console (Internal testing → Production tracks) is the final confirmation that the binary reached the store.
-
-See [docs/release.md](release.md) for the full mobile-build babysitting flow.

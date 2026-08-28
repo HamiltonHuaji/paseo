@@ -73,7 +73,8 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
           else
-            gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --target "$CHECKOUT_REF" --title "$title" --notes "$notes" --draft
+            gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --target "$CHECKOUT_REF" --title "$title" --notes "$notes" --draft || \
+              gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null
           fi
 
       - name: Setup Node

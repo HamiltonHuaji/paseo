@@ -52,17 +52,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
+          notes=$(printf 'Fork version: `v%s`\n\nInstaller version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
+            "$FORK_DISPLAY_VERSION" "$RELEASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
             exit 0
           fi
-          title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
-          notes=$(printf 'Fork version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
-            "$FORK_DISPLAY_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
           args=(release create "$RELEASE_TAG" --repo "${{ github.repository }}" --target "$CHECKOUT_REF" --title "$title" --notes "$notes" --draft)
           if [[ "$IS_PRERELEASE" == "true" ]]; then
             args+=(--prerelease)
           fi
-          gh "${args[@]}"
+          gh "${args[@]}" || gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null
 
       - uses: actions/setup-node@v4
         with:

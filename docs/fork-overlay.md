@@ -11,7 +11,8 @@ This fork keeps product customizations as a rebaseable overlay on official Paseo
 
 Releases and fork build tags are cut from `overlay`, not `main`. The overlay follows official
 stable tags rather than `upstream/main`, so a fork release never accidentally includes unreleased
-upstream work.
+upstream work. Follow [release.md](release.md); the upstream npm release commands are not part of
+the fork workflow.
 
 A separate branch containing generated patch files is intentionally not maintained. Git commits
 already preserve the overlay's reviewable units, tests, authorship, and conflict context; a patch
@@ -68,15 +69,16 @@ Actions runs and pull requests target the fork product rather than the upstream 
 
 ## Fork workflow routing
 
-The workflow files on `overlay` route ordinary CI and pull-request checks to `overlay`. Docker
-publishing remains tag-driven, so routine overlay pushes do not spend time on an unpublished
-multi-architecture image.
+The workflow files on `overlay` route ordinary CI and pull-request checks to `overlay`. Docker and
+Nix builds run as pull-request validation without publishing artifacts.
 
-The fork repository keeps the upstream Cloudflare website deployment and Nix bot hash-update
-workflows disabled in GitHub Actions. They depend on upstream-owned credentials and must not run
-when `main` is refreshed as a mirror. Re-enable them only after replacing their deployment target
-and credentials with fork-owned infrastructure.
+The overlay removes upstream Cloudflare deployment, release-note sync, store APK, and Nix bot
+hash-update workflows. They depend on upstream-owned credentials or mutate upstream-owned release
+surfaces. Docker and Nix remain validation-only checks; fork tag pushes do not publish them.
 
+The fork release workflows are manual-only. The desktop workflow creates the release tag; the
+release process never pushes a tag event that could trigger external upstream automation. It does
+not publish upstream npm packages, official mobile apps, websites, relay workers, or Docker images.
 The desktop workflow publishes only a Windows x64 NSIS installer and a Linux x64 Debian package.
 Keep the upstream application identity so an installed fork retains the Electron user-data and
 daemon directories. Windows uses the upstream updater state machine with its generated feed
