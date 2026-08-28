@@ -41,8 +41,8 @@ After the rebase:
 
 1. Update `packages/desktop/src/features/fork-build-info.json` to the new official base and reset
    its fork revision to `1`.
-2. Run targeted tests for every conflict and fork feature touching the same files.
-3. Run formatting, lint, and typecheck.
+2. Run formatting, lint, and typecheck.
+3. Run tests only when the user separately requests them.
 4. Compare `v<official-version>..overlay` to review only the remaining fork overlay.
 5. Push the rewritten overlay with `git push --force-with-lease origin overlay` only after the
    rebased branch has been verified.
@@ -69,8 +69,9 @@ Actions runs and pull requests target the fork product rather than the upstream 
 
 ## Fork workflow routing
 
-The workflow files on `overlay` route ordinary CI and pull-request checks to `overlay`. Docker and
-Nix builds run as pull-request validation without publishing artifacts.
+The workflow files on `overlay` route lightweight Quick Checks to `overlay`. Quick Checks contain
+lint, typecheck, and existing Node-only unit tests. Docker and Nix builds run as pull-request
+validation without publishing artifacts.
 
 The overlay removes upstream Cloudflare deployment, release-note sync, store APK, and Nix bot
 hash-update workflows. They depend on upstream-owned credentials or mutate upstream-owned release
@@ -78,6 +79,7 @@ surfaces. Docker and Nix remain validation-only checks; fork tag pushes do not p
 
 The fork release workflows are manual-only. The desktop workflow creates the release tag; the
 release process never pushes a tag event that could trigger external upstream automation. It does
+not wait for Quick Checks and does not run tests, browser downloads, or smoke checks. It does
 not publish upstream npm packages, official mobile apps, websites, relay workers, or Docker images.
 The desktop workflow publishes only a Windows x64 NSIS installer and a Linux x64 Debian package.
 Keep the upstream application identity so an installed fork retains the Electron user-data and

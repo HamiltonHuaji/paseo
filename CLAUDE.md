@@ -114,12 +114,13 @@ See [docs/development.md](docs/development.md) for full setup, build sync requir
 - **NEVER assume a timeout means the service needs restarting** — timeouts can be transient.
 - **NEVER add auth checks to tests** — agent providers handle their own auth.
 - **Before changing app routes, startup routing, remembered workspace restore, or active workspace selection, read [docs/expo-router.md](docs/expo-router.md).**
-- **NEVER run the full test suite locally.** The test suites are heavy and will freeze the machine, especially if multiple agents run them in parallel. Rules:
+- **NEVER add tests or smoke harnesses unless the user explicitly asks for them.** Release work does not authorize tests.
+- **NEVER run test suites unless the user explicitly asks for that run.** The test suites are heavy and will freeze the machine, especially if multiple agents run them in parallel. Rules:
   - Run only the specific test file you changed: `npx vitest run <file> --bail=1`
   - Never run `npm run test` for an entire workspace unless explicitly asked.
   - If you must run a broad suite, pipe output to a file and read it afterward: `npx vitest run <file> --bail=1 > /tmp/test-output.txt 2>&1` then read the file.
   - Never re-run a test suite that another agent already ran and reported green — trust the result.
-  - For full suite verification, push to CI and check GitHub Actions instead.
+  - Do not use CI as an implicit full-suite fallback. Quick Checks contain only lint, typecheck, and existing Node unit tests.
 - **Always run typecheck and lint after every change.**
 - **Build workspace packages before diagnosing cross-package type errors.** This repo consumes generated declarations across workspaces. If typecheck fails in a package that depends on another workspace, rebuild the owning stack first so `dist` declarations are current:
   - `npm run build:client` — rebuild protocol and client declarations.

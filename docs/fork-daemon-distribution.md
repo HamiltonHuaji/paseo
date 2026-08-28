@@ -4,12 +4,13 @@ The fork ships its CLI and daemon as one npm-compatible GitHub Release asset. np
 third-party native dependencies for the target host; the tarball carries fork-built copies of the
 internal `highlight`, `protocol`, `client`, `relay`, `plugin`, and `server` workspaces.
 
-Build and verify it with:
+Build it with:
 
 ```bash
 npm run build:fork-daemon-package
-npm run verify:fork-daemon-package
 ```
+
+Package verification is a separate, explicit operation. It is not part of a release.
 
 The output is `artifacts/fork-daemon/paseo-fork.tgz`. Install it with:
 

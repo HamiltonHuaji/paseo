@@ -31,6 +31,8 @@ env:
   SHOULD_PUBLISH: ${{ inputs.publish != 'false' }}
   PASEO_FORK_EAS_PROJECT_ID: ${{ vars.PASEO_FORK_EAS_PROJECT_ID }}
   PASEO_FORK_EAS_OWNER: ${{ vars.PASEO_FORK_EAS_OWNER }}
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:
   publish-android-apk:
@@ -85,7 +87,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install JS dependencies
-        run: node scripts/npm-retry.mjs ci
+        run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
 
       - name: Prepare fork build metadata
         shell: bash

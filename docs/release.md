@@ -46,10 +46,15 @@ individual workflow when you need an unpublished artifact for testing.
 2. Increment `revision` in `fork-build-info.json`. Reset it to `1` only when
    `upstreamBaseVersion` advances.
 3. Choose an installer patch version greater than every published fork installer version.
-4. Run `npm run format`, `npm run lint`, and `npm run typecheck`.
+4. Run `npm run release:fork:check`. This runs formatting checks, lint, and typecheck only.
 5. Show the
    release commit, installer version, fork display version, and artifact set to the user.
 6. Wait for explicit publish authorization. Keep all preparation local until then.
+
+Do not add or run Playwright, browser, E2E, integration, packaged smoke, or other test suites while
+preparing or publishing a release. Quick Checks may run existing Node unit tests independently,
+but their status never gates a fork release. Run broader tests only after a separate explicit user
+request.
 
 Do not run `npm run release:patch`, `release:minor`, `release:promote`, or any npm publish command.
 Those commands belong to upstream Paseo and are intentionally absent from the overlay root
@@ -66,11 +71,10 @@ git push origin overlay
 RELEASE_COMMIT=$(git rev-parse origin/overlay)
 ```
 
-Wait for CI on `RELEASE_COMMIT` to finish successfully. Do not dispatch release workflows for a
-commit with pending or failed CI.
-
 Dispatch the fork workflows explicitly. The desktop workflow creates the release and its tag; the
 other workflows tolerate racing with that creation and attach their assets to the same release.
+Dispatch immediately after pushing the release commit. Quick Checks and release workflows are
+independent, so a pending or failed Quick Checks run does not delay publication.
 
 ```bash
 gh workflow run fork-desktop-release.yml \

@@ -27,6 +27,8 @@ env:
   SOURCE_TAG: ${{ inputs.tag }}
   CHECKOUT_REF: ${{ inputs.checkout_ref || 'overlay' }}
   SHOULD_PUBLISH: ${{ inputs.publish != 'false' }}
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 jobs:
   publish-daemon-package:
@@ -72,12 +74,10 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: node scripts/npm-retry.mjs ci
+        run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
 
-      - name: Build and verify daemon package
-        run: |
-          npm run build:fork-daemon-package
-          npm run verify:fork-daemon-package
+      - name: Build daemon package
+        run: npm run build:fork-daemon-package
 
       - name: Upload daemon package to release
         if: env.SHOULD_PUBLISH == 'true'

@@ -61,7 +61,7 @@ async function compressFile(filePath) {
       createReadStream(filePath),
       createBrotliCompress({
         params: {
-          [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
+          [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
         },
       }),
       createWriteStream(brotliPath),
@@ -75,16 +75,13 @@ async function precompressAssets(dir) {
   const files = entries.filter((entry) => entry.isFile());
   const dirs = entries.filter((entry) => entry.isDirectory());
 
-  for (const file of files) {
-    const filePath = path.join(dir, file.name);
-    if (COMPRESS_EXTENSIONS.has(path.extname(file.name).toLowerCase())) {
-      await compressFile(filePath);
-    }
-  }
-
-  for (const subdir of dirs) {
-    await precompressAssets(path.join(dir, subdir.name));
-  }
+  await Promise.all(
+    files
+      .map((file) => path.join(dir, file.name))
+      .filter((filePath) => COMPRESS_EXTENSIONS.has(path.extname(filePath).toLowerCase()))
+      .map(compressFile),
+  );
+  await Promise.all(dirs.map((subdir) => precompressAssets(path.join(dir, subdir.name))));
 }
 
 async function measureBundle(dir) {

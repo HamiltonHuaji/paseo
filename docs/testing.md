@@ -1,12 +1,23 @@
 # Testing
 
+## Overlay execution policy
+
+Do not add tests or smoke harnesses unless the user explicitly asks for them. Do not run browser,
+Playwright, E2E, integration, live-provider, packaged-smoke, or full-workspace suites unless the
+user explicitly asks for that run.
+
+Automatic Quick Checks run lint, typecheck, and the existing Node-only app and SDK unit suites.
+They set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. Release workflows build and publish artifacts
+without waiting for Quick Checks and without running any test suite.
+
 ## Philosophy
 
 Tests prove behavior, not structure. Every test should answer: "what user-visible or API-visible behavior does this verify?"
 
-## Test-driven development
+## Test development
 
-Work in vertical slices: one test, one implementation, repeat. Each test responds to what you learned from the previous cycle.
+When the user explicitly requests tests, work in vertical slices: one test, one implementation,
+repeat. Each test responds to what you learned from the previous cycle.
 
 ```
 RIGHT (vertical):
@@ -31,7 +42,8 @@ Every user action that can fail must expose the complete operation state in the 
 
 Logs, console output, and a reset button are not user feedback. Neither is a platform API unless it is verified on every supported platform: React Native Web's `Alert.alert()` is a no-op, so browser and Electron failures must use rendered app UI such as the shared alert component.
 
-Every fallible action needs behavioral coverage for success and failure. RPC-backed UI should use an app Playwright test with a real browser, network, and daemon whenever feasible. The failure test must assert what the user can see and do after the failure, not an internal response, state field, or log line. Add distinct timeout or disconnect cases when they produce distinct recovery behavior.
+When behavioral coverage was explicitly requested, the failure test must assert what the user can
+see and do after the failure, not an internal response, state field, or log line.
 
 ## Determinism first
 
@@ -103,32 +115,12 @@ function createTestEmailSender() {
 
 When a test is labeled end-to-end, it calls the real service. No environment variable gates, no conditional skipping, no mocking the external dependency.
 
-### Packaged desktop smoke
-
-The packaged desktop smoke is an external observer of the production launch path. It must not add a smoke-only branch to Electron main or start the daemon itself.
-
-The harness launches the unpacked packaged app with isolated user data and daemon state, connects to the real renderer over Chromium's debugging protocol, and requires all of these outcomes:
-
-- the `paseo://app/` renderer mounts into `#root`;
-- the sandboxed preload exposes the desktop bridge;
-- the renderer starts a fresh desktop-managed daemon through the normal startup bootstrap;
-- the bundled CLI can query that daemon and run a terminal command.
-
-Pull-request CI runs the Linux x64 smoke under Xvfb when the cumulative PR diff changes `packages/desktop/**`. The desktop release matrix runs the harness against each host-native packaged app before publishing. All smoke jobs upload renderer, desktop, and daemon diagnostics on failure.
-
-To exercise the smoke locally on Linux:
-
-```bash
-PASEO_DESKTOP_SMOKE=1 \
-PASEO_DESKTOP_SMOKE_ARTIFACT_DIR=/tmp/paseo-desktop-smoke \
-npm run build:desktop -- --publish never --linux --x64 --dir
-```
-
 ### Undeclared peer dependencies break app.asar
 
 electron-builder packs `node_modules` by walking declared production `dependencies`. A package that imports something it only lists as a `peerDependency` resolves fine in this hoisted workspace, passes every test, and then throws `ERR_MODULE_NOT_FOUND` inside `app.asar` — killing the desktop daemon at startup. That shipped twice from `@replit/codemirror-lang-*` grammars, which are interactive editor extensions published as if they were bare parsers.
 
-The packaged smoke catches it but only runs when a PR touches the `desktop` filter in `.github/ci-paths.yml`. Both offenders landed under `packages/highlight/**`, which maps to `sdk`.
+The overlay release pipeline does not run a packaged smoke. Check the packaged dependency closure
+only when the user explicitly requests that validation.
 
 `packages/highlight/src/__tests__/dependency-closure.test.ts` replicates the packer's traversal statically and runs with the normal unit tests. It is scoped to `@getpaseo/highlight` on purpose: that tree is small and pure, so the check is exact. Running the same walk over `@getpaseo/server` produces dozens of false positives from optional dependencies loaded behind `try`/`catch`.
 
@@ -177,16 +169,14 @@ Codex MultiAgentV2 real tests use local Codex authentication rather than the Ope
 
 ## Running tests locally
 
-Test suites in this repo are heavy. Running them in bulk freezes the machine, especially with multiple agents in parallel.
+Test suites in this repo are heavy. Run them only after an explicit user request.
 
 - Run only the file you changed: `npx vitest run <path> --bail=1`
 - Never run `npm run test` for a whole workspace unless asked.
-- For a broad sweep, redirect to a file and read it after: `npx vitest run <path> --bail=1 > /tmp/test-output.txt 2>&1`
+- For a requested broad sweep, redirect to a file and read it after: `npx vitest run <path> --bail=1 > /tmp/test-output.txt 2>&1`
 - Never re-run a suite another agent already reported green.
-- Ordinary overlay CI runs Node unit tests, lint, and typecheck. The workflow retains the server,
-  CLI, relay, desktop, packaged-smoke, and app Playwright jobs behind constant-false gates so they
-  can be re-enabled without reconstructing them. Run a targeted retained job or test manually when
-  its behavior is part of the change.
+- Ordinary overlay Quick Checks run existing Node unit tests, lint, and typecheck. Heavy test jobs
+  are absent from the workflow, so a YAML expression cannot accidentally enable them.
 - Never run the full Playwright E2E suite locally — defer whole-suite verification to CI. Targeted Playwright specs are allowed when you changed or need to prove that specific flow.
 - App Playwright shares one warmed Metro server per run and gives every Playwright worker its own isolated daemon and `PASEO_HOME`. Spec files run concurrently without exposing one file's projects, agents, terminals, history, or provider configuration to another worker; tests within a file remain together so file-level setup is not repeated.
 - Playwright specs that exercise only the daemon import `daemonTest` from the shared fixtures so they do not create a browser context or page.
@@ -197,15 +187,10 @@ Test suites in this repo are heavy. Running them in bulk freezes the machine, es
 - Teardown kills the process tree, because a Windows signal reaches only the direct child and leaves forked workers holding the listening port.
 - The `asdf`-backed local Elixir relay stays POSIX-only, so the `relay-deployment` Playwright project is unavailable on Windows.
 
-## Pull-request test routing
+## Pull-request checks
 
-PR checks are routed by the behavior each suite proves, using `.github/ci-paths.yml`. A package does not inherit every test suite of its runtime consumers: app changes do not run CLI or Electron-wrapper tests, and protocol changes do not run every package that imports the protocol. Cross-package static compatibility belongs to `typecheck`; full integration coverage runs after merge on main and in manual CI runs.
-
-Matrix legs are declared as statically named jobs. Their shared steps use YAML anchors. The overlay
-keeps jobs that exceed its five-minute CI budget behind constant-false job-level gates; do not delete
-their definitions when disabling them.
-
-The smallest meaningful contract wins over package ownership. Tiny structural invariants such as daemon launch supervision run unconditionally in the always-running routing job instead of maintaining a transitive file list; this check reads source entrypoints and builds no product. Routed integration contracts use stable domain directories. Repository scripts and the shared Vitest configuration run every PR contract because they are cross-cutting toolchain inputs. App CI selects only the Node `unit` Vitest project and does not install Chromium.
+Pull requests run the same Quick Checks as `overlay` pushes. The app command selects only the Node
+`unit` Vitest project. CI never installs Chromium. Run other suites only after an explicit request.
 
 ## Agent authentication in tests
 

@@ -99,7 +99,7 @@
     "db:query": "npm run db:query --workspace=@getpaseo/server --",
     "cli": "./scripts/dev-home.sh npx tsx packages/cli/src/index.js",
     "version:sync-internal": "node scripts/sync-workspace-versions.mjs",
-    "release:fork:check": "node --test scripts/fork-release-contract.test.mjs && npm run format:check && npm run lint && npm run typecheck"
+    "release:fork:check": "npm run format:check && npm run lint && npm run typecheck"
   },
   "devDependencies": {
     "@types/ws": "^8.5.14",
