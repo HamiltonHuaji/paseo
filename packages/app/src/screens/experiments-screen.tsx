@@ -569,9 +569,9 @@ function AttemptPanel({
     [client],
   );
   let progressContent = null;
-  if (attempt.progressPlan) {
+  if (attempt.progressPlans) {
     progressContent = (
-      <ExperimentProgressSchedule plan={attempt.progressPlan} observation={observation} />
+      <ExperimentProgressSchedule plan={attempt.progressPlans} observation={observation} />
     );
   } else if (observation) {
     progressContent = (
@@ -791,7 +791,7 @@ function groupExperiments(experiments: ExperimentRecord[]): Array<[string, Exper
 function findLatestProgressAttempt(attempts: ExperimentAttempt[]): ExperimentAttempt | null {
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
     const attempt = attempts[index];
-    if (attempt?.progress || attempt?.progressSource) return attempt;
+    if (attempt?.progress || attempt?.progressSource || attempt?.progressPlans) return attempt;
   }
   return null;
 }

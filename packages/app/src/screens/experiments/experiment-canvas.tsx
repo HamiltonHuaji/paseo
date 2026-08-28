@@ -5,6 +5,9 @@ import {
   ScrollView,
   Text,
   View,
+  type GestureResponderEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type PanResponderGestureState,
   type ViewStyle,
 } from "react-native";
@@ -17,11 +20,11 @@ import type {
   ExperimentRecord,
 } from "@getpaseo/protocol/experiments";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { isWeb } from "@/constants/platform";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { Theme } from "@/styles/theme";
 import {
   EXPERIMENT_CANVAS_GRID_SIZE,
-  EXPERIMENT_CANVAS_MIN_ROWS,
   buildAutomaticLayout,
   canvasDimensions,
   fallbackPlacement,
@@ -63,6 +66,10 @@ export function ExperimentCanvas({
     [detailByExperiment, experiments],
   );
   const [localPlacements, setLocalPlacements] = useState<Record<string, ResolvedPlacement>>({});
+  const horizontalScrollRef = useRef<ScrollView>(null);
+  const verticalScrollRef = useRef<ScrollView>(null);
+  const scrollOffsetRef = useRef({ x: 0, y: 0 });
+  const panOriginRef = useRef({ x: 0, y: 0 });
   const placements = useMemo(
     () =>
       new Map(
@@ -105,35 +112,79 @@ export function ExperimentCanvas({
     () => [styles.canvas, geometryStyle({ width: dimensions.width, height: dimensions.height })],
     [dimensions.height, dimensions.width],
   );
+  const handleHorizontalScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetRef.current.x = event.nativeEvent.contentOffset.x;
+  }, []);
+  const handleVerticalScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollOffsetRef.current.y = event.nativeEvent.contentOffset.y;
+  }, []);
+  const canvasPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
+        onPanResponderGrant: (event) => {
+          captureGesturePointer(event);
+          panOriginRef.current = { ...scrollOffsetRef.current };
+        },
+        onPanResponderMove: (_, gesture) => {
+          horizontalScrollRef.current?.scrollTo({
+            x: Math.max(0, panOriginRef.current.x - gesture.dx),
+            animated: false,
+          });
+          verticalScrollRef.current?.scrollTo({
+            y: Math.max(0, panOriginRef.current.y - gesture.dy),
+            animated: false,
+          });
+        },
+      }),
+    [],
+  );
 
   return (
-    <ScrollView horizontal style={styles.viewport} contentContainerStyle={styles.viewportContent}>
-      <View style={canvasStyle}>
-        <GridLines width={dimensions.width} height={dimensions.height} />
-        <ThemedLineageOverlay
-          experiments={experiments}
-          placements={placements}
-          width={dimensions.width}
-          height={dimensions.height}
-          uniProps={lineagePaletteMapping}
-        />
-        {experiments.map((experiment) => {
-          const placement = placements.get(experiment.id);
-          if (!placement) return null;
-          return (
-            <CanvasCard
-              key={experiment.id}
-              experiment={experiment}
-              detail={detailByExperiment.get(experiment.id) ?? null}
-              placement={placement}
-              selected={experiment.id === selectedExperiment}
-              onSelect={onSelectExperiment}
-              onPreviewPlacement={previewPlacement}
-              onCommitPlacement={commitPlacement}
-            />
-          );
-        })}
-      </View>
+    <ScrollView
+      ref={verticalScrollRef}
+      style={styles.viewport}
+      contentContainerStyle={styles.verticalViewportContent}
+      onScroll={handleVerticalScroll}
+      scrollEventThrottle={16}
+    >
+      <ScrollView
+        ref={horizontalScrollRef}
+        horizontal
+        contentContainerStyle={styles.viewportContent}
+        onScroll={handleHorizontalScroll}
+        scrollEventThrottle={16}
+      >
+        <View style={canvasStyle}>
+          <View style={styles.panSurface} {...canvasPanResponder.panHandlers} />
+          <GridLines width={dimensions.width} height={dimensions.height} />
+          <ThemedLineageOverlay
+            experiments={experiments}
+            placements={placements}
+            width={dimensions.width}
+            height={dimensions.height}
+            uniProps={lineagePaletteMapping}
+          />
+          {experiments.map((experiment) => {
+            const placement = placements.get(experiment.id);
+            if (!placement) return null;
+            return (
+              <CanvasCard
+                key={experiment.id}
+                experiment={experiment}
+                detail={detailByExperiment.get(experiment.id) ?? null}
+                placement={placement}
+                selected={experiment.id === selectedExperiment}
+                onSelect={onSelectExperiment}
+                onPreviewPlacement={previewPlacement}
+                onCommitPlacement={commitPlacement}
+              />
+            );
+          })}
+        </View>
+      </ScrollView>
     </ScrollView>
   );
 }
@@ -169,7 +220,8 @@ function CanvasCard({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: (_, gesture) =>
           Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
-        onPanResponderGrant: () => {
+        onPanResponderGrant: (event) => {
+          captureGesturePointer(event);
           gestureOriginRef.current = placementRef.current;
         },
         onPanResponderMove: (_, gesture) => {
@@ -190,7 +242,8 @@ function CanvasCard({
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: () => {
+        onPanResponderGrant: (event) => {
+          captureGesturePointer(event);
           gestureOriginRef.current = placementRef.current;
         },
         onPanResponderMove: (_, gesture) => {
@@ -215,10 +268,11 @@ function CanvasCard({
     [placement, selected],
   );
   const latestProgress = detail ? latestProgressAttempt(detail) : null;
+  const progressPlan = latestProgress?.progressPlans;
+  const sourcePlan = progressPlan?.units.find((plan) => plan.unit === progressPlan.sourceUnit);
   const progressRatio = latestProgress?.progress
     ? clamp(
-        latestProgress.progress.current /
-          (latestProgress.progressPlan?.total ?? latestProgress.progress.total ?? 1),
+        latestProgress.progress.current / (sourcePlan?.total ?? latestProgress.progress.total ?? 1),
         0,
         1,
       )
@@ -251,7 +305,7 @@ function CanvasCard({
             </View>
             <Text style={styles.cardProgressText} numberOfLines={1}>
               {latestProgress.shortDescription} · {formatNumber(latestProgress.progress!.current)}
-              {latestProgress.progressPlan ? ` ${latestProgress.progressPlan.unit}` : ""}
+              {progressPlan ? ` ${progressPlan.sourceUnit}` : ""}
             </Text>
           </View>
         ) : null}
@@ -385,6 +439,18 @@ function geometryStyle(style: ViewStyle): ViewStyle {
   return inlineUnistylesStyle(style);
 }
 
+function captureGesturePointer(event: GestureResponderEvent): void {
+  if (!isWeb) return;
+  const nativeEvent = event.nativeEvent as unknown as {
+    identifier?: number | string;
+    pointerId?: number;
+  };
+  const pointerId = nativeEvent.pointerId ?? Number(nativeEvent.identifier);
+  const element = event.currentTarget as unknown as HTMLElement | null;
+  if (!Number.isFinite(pointerId) || !element) return;
+  element.setPointerCapture?.(pointerId);
+}
+
 function percentageWidth(ratio: number): ViewStyle {
   return inlineUnistylesStyle({ width: `${ratio * 100}%` });
 }
@@ -392,7 +458,12 @@ function percentageWidth(ratio: number): ViewStyle {
 function latestProgressAttempt(detail: ExperimentDetail) {
   return detail.attempts
     .toReversed()
-    .find((attempt) => attempt.progress !== null || attempt.progressSource !== null);
+    .find(
+      (attempt) =>
+        attempt.progress !== null ||
+        attempt.progressSource !== null ||
+        Boolean(attempt.progressPlans),
+    );
 }
 
 interface Point {
@@ -424,15 +495,16 @@ function formatNumber(value: number): string {
 
 const styles = StyleSheet.create((theme) => ({
   viewport: {
-    flex: 1,
-    minHeight: EXPERIMENT_CANVAS_MIN_ROWS * GRID_SIZE,
+    height: { xs: 480, md: 720 },
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface0,
   },
+  verticalViewportContent: { alignItems: "flex-start" },
   viewportContent: { alignItems: "flex-start" },
   canvas: { position: "relative", backgroundColor: theme.colors.surface0 },
+  panSurface: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
   grid: { ...StyleSheet.absoluteFillObject },
   gridVertical: {
     position: "absolute",

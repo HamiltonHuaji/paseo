@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
-  ProgressPlanSchema,
+  ProgressPlanSetSchema,
   ProgressSourceSchema,
   ViewerConfigSchema,
   type CreateAttemptInput,
@@ -166,7 +166,7 @@ export class ProjectExperimentStore {
 
   async createAttempt(input: CreateAttemptInput): Promise<ExperimentAttempt> {
     const experiment = this.getExperiment(input.experiment).experiment;
-    this.validateProgressPlan(input.progressPlan ?? null);
+    this.validateProgressPlans(input.progressPlans ?? null);
     const now = new Date().toISOString();
     const id = this.generateHandle("att", "attempts");
     const elapsed = Math.max(0, Date.parse(now) - Date.parse(experiment.createdAt));
@@ -179,7 +179,7 @@ export class ProjectExperimentStore {
       .prepare(
         `INSERT INTO attempts (
           id, experiment_id, short_description, purpose, result_summary, wandb_id, job_id,
-          output_dir, progress_plan_json, progress_source_json, viewer_config_json, blob_relpath,
+          output_dir, progress_plans_json, progress_source_json, viewer_config_json, blob_relpath,
           started_at, ended_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?)`,
       )
@@ -192,7 +192,7 @@ export class ProjectExperimentStore {
         input.wandbId ?? null,
         input.jobId ?? null,
         input.outputDir ?? null,
-        serializeNullable(input.progressPlan ?? null),
+        serializeNullable(input.progressPlans ?? null),
         serializeNullable(input.progressSource ?? null),
         blobRelpath,
         input.resultSummary ? now : null,
@@ -205,7 +205,7 @@ export class ProjectExperimentStore {
 
   updateAttempt(input: UpdateAttemptInput): ExperimentAttempt {
     const existing = this.getAttempt(input.attempt);
-    if (hasOwn(input, "progressPlan")) this.validateProgressPlan(input.progressPlan ?? null);
+    if (hasOwn(input, "progressPlans")) this.validateProgressPlans(input.progressPlans ?? null);
     const resultSummary = hasOwn(input, "resultSummary")
       ? input.resultSummary
       : existing.resultSummary;
@@ -213,7 +213,7 @@ export class ProjectExperimentStore {
     this.db
       .prepare(
         `UPDATE attempts SET short_description = ?, purpose = ?, result_summary = ?, wandb_id = ?,
-          job_id = ?, output_dir = ?, progress_plan_json = ?, progress_source_json = ?,
+          job_id = ?, output_dir = ?, progress_plans_json = ?, progress_source_json = ?,
           ended_at = ?, updated_at = ? WHERE id = ?`,
       )
       .run(
@@ -223,9 +223,9 @@ export class ProjectExperimentStore {
         hasOwn(input, "wandbId") ? input.wandbId : existing.wandbId,
         hasOwn(input, "jobId") ? input.jobId : existing.jobId,
         hasOwn(input, "outputDir") ? input.outputDir : existing.outputDir,
-        hasOwn(input, "progressPlan")
-          ? serializeNullable(input.progressPlan ?? null)
-          : serializeNullable(existing.progressPlan),
+        hasOwn(input, "progressPlans")
+          ? serializeNullable(input.progressPlans ?? null)
+          : serializeNullable(existing.progressPlans ?? null),
         hasOwn(input, "progressSource")
           ? serializeNullable(input.progressSource ?? null)
           : serializeNullable(existing.progressSource),
@@ -436,7 +436,7 @@ export class ProjectExperimentStore {
         wandb_id TEXT,
         job_id TEXT,
         output_dir TEXT,
-        progress_plan_json TEXT,
+        progress_plans_json TEXT,
         progress_source_json TEXT,
         viewer_config_json TEXT,
         blob_relpath TEXT NOT NULL,
@@ -507,7 +507,8 @@ export class ProjectExperimentStore {
       wandbId: stringOrNull(row.wandb_id),
       jobId: stringOrNull(row.job_id),
       outputDir: stringOrNull(row.output_dir),
-      progressPlan: parseNullable(row.progress_plan_json, ProgressPlanSchema),
+      progressPlan: null,
+      progressPlans: parseNullable(row.progress_plans_json, ProgressPlanSetSchema),
       progressSource: parseNullable(row.progress_source_json, ProgressSourceSchema),
       viewer: parseNullable(row.viewer_config_json, ViewerConfigSchema),
       blobRelpath: String(row.blob_relpath),
@@ -544,8 +545,45 @@ export class ProjectExperimentStore {
     }
   }
 
-  private validateProgressPlan(plan: CreateAttemptInput["progressPlan"]): void {
-    if (!plan) return;
+  private validateProgressPlans(plans: CreateAttemptInput["progressPlans"]): void {
+    if (!plans) return;
+    const units = new Set<string>();
+    let sourceTotal: number | null = null;
+    for (const plan of plans.units) {
+      if (units.has(plan.unit)) {
+        throw new ExperimentStoreError(
+          "invalid_input",
+          `Progress plan unit ${plan.unit} is duplicated`,
+        );
+      }
+      units.add(plan.unit);
+      this.validateProgressUnitPlan(plan);
+      if (plan.unit === plans.sourceUnit) sourceTotal = plan.total;
+    }
+    if (sourceTotal === null) {
+      throw new ExperimentStoreError(
+        "invalid_input",
+        `Progress source unit ${plans.sourceUnit} has no plan`,
+      );
+    }
+    for (const plan of plans.units) {
+      if (plan.unit === plans.sourceUnit && plan.projection?.length) {
+        throw new ExperimentStoreError(
+          "invalid_input",
+          "The progress source unit cannot define a projection",
+        );
+      }
+      if (plan.unit !== plans.sourceUnit) {
+        this.validateProgressProjection(plan.projection ?? [], sourceTotal, plan.total);
+      }
+    }
+  }
+
+  private validateProgressUnitPlan(plan: {
+    total: number;
+    segments?: Array<{ start: number; end: number }>;
+    tracks?: Array<{ segments: Array<{ start: number; end: number }> }>;
+  }): void {
     if (plan.segments && plan.tracks) {
       throw new ExperimentStoreError(
         "invalid_input",
@@ -555,6 +593,37 @@ export class ProjectExperimentStore {
     if (plan.segments) this.validateProgressSegments(plan.segments, plan.total);
     for (const track of plan.tracks ?? []) {
       this.validateProgressSegments(track.segments, plan.total);
+    }
+  }
+
+  private validateProgressProjection(
+    ranges: Array<{
+      sourceStart: number;
+      sourceEnd: number;
+      targetStart: number;
+      targetEnd: number;
+    }>,
+    sourceTotal: number,
+    targetTotal: number,
+  ): void {
+    let previousSourceEnd = 0;
+    let previousTargetEnd = 0;
+    for (const range of ranges) {
+      if (
+        range.sourceStart < previousSourceEnd ||
+        range.sourceEnd <= range.sourceStart ||
+        range.sourceEnd > sourceTotal ||
+        range.targetStart < previousTargetEnd ||
+        range.targetEnd <= range.targetStart ||
+        range.targetEnd > targetTotal
+      ) {
+        throw new ExperimentStoreError(
+          "invalid_input",
+          "Progress projection ranges must be ordered, non-overlapping, increasing, and within both unit totals",
+        );
+      }
+      previousSourceEnd = range.sourceEnd;
+      previousTargetEnd = range.targetEnd;
     }
   }
 
