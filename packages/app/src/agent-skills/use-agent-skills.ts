@@ -81,7 +81,8 @@ export function useAgentSkills(serverId: string) {
   const uninstallAsync = uninstall.mutateAsync;
   const saveAsync = save.mutateAsync;
   const refresh = useCallback(async () => {
-    await refetch();
+    const result = await refetch();
+    return result.data ?? null;
   }, [refetch]);
   const runReconcile = useCallback(async () => {
     await reconcileAsync().catch(() => undefined);

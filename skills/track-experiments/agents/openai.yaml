@@ -2,3 +2,9 @@ interface:
   display_name: "Track experiments"
   short_description: "Track durable work and concrete attempts"
   default_prompt: "Use $track-experiments to record and coordinate this experiment."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "paseo"
+      description: "Paseo project coordination and experiment tools"

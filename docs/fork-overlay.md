@@ -83,6 +83,8 @@ release process never pushes a tag event that could trigger external upstream au
 not wait for Quick Checks and does not run tests, browser downloads, or smoke checks. It does
 not publish upstream npm packages, official mobile apps, websites, relay workers, or Docker images.
 The desktop workflow publishes only a Windows x64 NSIS installer and a Linux x64 Debian package.
+Fork Web and Electron renderer exports keep JavaScript unminified and emit source maps. Prefer
+actionable client error stacks over smaller personal-distribution artifacts.
 Keep the upstream application identity so an installed fork retains the Electron user-data and
 daemon directories. Windows uses the upstream updater state machine with its generated feed
 pointing at `HamiltonHuaji/paseo`; Linux verifies the fork release digest and installs the `.deb`

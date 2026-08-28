@@ -94,7 +94,7 @@
     "web": "npm run web --workspace=@getpaseo/app",
     "dev:desktop": "cross-env PASEO_LISTEN=127.0.0.1:6768 npm run dev --workspace=@getpaseo/desktop",
     "dev:win:desktop": "npm run dev:win --workspace=@getpaseo/desktop",
-    "build:desktop-renderer:prepared": "cd packages/app && cross-env PASEO_WEB_PLATFORM=electron npx expo export --platform web",
+    "build:desktop-renderer:prepared": "cd packages/app && cross-env PASEO_WEB_PLATFORM=electron npx expo export --platform web --no-minify --source-maps",
     "build:desktop": "npm run build:app-deps:clean && concurrently --kill-others-on-fail --names server,renderer --prefix-colors cyan,green \"npm run build:server-from-app-deps:clean\" \"npm run build:desktop-renderer:prepared\" && npm run build:package --workspace=@getpaseo/desktop --",
     "build:vscode": "npm run build --workspace=paseo-vscode",
     "package:vscode": "npm run build:relay && npm run package --workspace=paseo-vscode",

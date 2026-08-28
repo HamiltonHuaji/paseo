@@ -4025,11 +4025,9 @@ export class Session {
       await unarchiveAgentState(this.agentStorage, this.agentManager, agentId);
       let snapshot: ManagedAgent;
       const existing = this.agentManager.getAgent(agentId);
-      let forceHistoryRefresh = false;
       if (existing) {
         await this.interruptAgentIfRunning(agentId);
         snapshot = await this.agentManager.reloadAgentSession(agentId);
-        forceHistoryRefresh = true;
       } else {
         const record = await this.agentStorage.get(agentId);
         if (!record) {
@@ -4050,31 +4048,6 @@ export class Session {
           agentStorage: this.agentStorage,
           broadcastTimeline: true,
           logger: this.sessionLogger,
-        });
-      }
-      try {
-        await this.agentManager.hydrateTimelineFromProvider(agentId, {
-          broadcast: true,
-          force: forceHistoryRefresh,
-        });
-      } catch (error) {
-        // The provider process has already been replaced successfully. Forced
-        // hydration gathers history before replacing the old timeline, so a
-        // failure leaves the usable replacement session and timeline intact.
-        const message = getErrorMessage(error);
-        this.sessionLogger.warn(
-          { err: error, agentId },
-          `Agent ${agentId} reloaded, but provider history refresh failed`,
-        );
-        this.emit({
-          type: "activity_log",
-          payload: {
-            id: uuidv4(),
-            timestamp: new Date(),
-            type: "system",
-            content: `Agent reloaded, but provider history could not be refreshed: ${message}`,
-            metadata: { severity: "warning" },
-          },
         });
       }
       await this.agentUpdates.forwardLiveAgent(snapshot);

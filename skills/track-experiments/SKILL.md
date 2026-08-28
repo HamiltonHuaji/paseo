@@ -5,6 +5,17 @@ description: Track durable project work and its concrete operations with Paseo e
 
 # Track experiments
 
+## Find the Paseo tools
+
+This workflow uses the Paseo MCP server. Codex may defer MCP tools instead of listing every tool
+in the initial context. When an expected tool is not visible, search the available tools for
+`paseo` or `experiment` before concluding that it is unavailable. In Codex, the resolved names are
+usually prefixed with `mcp__paseo__`, such as `mcp__paseo__list_experiments`.
+
+If tool search cannot find the Paseo experiment tools, ask the user to enable **Paseo tools** on
+the host and reload the agent. Do not replace missing Experiment tools by editing `.paseo/v1/state.db`
+directly.
+
 ## Choose an experiment or attempt
 
 An experiment is a durable, user-visible unit of work with a stable subject, intended outcome, and completion criterion. It may be a model setting, software build, benchmark configuration, data-processing job, artifact, or any other independently meaningful work. A broader goal may group several experiments; each experiment must be able to reach its own conclusion or produce its own result.

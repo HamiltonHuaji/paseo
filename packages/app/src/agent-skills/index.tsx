@@ -42,6 +42,7 @@ export function AgentSkillsSection({ serverId }: { serverId: string }) {
   const skillsConnected = skills.connected;
   const skillsSupported = skills.supported;
   const [isChoosing, setIsChoosing] = useState(false);
+  const [isOpeningChooser, setIsOpeningChooser] = useState(false);
   useFocusEffect(
     useCallback(() => {
       if (skillsConnected && skillsSupported) void refreshSkills();
@@ -87,7 +88,18 @@ export function AgentSkillsSection({ serverId }: { serverId: string }) {
     () => <ThemedSettings size={ICON_SIZE.sm} uniProps={mutedMapping} />,
     [],
   );
-  const handleOpen = useCallback(() => setIsChoosing(true), []);
+  const handleOpen = useCallback(() => {
+    if (skills.isWorking || isOpeningChooser) return;
+    void (async () => {
+      setIsOpeningChooser(true);
+      try {
+        const status = skills.status ?? (await skills.refresh());
+        if (status) setIsChoosing(true);
+      } finally {
+        setIsOpeningChooser(false);
+      }
+    })();
+  }, [isOpeningChooser, skills]);
   const handleClose = useCallback(() => setIsChoosing(false), []);
   const handleOpenDocs = useCallback(() => {
     void openExternalUrl(SKILLS_DOCS_URL);
@@ -150,7 +162,8 @@ export function AgentSkillsSection({ serverId }: { serverId: string }) {
               size="sm"
               leftIcon={chooseIcon}
               onPress={handleOpen}
-              disabled={skills.status === null || skills.isWorking}
+              disabled={skills.isWorking}
+              loading={isOpeningChooser}
               accessibilityLabel={t("settings.host.skills.choose")}
             />
             {hasSelected ? (
