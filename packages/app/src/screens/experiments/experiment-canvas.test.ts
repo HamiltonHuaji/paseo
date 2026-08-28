@@ -8,15 +8,16 @@ import {
 } from "./experiment-canvas-layout";
 
 describe("Experiment Canvas layout", () => {
-  it("places lineage left-to-right and separates cards within a layer", () => {
+  it("places every goal chronologically top-to-bottom with a lineage indent", () => {
     const root = experiment("exp_root", null, "goal-a", "2026-01-01T00:00:00Z");
     const childA = experiment("exp_childa", root.id, "goal-a", "2026-01-02T00:00:00Z");
     const childB = experiment("exp_childb", root.id, "goal-a", "2026-01-03T00:00:00Z");
     const otherGoal = experiment("exp_other", null, "goal-b", "2026-01-04T00:00:00Z");
-    const layout = buildAutomaticLayout([root, childA, childB, otherGoal], new Map());
+    const layout = buildAutomaticLayout([childB, otherGoal, root, childA], new Map());
 
     expect(layout.get(childA.id)?.column).toBeGreaterThan(layout.get(root.id)?.column ?? 0);
     expect(layout.get(childB.id)?.column).toBe(layout.get(childA.id)?.column);
+    expect(layout.get(childA.id)?.row).toBeGreaterThan(layout.get(root.id)?.row ?? 0);
     expect(layout.get(childB.id)?.row).toBeGreaterThan(layout.get(childA.id)?.row ?? 0);
     expect(layout.get(otherGoal.id)?.row).toBeGreaterThan(layout.get(childB.id)?.row ?? 0);
   });

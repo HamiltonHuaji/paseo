@@ -9,7 +9,7 @@ export const EXPERIMENT_CANVAS_MIN_ROWS = 30;
 const DEFAULT_WIDTH = 12;
 const DEFAULT_HEIGHT = 8;
 const MIN_COLUMNS = 58;
-const LAYER_STRIDE = 17;
+const LINEAGE_INDENT = 3;
 
 export type ResolvedPlacement = Omit<
   ExperimentBoardPlacement,
@@ -50,28 +50,20 @@ export function buildAutomaticLayout(
   const result = new Map<string, ResolvedPlacement>();
   let groupRow = 1;
   for (const group of goalGroups.values()) {
-    const layers = new Map<number, ExperimentRecord[]>();
+    let row = groupRow;
     for (const experiment of group) {
       const depth = depthById.get(experiment.id) ?? 0;
-      layers.set(depth, [...(layers.get(depth) ?? []), experiment]);
+      const size = automaticCardSize(experiment, detailByExperiment.get(experiment.id) ?? null);
+      result.set(experiment.id, {
+        experiment: experiment.id,
+        column: 1 + depth * LINEAGE_INDENT,
+        row,
+        width: size.width,
+        height: size.height,
+      });
+      row += size.height + 2;
     }
-    let groupHeight = 0;
-    for (const [depth, layer] of layers) {
-      let layerRow = groupRow;
-      for (const experiment of layer) {
-        const size = automaticCardSize(experiment, detailByExperiment.get(experiment.id) ?? null);
-        result.set(experiment.id, {
-          experiment: experiment.id,
-          column: 1 + depth * LAYER_STRIDE,
-          row: layerRow,
-          width: size.width,
-          height: size.height,
-        });
-        layerRow += size.height + 2;
-      }
-      groupHeight = Math.max(groupHeight, layerRow - groupRow);
-    }
-    groupRow += Math.max(DEFAULT_HEIGHT + 2, groupHeight) + 2;
+    groupRow = row + 2;
   }
   return result;
 }

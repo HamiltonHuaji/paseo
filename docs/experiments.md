@@ -564,16 +564,20 @@ An Experiment row shows:
 The Experiment detail shows its description, lineage, conclusion, Attempts, Agent sessions, and
 resolved viewer entries. Attempts form one oldest-first record with an explicit sequence number and
 creation time. Render every Attempt in that record at once; do not hide them behind an exclusive
-picker. Each entry shows direct W&B, job, output directory, result, blob directory, viewer entries,
-a schedule drawn on its progress axis, latest observation, refresh error, and staleness. Each
-schedule draws only that Attempt's observation; cross-Attempt overlays are a separate future
-surface.
+picker. Each entry expands and collapses independently, starts expanded, and keeps its sequence,
+time, title, and purpose visible while collapsed. An expanded entry shows direct W&B, job, output
+directory, result, blob directory, viewer entries, a schedule drawn on its progress axis, latest
+observation, refresh error, and staleness. Each schedule draws only that Attempt's observation;
+cross-Attempt overlays are a separate future surface.
 
 The Canvas view places Experiment cards on an integer grid. Nullable stored `column`, `row`,
 `width`, and `height` values are user overrides. The client supplies missing values with a
-deterministic default layout: Goals form vertical blocks, lineage depth runs left to right, and
-cards at one depth stack vertically. Dragging or resizing writes concrete grid values after the
-gesture ends. Moving a card does not change the Experiment's `updated_at`.
+deterministic default layout: Goals form vertical blocks, cards within a Goal run oldest-to-newest
+from top to bottom, and lineage depth adds a small horizontal indent. Dragging and resizing move
+continuously during the gesture, then snap to the grid and write concrete values when the gesture
+ends. The Canvas extent grows when cards need more room but does not shrink during the mounted
+session, so moving its last card cannot move the page's scroll boundary mid-gesture. Moving a card
+does not change the Experiment's `updated_at`.
 
 Render lineage as grid-aligned orthogonal polylines. Routing follows current card edges and uses no
 automatic graph layout or obstacle-avoidance engine. The user can move a card when an edge crosses
