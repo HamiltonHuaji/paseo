@@ -567,10 +567,13 @@ Agent rather than the short-lived reporting Agent. Ordinary agent tools cannot s
 ## Client
 
 Open Experiments as a workspace surface alongside the complete tab deck. Both sit below the same
-workspace header. The header action swaps the tab strip plus all tab content for Experiments; the
-Experiments back action restores that entire tab deck without changing its tabs, splits, or focus.
-Keep both surfaces mounted after the first open so their local UI state survives switching. The
-standalone host route remains available for direct links and diagnostics.
+workspace header. The flask action toggles between the tab strip plus all tab content and
+Experiments; do not add another back-to-tabs control inside the surface. Restoring the tab deck does
+not change its tabs, splits, or focus. On Android, consume the system back gesture while Experiments
+is active: clear the selected card and its detail first, then do nothing when no card is selected.
+This prevents edge gestures used while panning the Canvas from dismissing the surface. Keep both
+surfaces mounted after the first open so their local UI state survives switching. The standalone
+host route remains available for direct links and diagnostics.
 
 The List view groups Experiments by Goal name and includes an Ungrouped section. Goal grouping,
 lineage, and Attempt containment are separate projections. Keep this view available while the
