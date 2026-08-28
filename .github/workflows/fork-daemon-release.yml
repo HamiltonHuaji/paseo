@@ -85,6 +85,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$RELEASE_TAG" artifacts/fork-daemon/paseo-fork.tgz --clobber --repo "${{ github.repository }}"
 
+      - name: Publish release with available daemon package
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --repo "${{ github.repository }}"
+
       - name: Upload daemon package to workflow
         if: env.SHOULD_PUBLISH != 'true'
         uses: actions/upload-artifact@v4

@@ -290,6 +290,13 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
 
+      - name: Publish release with available Linux artifacts
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release edit "$RELEASE_TAG" --draft=false --repo "${{ github.repository }}"
+
       - name: Upload desktop artifacts to workflow
         if: env.SHOULD_PUBLISH != 'true'
         uses: actions/upload-artifact@v4
@@ -390,6 +397,13 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
 
+      - name: Publish release with available Windows artifacts
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release edit "$RELEASE_TAG" --draft=false --repo "${{ github.repository }}"
+
       - name: Upload desktop artifacts to workflow
         if: env.SHOULD_PUBLISH != 'true'
         uses: actions/upload-artifact@v4
@@ -397,20 +411,3 @@ jobs:
           name: desktop-windows
           path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/*
           retention-days: 7
-
-  finalize-rollout:
-    needs: [publish-linux, publish-windows]
-    if: ${{ !cancelled() && (needs.publish-linux.result == 'success' || needs.publish-linux.result == 'skipped') && (needs.publish-windows.result == 'success' || needs.publish-windows.result == 'skipped') && inputs.publish != 'false' }}
-    permissions:
-      contents: write
-    runs-on: ubuntu-latest
-    concurrency:
-      group: fork-desktop-rollout-${{ inputs.tag }}
-      cancel-in-progress: false
-
-    steps:
-      - name: Publish release after platform artifacts are available
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: gh release edit "$SOURCE_TAG" --draft=false --repo "${{ github.repository }}"

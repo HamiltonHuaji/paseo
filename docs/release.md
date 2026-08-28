@@ -33,12 +33,12 @@ Every fork release builds:
 
 - Windows x64 NSIS installer;
 - Linux x64 Debian package;
-- `paseo-fork.tgz`, the fork CLI and daemon distribution;
-- `paseo-fork.vsix`, the VS Code extension.
+- `paseo-fork.tgz`, the fork CLI and daemon distribution.
 
-Android is opt-in because EAS signing and native compilation are slow. Build it only when the user
-explicitly requests Android. The fork does not have an npm beta channel. Use `publish=false` on an
-individual workflow when you need an unpublished artifact for testing.
+The VS Code extension is unfinished and its VSIX is opt-in. Android is opt-in because EAS signing
+and native compilation are slow. Build either only when the user explicitly requests it. The fork
+does not have an npm beta channel. Use `publish=false` on an individual workflow when you need an
+unpublished artifact for testing.
 
 ## Preparation
 
@@ -93,13 +93,10 @@ gh workflow run fork-daemon-release.yml \
   -f checkout_ref="$RELEASE_COMMIT" \
   -f publish=true
 
-gh workflow run fork-vscode-release.yml \
-  --repo HamiltonHuaji/paseo \
-  --ref overlay \
-  -f tag="v$INSTALLER_VERSION" \
-  -f checkout_ref="$RELEASE_COMMIT" \
-  -f publish=true
 ```
+
+When the user explicitly requests the unfinished VSIX, dispatch `fork-vscode-release.yml` with the
+same tag, ref, commit, and publish inputs.
 
 When Android was explicitly requested:
 
@@ -112,9 +109,8 @@ gh workflow run fork-android-release.yml \
   -f publish=true
 ```
 
-The desktop workflow creates a draft release and publishes it only after the final updater
-manifests are uploaded. Other fork workflows may attach assets while that release is still a
-draft.
+Each selected workflow publishes the release after uploading its artifact. Do not wait for a
+slower platform before exposing artifacts that have already finished.
 
 ## Completion
 
@@ -124,7 +120,7 @@ is public and contains:
 - the Windows x64 installer and `latest.yml`;
 - the Linux amd64 `.deb` and `latest-linux.yml`;
 - `paseo-fork.tgz`;
-- `paseo-fork.vsix`;
+- `paseo-fork.vsix`, only when explicitly requested;
 - the APK, only when requested.
 
 Confirm the release title shows the expected fork display version and official base. Report every
