@@ -97,6 +97,7 @@ import {
 } from "@getpaseo/protocol/browser-automation/capabilities";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
+import { currentDaemonDistribution } from "./session/daemon/distribution.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import { ExperimentService } from "./experiments/service.js";
 import type { WorkspaceLabelService } from "./workspace-labels/index.js";
@@ -1642,11 +1643,22 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private buildServerInfoStatusPayload(): ServerInfoStatusPayload {
+    const distribution =
+      currentDaemonDistribution.kind === "bundled"
+        ? {
+            packageName: currentDaemonDistribution.packageName,
+            version: currentDaemonDistribution.version,
+          }
+        : {
+            packageName: currentDaemonDistribution.packageName,
+            version: this.daemonVersion,
+          };
     return {
       status: "server_info",
       serverId: this.serverId,
       hostname: getHostname(),
       version: this.daemonVersion,
+      distribution,
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),

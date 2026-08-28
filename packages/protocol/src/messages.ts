@@ -3342,6 +3342,13 @@ export const ServerInfoStatusPayloadSchema = z
     serverId: z.string().trim().min(1),
     hostname: ServerInfoHostnameSchema.optional(),
     version: ServerInfoVersionSchema.optional(),
+    // COMPAT(daemonDistribution): added in v0.6.1-fork.8, keep optional for older daemons.
+    distribution: z
+      .object({
+        packageName: z.string().min(1),
+        version: z.string().min(1),
+      })
+      .optional(),
     // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
     desktopManaged: z.boolean().optional(),
     capabilities: ServerCapabilitiesFromUnknownSchema.optional(),

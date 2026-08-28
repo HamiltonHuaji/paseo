@@ -65,7 +65,7 @@ import { settingsStyles } from "@/styles/settings";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { isVersionMismatch } from "@/desktop/updates/desktop-updates";
-import { resolveAppVersion } from "@/utils/app-version";
+import { resolveAppVersion, resolveForkDistributionVersion } from "@/utils/app-version";
 import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons";
 import { formatLatency } from "@/utils/latency";
 import { ICON_SIZE } from "@/styles/theme";
@@ -165,7 +165,10 @@ function HostStatusBadges({ serverId }: { serverId: string }) {
   const { theme } = useUnistyles();
   const snapshot = useHostRuntimeSnapshot(serverId);
   const daemonVersion = useSessionStore(
-    (state) => state.sessions[serverId]?.serverInfo?.version ?? null,
+    (state) =>
+      state.sessions[serverId]?.serverInfo?.distribution?.version ??
+      state.sessions[serverId]?.serverInfo?.version ??
+      null,
   );
 
   const connectionStatus = snapshot?.connectionStatus ?? "connecting";
@@ -727,17 +730,12 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
   const isMountedRef = useRef(true);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
-  const daemonVersion = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
-  );
-  const supportsSelfUpdate = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.features?.daemonSelfUpdate === true,
-  );
-  const desktopManaged = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.desktopManaged === true,
-  );
+  const serverInfo = useSessionStore((state) => state.sessions[host.serverId]?.serverInfo ?? null);
+  const daemonVersion = serverInfo?.distribution?.version ?? serverInfo?.version ?? null;
+  const supportsSelfUpdate = serverInfo?.features?.daemonSelfUpdate === true;
+  const desktopManaged = serverInfo?.desktopManaged === true;
 
-  const appVersion = resolveAppVersion();
+  const appVersion = resolveForkDistributionVersion() ?? resolveAppVersion();
   const hasVersionMismatch = isVersionMismatch(appVersion, daemonVersion);
 
   useEffect(() => {
@@ -918,7 +916,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     [theme.iconSize.sm, theme.colors.foreground],
   );
 
-  const shouldShowUpdate = hasVersionMismatch && (supportsSelfUpdate || desktopManaged);
+  const shouldShowUpdate = supportsSelfUpdate || (hasVersionMismatch && desktopManaged);
   if (!shouldShowUpdate) {
     return null;
   }

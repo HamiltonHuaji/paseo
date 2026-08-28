@@ -27,8 +27,15 @@ must not resolve a separately installed `@getpaseo/cli`; otherwise a restart fro
 replace the running fork daemon with the official daemon.
 
 The generated distribution manifest records the fork version, official daemon baseline, and
-install URL. Daemon self-update reads that manifest and updates the same distribution. An official
-installation without a manifest keeps using `@getpaseo/cli@latest`.
+install URL. Daemon self-update reads that manifest, runs npm directly with `--force`, and updates
+the same distribution. It never resolves `paseo` from `PATH`. The daemon advertises the exact
+distribution version so fork clients can distinguish revisions built on the same official base. An
+official installation without a manifest keeps using `@getpaseo/cli@latest`.
+
+Self-update restarts the worker through its existing supervisor. The replacement worker inherits
+the supervisor's startup environment and loads code from the updated package path. The supervisor
+process itself remains in memory; a release that changes supervisor behavior still requires one
+full external daemon restart or a host reboot after the package update.
 
 Run the `Fork Daemon Release` workflow to build and attach the stable `paseo-fork.tgz` asset to a
 fork release.
