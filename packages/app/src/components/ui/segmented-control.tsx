@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useMemo, type ComponentType } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import type { StyleProp, TextStyle, ViewStyle } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -9,12 +9,12 @@ import {
 } from "@/components/ui/control-geometry";
 import type { Theme } from "@/styles/theme";
 
-type SegmentedControlIconRenderer = (props: { color: string; size: number }) => ReactNode;
+type SegmentedControlIcon = ComponentType<{ color: string; size: number }>;
 
 export interface SegmentedControlOption<T extends string> {
   value: T;
   label: string;
-  icon?: SegmentedControlIconRenderer;
+  icon?: SegmentedControlIcon;
   disabled?: boolean;
   testID?: string;
 }
@@ -30,13 +30,18 @@ interface SegmentedControlProps<T extends string> {
 }
 
 interface SegmentIconProps {
-  icon: SegmentedControlIconRenderer;
+  icon: SegmentedControlIcon;
   iconSize: number;
   iconColor: string;
 }
 
 function SegmentIcon({ icon, iconSize, iconColor }: SegmentIconProps) {
-  return <View style={styles.iconContainer}>{icon({ color: iconColor, size: iconSize })}</View>;
+  const Icon = icon;
+  return (
+    <View style={styles.iconContainer}>
+      <Icon color={iconColor} size={iconSize} />
+    </View>
+  );
 }
 
 const ThemedSegmentIcon = withUnistyles(SegmentIcon);
