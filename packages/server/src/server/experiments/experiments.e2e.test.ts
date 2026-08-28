@@ -20,11 +20,16 @@ describe("project Experiments", () => {
       expect(added.project).not.toBeNull();
       projectId = added.project!.projectId;
 
+      const caller = await ctx.client.createAgent({
+        config: { provider: "codex", cwd: projectRoot },
+      });
+
       const created = await ctx.client.createExperiment({
         projectId,
         shortDescription: "Compare router training schedules",
         description: "Find a stable schedule for the router model.",
         goal: "router architecture",
+        callerAgentId: caller.id,
       });
       expect(created.experiment.goal).toBe("router architecture");
       expect(created.experiment.id).toMatch(/^exp_/);
@@ -57,8 +62,16 @@ describe("project Experiments", () => {
           progressRegex: "step=(?<current>\\d+) phase=(?<phase>\\w+)",
           endRegex: "training completed",
         },
+        callerAgentId: caller.id,
       });
       const attempt = attemptResult.attempt;
+      expect((await ctx.daemon.daemon.agentStorage.get(caller.id))?.experimentTouches).toEqual([
+        {
+          experiment: created.experiment.id,
+          attempt: attempt.id,
+          lastTouchedAt: expect.any(String),
+        },
+      ]);
 
       const first = await ctx.client.refreshExperimentProgress({ projectId, attempt: attempt.id });
       expect(first.observation).toMatchObject({

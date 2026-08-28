@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -21,6 +22,9 @@ describe("orchestration skill paths", () => {
     );
 
     expect(resolveBundledSkillsDir()).toBe(path.join(repositoryRoot, "skills"));
+    expect(existsSync(path.join(resolveBundledSkillsDir(), "track-experiments", "SKILL.md"))).toBe(
+      true,
+    );
   });
 
   it("finds the catalog beside the actual emitted server layout", async () => {

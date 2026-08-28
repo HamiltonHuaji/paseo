@@ -659,6 +659,32 @@ class FailingResumeClient extends NonPersistentReloadClient {
   }
 }
 
+class HistoryFailingReloadSession extends FailingResumeSession {
+  override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+    yield* [];
+    throw new Error("history refresh exploded");
+  }
+}
+
+class HistoryFailingReloadClient extends NonPersistentReloadClient {
+  async createSession(_config: AgentSessionConfig): Promise<AgentSession> {
+    this.createSessionCalls += 1;
+    return new FailingResumeSession(() => {
+      this.closeCalls += 1;
+    });
+  }
+
+  async resumeSession(
+    _handle: AgentPersistenceHandle,
+    _overrides?: Partial<AgentSessionConfig>,
+  ): Promise<AgentSession> {
+    this.resumeSessionCalls += 1;
+    return new HistoryFailingReloadSession(() => {
+      this.closeCalls += 1;
+    });
+  }
+}
+
 function resolveSpeechConfig() {
   if (hasLocalSpeech) {
     return {
@@ -907,6 +933,36 @@ test("refresh_agent rejects when persisted session resume fails", async () => {
       requestType: "refresh_agent_request",
     });
     expect(client.resumeSessionCalls).toBe(1);
+  } finally {
+    await localCtx.cleanup();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("refresh_agent succeeds when replacement history refresh fails", async () => {
+  const cwd = tmpCwd();
+  const client = new HistoryFailingReloadClient();
+  const localCtx = await createDaemonTestContext({
+    agentClients: {
+      claude: client,
+    },
+  });
+
+  try {
+    const created = await localCtx.client.createAgent({
+      config: {
+        provider: "claude",
+        cwd,
+      },
+    });
+
+    await expect(localCtx.client.refreshAgent(created.id)).resolves.toMatchObject({
+      status: "agent_refreshed",
+      agentId: created.id,
+    });
+    expect(client.resumeSessionCalls).toBe(1);
+    expect(client.closeCalls).toBe(1);
+    expect((await localCtx.client.fetchAgent({ agentId: created.id }))?.agent.status).toBe("idle");
   } finally {
     await localCtx.cleanup();
     rmSync(cwd, { recursive: true, force: true });

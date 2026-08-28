@@ -3891,7 +3891,7 @@ test("reloadAgentSession preserves timeline and does not force history replay", 
   expect(afterHydrate).toEqual(beforeReload);
 });
 
-test("reloadAgentSession clears provider children before rehydrating from disk", async () => {
+test("forced history refresh clears provider children after reload", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provider-child-reload-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
   let activeSession: TestAgentSession | null = null;
@@ -3927,7 +3927,12 @@ test("reloadAgentSession clears provider children before rehydrating from disk",
   });
   await vi.waitFor(() => expect(manager.listProviderSubagents(snapshot.id)).toHaveLength(1));
 
-  await manager.reloadAgentSession(snapshot.id, undefined, { rehydrateFromDisk: true });
+  await manager.reloadAgentSession(snapshot.id);
+  expect(manager.listProviderSubagents(snapshot.id)).toEqual([
+    expect.objectContaining({ id: "stale-child", status: "canceled" }),
+  ]);
+
+  await manager.hydrateTimelineFromProvider(snapshot.id, { force: true });
 
   expect(manager.listProviderSubagents(snapshot.id)).toEqual([]);
 });

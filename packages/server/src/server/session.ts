@@ -2546,10 +2546,27 @@ export class Session {
     this.emit({ type: "experiment.get.response", payload: { requestId: msg.requestId, detail } });
   }
 
+  private async touchExperimentForCaller(
+    callerAgentId: string | undefined,
+    experiment: string,
+    attempt: string | null,
+  ): Promise<void> {
+    if (!callerAgentId) return;
+    try {
+      await this.agentStorage.touchExperiment(callerAgentId, experiment, attempt);
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, callerAgentId, experiment, attempt },
+        "Failed to record Experiment caller engagement",
+      );
+    }
+  }
+
   private async handleExperimentCreate(
     msg: Extract<SessionInboundMessage, { type: "experiment.create.request" }>,
   ): Promise<void> {
     const experiment = await this.experimentService.createExperiment(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, experiment.id, null);
     this.emit({
       type: "experiment.create.response",
       payload: { requestId: msg.requestId, experiment },
@@ -2560,6 +2577,7 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "experiment.update.request" }>,
   ): Promise<void> {
     const experiment = await this.experimentService.updateExperiment(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, experiment.id, null);
     this.emit({
       type: "experiment.update.response",
       payload: { requestId: msg.requestId, experiment },
@@ -2570,6 +2588,7 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "experiment.attempt.create.request" }>,
   ): Promise<void> {
     const attempt = await this.experimentService.createAttempt(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, attempt.experiment, attempt.id);
     this.emit({
       type: "experiment.attempt.create.response",
       payload: { requestId: msg.requestId, attempt },
@@ -2580,6 +2599,7 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "experiment.attempt.update.request" }>,
   ): Promise<void> {
     const attempt = await this.experimentService.updateAttempt(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, attempt.experiment, attempt.id);
     this.emit({
       type: "experiment.attempt.update.response",
       payload: { requestId: msg.requestId, attempt },
@@ -3978,11 +3998,11 @@ export class Session {
       await unarchiveAgentState(this.agentStorage, this.agentManager, agentId);
       let snapshot: ManagedAgent;
       const existing = this.agentManager.getAgent(agentId);
+      let forceHistoryRefresh = false;
       if (existing) {
         await this.interruptAgentIfRunning(agentId);
-        snapshot = await this.agentManager.reloadAgentSession(agentId, undefined, {
-          rehydrateFromDisk: true,
-        });
+        snapshot = await this.agentManager.reloadAgentSession(agentId);
+        forceHistoryRefresh = true;
       } else {
         const record = await this.agentStorage.get(agentId);
         if (!record) {
@@ -4005,7 +4025,31 @@ export class Session {
           logger: this.sessionLogger,
         });
       }
-      await this.agentManager.hydrateTimelineFromProvider(agentId, { broadcast: true });
+      try {
+        await this.agentManager.hydrateTimelineFromProvider(agentId, {
+          broadcast: true,
+          force: forceHistoryRefresh,
+        });
+      } catch (error) {
+        // The provider process has already been replaced successfully. Forced
+        // hydration gathers history before replacing the old timeline, so a
+        // failure leaves the usable replacement session and timeline intact.
+        const message = getErrorMessage(error);
+        this.sessionLogger.warn(
+          { err: error, agentId },
+          `Agent ${agentId} reloaded, but provider history refresh failed`,
+        );
+        this.emit({
+          type: "activity_log",
+          payload: {
+            id: uuidv4(),
+            timestamp: new Date(),
+            type: "system",
+            content: `Agent reloaded, but provider history could not be refreshed: ${message}`,
+            metadata: { severity: "warning" },
+          },
+        });
+      }
       await this.agentUpdates.forwardLiveAgent(snapshot);
       const timelineSize = this.agentManager.getTimeline(agentId).length;
       if (requestId) {

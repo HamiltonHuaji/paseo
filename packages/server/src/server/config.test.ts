@@ -40,6 +40,20 @@ describe("server config", () => {
     expect(config.providerCatalogRefreshTimeoutMs).toBe(180_000);
   });
 
+  test("injects Paseo tools by default and respects an explicit opt-out", async () => {
+    const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-config-mcp-injection-"));
+    roots.push(paseoHome);
+
+    expect(loadConfig(paseoHome, { env: {} }).mcpInjectIntoAgents).toBe(true);
+
+    await writeFile(
+      path.join(paseoHome, "config.json"),
+      JSON.stringify({ version: 1, daemon: { mcp: { injectIntoAgents: false } } }),
+    );
+
+    expect(loadConfig(paseoHome, { env: {} }).mcpInjectIntoAgents).toBe(false);
+  });
+
   test("resolves reload state from the supplied validated snapshot", async () => {
     const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-config-snapshot-"));
     roots.push(paseoHome);

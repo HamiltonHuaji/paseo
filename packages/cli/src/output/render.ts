@@ -49,16 +49,24 @@ export function render<T>(
 
 /** Convert an unknown error to a CommandError */
 export function toCommandError(error: unknown): CommandError {
-  if (isCommandError(error)) {
-    return error;
+  if (error instanceof Error) {
+    const code = "code" in error && typeof error.code === "string" ? error.code : "UNKNOWN_ERROR";
+    const metadata = Object.fromEntries(Object.entries(error).filter(([key]) => key !== "code"));
+    let details: unknown;
+    if (Object.keys(metadata).length > 0) {
+      details = metadata;
+    } else if (error.stack) {
+      details = error.stack;
+    }
+    return {
+      code,
+      message: error.message,
+      ...(details !== undefined ? { details } : {}),
+    };
   }
 
-  if (error instanceof Error) {
-    return {
-      code: "UNKNOWN_ERROR",
-      message: error.message,
-      details: error.stack,
-    };
+  if (isCommandError(error)) {
+    return error;
   }
 
   return {
