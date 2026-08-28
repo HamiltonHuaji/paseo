@@ -220,7 +220,9 @@ export async function serializeSnapshotWithMetadata(
 ) {
   const metadata = await resolveAgentMetadata(agentStorage, snapshot.id, logger);
   const payload = serializeAgentSnapshot(snapshot, { title: metadata.title });
-  payload.experimentTouches = metadata.experimentTouches;
+  if (metadata.experimentTouches !== undefined) {
+    payload.experimentTouches = metadata.experimentTouches;
+  }
   return payload;
 }
 
