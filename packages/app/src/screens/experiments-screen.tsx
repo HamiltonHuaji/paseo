@@ -78,7 +78,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   const [selectedExperiment, setSelectedExperiment] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [viewMode, setViewMode] = useState<ExperimentViewMode>("list");
-  const canvasExpanded = viewMode === "canvas" && selectedExperiment === null;
+  const canvasMode = viewMode === "canvas";
   const experiments = listQuery.data ?? EMPTY_EXPERIMENTS;
   const detailQueries = useFetchQueries<ExperimentDetail>(
     experiments.map((experiment) => ({
@@ -211,7 +211,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
     <View style={styles.container}>
       <MenuHeader title="Experiments" rightContent={headerAction} />
       <ScrollView
-        contentContainerStyle={[styles.content, optionalStyle(canvasExpanded, styles.contentFill)]}
+        contentContainerStyle={[styles.content, optionalStyle(canvasMode, styles.contentFill)]}
       >
         {!connected ? <Message text="Host is offline." /> : null}
         {listQuery.isLoading ? <ThemedLoadingSpinner /> : null}
@@ -219,7 +219,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
         {groups.length === 0 && !listQuery.isLoading && !listQuery.error ? (
           <Message text="No experiments in this project." />
         ) : null}
-        <View style={[styles.board, optionalStyle(canvasExpanded, styles.boardFill)]}>
+        <View style={[styles.board, optionalStyle(canvasMode, styles.boardFill)]}>
           {viewMode === "list" ? (
             <View style={styles.listColumn}>
               {groups.map(([goal, goalExperiments]) => (
@@ -246,9 +246,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
               ))}
             </View>
           ) : (
-            <View
-              style={[styles.canvasColumn, optionalStyle(canvasExpanded, styles.canvasColumnFill)]}
-            >
+            <View style={[styles.canvasColumn, optionalStyle(canvasMode, styles.canvasColumnFill)]}>
               {boardLayoutQuery.error ? (
                 <Message text={errorMessage(boardLayoutQuery.error)} error />
               ) : null}
@@ -257,7 +255,6 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
                 detailByExperiment={detailByExperiment}
                 storedPlacements={boardLayoutQuery.data ?? []}
                 selectedExperiment={selectedExperiment}
-                fillAvailableHeight={canvasExpanded}
                 onSelectExperiment={setSelectedExperiment}
                 onClearSelection={clearSelection}
                 onPersistPlacement={persistPlacement}
