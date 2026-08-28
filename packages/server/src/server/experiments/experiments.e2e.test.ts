@@ -48,12 +48,24 @@ describe("project Experiments", () => {
         jobId: "81273",
         outputDir,
         progressPlan: {
-          unit: "step",
+          unit: "effective-frame",
           total: 500,
-          segments: [
-            { label: "short", start: 0, end: 100 },
-            { label: "mixed", start: 100, end: 300 },
-            { label: "long", start: 300, end: 500 },
+          tracks: [
+            {
+              label: "data",
+              segments: [
+                { label: "short", start: 0, end: 100 },
+                { label: "mixed", start: 100, end: 300 },
+                { label: "long", start: 300, end: 500 },
+              ],
+            },
+            {
+              label: "noise",
+              segments: [
+                { label: "pure", start: 0, end: 200 },
+                { label: "shifted", start: 200, end: 500 },
+              ],
+            },
           ],
         },
         progressSource: {
@@ -65,6 +77,27 @@ describe("project Experiments", () => {
         callerAgentId: caller.id,
       });
       const attempt = attemptResult.attempt;
+      await expect(
+        ctx.client.createExperimentAttempt({
+          projectId,
+          experiment: created.experiment.id,
+          shortDescription: "Invalid overlapping schedule",
+          purpose: "Verify per-track schedule validation.",
+          progressPlan: {
+            unit: "effective-frame",
+            total: 500,
+            tracks: [
+              {
+                label: "data",
+                segments: [
+                  { label: "first", start: 0, end: 300 },
+                  { label: "overlap", start: 200, end: 500 },
+                ],
+              },
+            ],
+          },
+        }),
+      ).rejects.toThrow("Progress segments in each track must be ordered, non-overlapping");
       expect((await ctx.daemon.daemon.agentStorage.get(caller.id))?.experimentTouches).toEqual([
         {
           experiment: created.experiment.id,
@@ -81,6 +114,47 @@ describe("project Experiments", () => {
         phase: "mixed",
       });
       expect(first.nextRefreshAfterMs).toBeGreaterThan(0);
+
+      const defaultLayout = await ctx.client.updateExperimentBoardLayout({
+        projectId,
+        placements: [
+          {
+            experiment: created.experiment.id,
+            column: null,
+            row: null,
+            width: null,
+            height: null,
+          },
+        ],
+      });
+      expect(defaultLayout.placements[0]).toMatchObject({
+        experiment: created.experiment.id,
+        column: null,
+      });
+      const placed = await ctx.client.updateExperimentBoardLayout({
+        projectId,
+        placements: [
+          {
+            experiment: created.experiment.id,
+            column: 4,
+            row: 7,
+            width: 12,
+            height: 8,
+          },
+        ],
+      });
+      expect(placed.placements[0]).toMatchObject({ column: 4, row: 7, width: 12, height: 8 });
+      await expect(ctx.client.getExperimentBoardLayout({ projectId })).resolves.toMatchObject({
+        placements: [
+          {
+            experiment: created.experiment.id,
+            column: 4,
+            row: 7,
+            width: 12,
+            height: 8,
+          },
+        ],
+      });
 
       await writeFile(
         logPath,

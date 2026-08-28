@@ -8,6 +8,10 @@ import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
 import { WORKSPACE_LABEL_COLORS } from "./workspace-labels.js";
 import {
   AgentExperimentTouchSchema,
+  ExperimentBoardLayoutGetRequestSchema,
+  ExperimentBoardLayoutGetResponseSchema,
+  ExperimentBoardLayoutUpdateRequestSchema,
+  ExperimentBoardLayoutUpdateResponseSchema,
   ExperimentAttemptCreateRequestSchema,
   ExperimentAttemptCreateResponseSchema,
   ExperimentAttemptUpdateRequestSchema,
@@ -3009,6 +3013,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ExperimentUpdateRequestSchema,
   ExperimentAttemptCreateRequestSchema,
   ExperimentAttemptUpdateRequestSchema,
+  ExperimentBoardLayoutGetRequestSchema,
+  ExperimentBoardLayoutUpdateRequestSchema,
   ExperimentProgressRefreshRequestSchema,
   ExperimentStorageResolveRequestSchema,
   ExperimentViewerConfigureRequestSchema,
@@ -6256,6 +6262,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ExperimentUpdateResponseSchema,
   ExperimentAttemptCreateResponseSchema,
   ExperimentAttemptUpdateResponseSchema,
+  ExperimentBoardLayoutGetResponseSchema,
+  ExperimentBoardLayoutUpdateResponseSchema,
   ExperimentProgressRefreshResponseSchema,
   ExperimentStorageResolveResponseSchema,
   ExperimentViewerConfigureResponseSchema,

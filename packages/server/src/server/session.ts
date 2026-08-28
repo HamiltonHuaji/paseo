@@ -2479,6 +2479,10 @@ export class Session {
         return this.handleExperimentAttemptUpdate(msg);
       case "experiment.attempt.progress.refresh.request":
         return this.handleExperimentProgressRefresh(msg);
+      case "experiment.board.layout.get.request":
+        return this.handleExperimentBoardLayoutGet(msg);
+      case "experiment.board.layout.update.request":
+        return this.handleExperimentBoardLayoutUpdate(msg);
       case "experiment.storage.resolve.request":
         return this.handleExperimentStorageResolve(msg);
       case "experiment.viewer.configure.request":
@@ -2613,6 +2617,29 @@ export class Session {
     this.emit({
       type: "experiment.attempt.progress.refresh.response",
       payload: { requestId: msg.requestId, ...result },
+    });
+  }
+
+  private async handleExperimentBoardLayoutGet(
+    msg: Extract<SessionInboundMessage, { type: "experiment.board.layout.get.request" }>,
+  ): Promise<void> {
+    const placements = await this.experimentService.getBoardLayout(msg.projectId);
+    this.emit({
+      type: "experiment.board.layout.get.response",
+      payload: { requestId: msg.requestId, placements },
+    });
+  }
+
+  private async handleExperimentBoardLayoutUpdate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.board.layout.update.request" }>,
+  ): Promise<void> {
+    const placements = await this.experimentService.updateBoardLayout(
+      msg.projectId,
+      msg.placements,
+    );
+    this.emit({
+      type: "experiment.board.layout.update.response",
+      payload: { requestId: msg.requestId, placements },
     });
   }
 

@@ -734,6 +734,14 @@ export type ExperimentProgressRefreshPayload = Extract<
   SessionOutboundMessage,
   { type: "experiment.attempt.progress.refresh.response" }
 >["payload"];
+export type ExperimentBoardLayoutGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.board.layout.get.response" }
+>["payload"];
+export type ExperimentBoardLayoutUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.board.layout.update.response" }
+>["payload"];
 export type ExperimentStorageResolvePayload = Extract<
   SessionOutboundMessage,
   { type: "experiment.storage.resolve.response" }
@@ -2403,6 +2411,32 @@ export class DaemonClient {
         projectId: options.projectId,
         attempt: options.attempt,
       },
+    });
+  }
+
+  getExperimentBoardLayout(options: {
+    projectId: string;
+    requestId?: string;
+  }): Promise<ExperimentBoardLayoutGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.board.layout.get.request",
+        projectId: options.projectId,
+      },
+    });
+  }
+
+  updateExperimentBoardLayout(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.board.layout.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentBoardLayoutUpdatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.board.layout.update.request", ...input },
     });
   }
 
