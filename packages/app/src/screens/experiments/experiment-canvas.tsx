@@ -2,11 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PanResponder,
   Pressable,
-  ScrollView,
   Text,
   View,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+  type LayoutChangeEvent,
   type PointerEvent as RNPointerEvent,
   type ViewStyle,
 } from "react-native";
@@ -33,12 +31,16 @@ import {
 } from "./experiment-canvas-layout";
 
 const GRID_SIZE = EXPERIMENT_CANVAS_GRID_SIZE;
-const PAN_MARGIN = GRID_SIZE * 12;
 const MIN_WIDTH = 9;
 const MIN_HEIGHT = 6;
 const ThemedGrip = withUnistyles(Grip);
 const ThemedMaximize2 = withUnistyles(Maximize2);
 const mutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
+
+interface CanvasCamera {
+  x: number;
+  y: number;
+}
 
 interface ExperimentCanvasProps {
   experiments: ExperimentRecord[];
@@ -68,9 +70,10 @@ export function ExperimentCanvas({
     [detailByExperiment, experiments],
   );
   const [localPlacements, setLocalPlacements] = useState<Record<string, ResolvedPlacement>>({});
-  const horizontalScrollRef = useRef<ScrollView>(null);
-  const verticalScrollRef = useRef<ScrollView>(null);
-  const scrollOffsetRef = useRef({ x: 0, y: 0 });
+  const [camera, setCameraState] = useState<CanvasCamera>({ x: 0, y: 0 });
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const cameraRef = useRef(camera);
+  const viewportRef = useRef<View>(null);
   const panOriginRef = useRef({ x: 0, y: 0 });
   const placements = useMemo(
     () =>
@@ -84,29 +87,11 @@ export function ExperimentCanvas({
       ),
     [automatic, experiments, localPlacements, persisted],
   );
-  const measuredDimensions = useMemo(() => canvasDimensions(placements), [placements]);
-  // A shrinking bottom edge changes the outer ScrollView offset while its last card is dragged.
-  const [minimumDimensions, setMinimumDimensions] = useState(measuredDimensions);
-  const dimensions = useMemo(
-    () => ({
-      width: Math.max(measuredDimensions.width, minimumDimensions.width),
-      height: Math.max(measuredDimensions.height, minimumDimensions.height),
-    }),
-    [measuredDimensions, minimumDimensions],
-  );
-  const surfaceDimensions = useMemo(
-    () => ({
-      width: dimensions.width + PAN_MARGIN * 2,
-      height: dimensions.height + PAN_MARGIN * 2,
-    }),
-    [dimensions.height, dimensions.width],
-  );
-  useEffect(() => {
-    setMinimumDimensions((current) => ({
-      width: Math.max(current.width, measuredDimensions.width),
-      height: Math.max(current.height, measuredDimensions.height),
-    }));
-  }, [measuredDimensions.height, measuredDimensions.width]);
+  const worldDimensions = useMemo(() => canvasDimensions(placements), [placements]);
+  const updateCamera = useCallback((next: CanvasCamera) => {
+    cameraRef.current = next;
+    setCameraState(next);
+  }, []);
   const previewPlacement = useCallback((placement: ResolvedPlacement) => {
     setLocalPlacements((current) => ({ ...current, [placement.experiment]: placement }));
   }, []);
@@ -117,36 +102,35 @@ export function ExperimentCanvas({
     },
     [onPersistPlacement, previewPlacement],
   );
-  const canvasStyle = useMemo(
+  const worldStyle = useMemo(
     () => [
-      styles.canvas,
-      geometryStyle({ width: surfaceDimensions.width, height: surfaceDimensions.height }),
-    ],
-    [surfaceDimensions.height, surfaceDimensions.width],
-  );
-  const contentLayerStyle = useMemo(
-    () => [
-      styles.contentLayer,
+      styles.world,
       geometryStyle({
-        left: PAN_MARGIN,
-        top: PAN_MARGIN,
-        width: dimensions.width,
-        height: dimensions.height,
+        width: worldDimensions.width,
+        height: worldDimensions.height,
+        transform: [{ translateX: camera.x }, { translateY: camera.y }],
       }),
     ],
-    [dimensions.height, dimensions.width],
+    [camera.x, camera.y, worldDimensions.height, worldDimensions.width],
   );
-  const handleHorizontalScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollOffsetRef.current.x = event.nativeEvent.contentOffset.x;
-  }, []);
-  const handleVerticalScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollOffsetRef.current.y = event.nativeEvent.contentOffset.y;
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setViewportSize((current) =>
+      current.width === width && current.height === height ? current : { width, height },
+    );
   }, []);
   useEffect(() => {
-    scrollOffsetRef.current = { x: PAN_MARGIN, y: PAN_MARGIN };
-    horizontalScrollRef.current?.scrollTo({ x: PAN_MARGIN, animated: false });
-    verticalScrollRef.current?.scrollTo({ y: PAN_MARGIN, animated: false });
-  }, []);
+    if (!isWeb) return;
+    const element = viewportRef.current as unknown as HTMLElement | null;
+    if (!element) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (event.cancelable) event.preventDefault();
+      const current = cameraRef.current;
+      updateCamera({ x: current.x - event.deltaX, y: current.y - event.deltaY });
+    };
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => element.removeEventListener("wheel", handleWheel);
+  }, [updateCamera]);
   const canvasPanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -154,33 +138,25 @@ export function ExperimentCanvas({
         onMoveShouldSetPanResponder: (_, gesture) =>
           Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
         onPanResponderGrant: () => {
-          panOriginRef.current = { ...scrollOffsetRef.current };
+          panOriginRef.current = { ...cameraRef.current };
         },
         onPanResponderMove: (_, gesture) => {
-          horizontalScrollRef.current?.scrollTo({
-            x: Math.max(0, panOriginRef.current.x - gesture.dx),
-            animated: false,
-          });
-          verticalScrollRef.current?.scrollTo({
-            y: Math.max(0, panOriginRef.current.y - gesture.dy),
-            animated: false,
+          updateCamera({
+            x: panOriginRef.current.x + gesture.dx,
+            y: panOriginRef.current.y + gesture.dy,
           });
         },
       }),
-    [],
+    [updateCamera],
   );
   const handleCanvasPointerDown = useWebPointerDrag({
     onGrant: () => {
-      panOriginRef.current = { ...scrollOffsetRef.current };
+      panOriginRef.current = { ...cameraRef.current };
     },
     onMove: ({ dx, dy }) => {
-      horizontalScrollRef.current?.scrollTo({
-        x: Math.max(0, panOriginRef.current.x - dx),
-        animated: false,
-      });
-      verticalScrollRef.current?.scrollTo({
-        y: Math.max(0, panOriginRef.current.y - dy),
-        animated: false,
+      updateCamera({
+        x: panOriginRef.current.x + dx,
+        y: panOriginRef.current.y + dy,
       });
     },
     onRelease: ({ dx, dy }) => {
@@ -189,55 +165,39 @@ export function ExperimentCanvas({
   });
 
   return (
-    <ScrollView
-      ref={verticalScrollRef}
-      style={styles.viewport}
-      contentContainerStyle={styles.verticalViewportContent}
-      onScroll={handleVerticalScroll}
-      scrollEventThrottle={16}
-    >
-      <ScrollView
-        ref={horizontalScrollRef}
-        horizontal
-        contentContainerStyle={styles.viewportContent}
-        onScroll={handleHorizontalScroll}
-        scrollEventThrottle={16}
-      >
-        <View style={canvasStyle}>
-          <View
-            style={styles.panSurface}
-            onPointerDown={handleCanvasPointerDown}
-            {...(!isWeb ? canvasPanResponder.panHandlers : {})}
-          />
-          <GridLines width={surfaceDimensions.width} height={surfaceDimensions.height} />
-          <View pointerEvents="box-none" style={contentLayerStyle}>
-            <ThemedLineageOverlay
-              experiments={experiments}
-              placements={placements}
-              width={dimensions.width}
-              height={dimensions.height}
-              uniProps={lineagePaletteMapping}
+    <View ref={viewportRef} style={styles.viewport} onLayout={handleLayout}>
+      <GridLines width={viewportSize.width} height={viewportSize.height} camera={camera} />
+      <View
+        style={styles.panSurface}
+        onPointerDown={handleCanvasPointerDown}
+        {...(!isWeb ? canvasPanResponder.panHandlers : {})}
+      />
+      <View pointerEvents="box-none" style={worldStyle}>
+        <ThemedLineageOverlay
+          experiments={experiments}
+          placements={placements}
+          width={worldDimensions.width}
+          height={worldDimensions.height}
+          uniProps={lineagePaletteMapping}
+        />
+        {experiments.map((experiment) => {
+          const placement = placements.get(experiment.id);
+          if (!placement) return null;
+          return (
+            <CanvasCard
+              key={experiment.id}
+              experiment={experiment}
+              detail={detailByExperiment.get(experiment.id) ?? null}
+              placement={placement}
+              selected={experiment.id === selectedExperiment}
+              onSelect={onSelectExperiment}
+              onPreviewPlacement={previewPlacement}
+              onCommitPlacement={commitPlacement}
             />
-            {experiments.map((experiment) => {
-              const placement = placements.get(experiment.id);
-              if (!placement) return null;
-              return (
-                <CanvasCard
-                  key={experiment.id}
-                  experiment={experiment}
-                  detail={detailByExperiment.get(experiment.id) ?? null}
-                  placement={placement}
-                  selected={experiment.id === selectedExperiment}
-                  onSelect={onSelectExperiment}
-                  onPreviewPlacement={previewPlacement}
-                  onCommitPlacement={commitPlacement}
-                />
-              );
-            })}
-          </View>
-        </View>
-      </ScrollView>
-    </ScrollView>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -398,25 +358,37 @@ function CanvasCard({
   );
 }
 
-function GridLines({ width, height }: { width: number; height: number }) {
-  const columns = Math.ceil(width / GRID_SIZE);
-  const rows = Math.ceil(height / GRID_SIZE);
+function GridLines({
+  width,
+  height,
+  camera,
+}: {
+  width: number;
+  height: number;
+  camera: CanvasCamera;
+}) {
+  const verticalLines = gridLinePositions(width, camera.x);
+  const horizontalLines = gridLinePositions(height, camera.y);
   return (
     <View style={styles.grid} pointerEvents="none">
-      {Array.from({ length: columns + 1 }, (_, index) => (
-        <View
-          key={`column:${index}`}
-          style={[styles.gridVertical, geometryStyle({ left: index * GRID_SIZE })]}
-        />
+      {verticalLines.map((left) => (
+        <View key={`column:${left}`} style={[styles.gridVertical, geometryStyle({ left })]} />
       ))}
-      {Array.from({ length: rows + 1 }, (_, index) => (
-        <View
-          key={`row:${index}`}
-          style={[styles.gridHorizontal, geometryStyle({ top: index * GRID_SIZE })]}
-        />
+      {horizontalLines.map((top) => (
+        <View key={`row:${top}`} style={[styles.gridHorizontal, geometryStyle({ top })]} />
       ))}
     </View>
   );
+}
+
+function gridLinePositions(viewportLength: number, cameraOffset: number): number[] {
+  const first = positiveModulo(cameraOffset, GRID_SIZE) - GRID_SIZE;
+  const count = Math.ceil(viewportLength / GRID_SIZE) + 2;
+  return Array.from({ length: count }, (_, index) => first + index * GRID_SIZE);
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 interface LineageOverlayProps {
@@ -628,12 +600,10 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface0,
+    overflow: "hidden",
   },
-  verticalViewportContent: { alignItems: "flex-start" },
-  viewportContent: { alignItems: "flex-start" },
-  canvas: { position: "relative", backgroundColor: theme.colors.surface0 },
   panSurface: { ...StyleSheet.absoluteFillObject, zIndex: 1 },
-  contentLayer: { position: "absolute", zIndex: 2 },
+  world: { position: "absolute", left: 0, top: 0, zIndex: 2 },
   grid: { ...StyleSheet.absoluteFillObject },
   gridVertical: {
     position: "absolute",
