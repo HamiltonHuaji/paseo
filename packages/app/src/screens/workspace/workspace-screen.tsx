@@ -40,6 +40,7 @@ import { RetainedPanel } from "@/components/retained-panel";
 import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/screens/workspace/workspace-open-in-editor-button";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
+import { WorkspaceExperimentsButton } from "@/screens/workspace/workspace-experiments-button";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
 import { useToast } from "@/contexts/toast-context";
 import { getOrCreateClientId } from "@/utils/client-id";
@@ -189,7 +190,12 @@ import { findAdjacentPane } from "@/utils/split-navigation";
 import { supportsDesktopPaneSplits, useIsCompactFormFactor } from "@/constants/layout";
 import { getIsElectron, isNative, isWeb } from "@/constants/platform";
 import type { SurfaceBackdrop } from "@/styles/surface-backdrop";
-import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
+import {
+  buildHostExperimentsRoute,
+  buildHostRootRoute,
+  buildSettingsHostRoute,
+} from "@/utils/host-routes";
+import { useHostFeature } from "@/runtime/host-features";
 import { useWorkspaceTerminals } from "@/screens/workspace/terminals/use-workspace-terminals";
 import type { TerminalProfile } from "@getpaseo/protocol/messages";
 import {
@@ -216,6 +222,26 @@ function getWorkspaceScripts(
   workspaceDescriptor: WorkspaceDescriptor | null | undefined,
 ): WorkspaceDescriptor["scripts"] {
   return workspaceDescriptor?.scripts ?? EMPTY_WORKSPACE_SCRIPTS;
+}
+
+function getWorkspaceProjectId(
+  workspaceDescriptor: WorkspaceDescriptor | null | undefined,
+): string | undefined {
+  return workspaceDescriptor?.projectId;
+}
+
+function useWorkspaceExperimentsAction(serverId: string, projectId: string | undefined) {
+  const supportsExperiments = useHostFeature(serverId, "experiments");
+  const router = useRouter();
+  const route = useMemo(
+    () =>
+      supportsExperiments && projectId ? buildHostExperimentsRoute(serverId, projectId) : null,
+    [projectId, serverId, supportsExperiments],
+  );
+  const onPress = useCallback(() => {
+    if (route) router.push(route);
+  }, [route, router]);
+  return { onPress, visible: route !== null };
 }
 
 interface WorkspaceFileLocationFields {
@@ -979,6 +1005,7 @@ interface WorkspaceHeaderTitleBarProps {
   normalizedWorkspaceId: string;
   workspaceScripts: WorkspaceDescriptor["scripts"];
   liveTerminalIds: string[];
+  showExperiments: boolean;
   showWorkspaceSetup: boolean;
   showCreateBrowserTab: boolean;
   isMobile: boolean;
@@ -996,6 +1023,7 @@ interface WorkspaceHeaderTitleBarProps {
   onScriptTerminalStarted: (terminalId: string) => void;
   onViewScriptTerminal: (terminalId: string) => void;
   onOpenUrlInBrowserTab: (url: string) => void;
+  onOpenExperiments: () => void;
 }
 
 function WorkspaceHeaderTitleBar({
@@ -1008,6 +1036,7 @@ function WorkspaceHeaderTitleBar({
   normalizedWorkspaceId,
   workspaceScripts,
   liveTerminalIds,
+  showExperiments,
   showWorkspaceSetup,
   showCreateBrowserTab,
   isMobile,
@@ -1025,6 +1054,7 @@ function WorkspaceHeaderTitleBar({
   onScriptTerminalStarted,
   onViewScriptTerminal,
   onOpenUrlInBrowserTab,
+  onOpenExperiments,
 }: WorkspaceHeaderTitleBarProps) {
   return (
     <View style={styles.headerTitleContainer}>
@@ -1085,6 +1115,9 @@ function WorkspaceHeaderTitleBar({
             hideLabels
             presentation="ghost"
           />
+        ) : null}
+        {isMobile && showExperiments ? (
+          <WorkspaceExperimentsButton onPress={onOpenExperiments} mobile />
         ) : null}
       </View>
     </View>
@@ -1578,6 +1611,8 @@ function WorkspaceScreenContent({
   );
   const workspaceDescriptor = useWorkspace(normalizedServerId, normalizedWorkspaceId);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
+  const { onPress: handleOpenExperiments, visible: showExperiments } =
+    useWorkspaceExperimentsAction(normalizedServerId, getWorkspaceProjectId(workspaceDescriptor));
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
 
@@ -3738,6 +3773,11 @@ function WorkspaceScreenContent({
             hideLabels
           />
         ) : null}
+        <WorkspaceExperimentsButton
+          onPress={handleOpenExperiments}
+          visible={showExperiments}
+          hidden={isMobile}
+        />
         {!isMobile && workspaceDirectory ? (
           <WorkspaceOpenInEditorButton
             serverId={normalizedServerId}
@@ -3783,6 +3823,8 @@ function WorkspaceScreenContent({
       handleScriptTerminalStarted,
       handleViewScriptTerminal,
       handleOpenUrlInBrowserTab,
+      handleOpenExperiments,
+      showExperiments,
       handleToggleExplorerSidebar,
       explorerSidebarToggleLabel,
       explorerSidebarToggleAccessibilityState,
@@ -3862,6 +3904,7 @@ function WorkspaceScreenContent({
                 normalizedWorkspaceId={normalizedWorkspaceId}
                 workspaceScripts={workspaceScripts}
                 liveTerminalIds={liveTerminalIds}
+                showExperiments={showExperiments}
                 showWorkspaceSetup={showWorkspaceSetup}
                 showCreateBrowserTab={showCreateBrowserTab}
                 isMobile={isMobile}
@@ -3879,6 +3922,7 @@ function WorkspaceScreenContent({
                 onScriptTerminalStarted={handleScriptTerminalStarted}
                 onViewScriptTerminal={handleViewScriptTerminal}
                 onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+                onOpenExperiments={handleOpenExperiments}
               />
             </>
           }
@@ -3897,6 +3941,7 @@ function WorkspaceScreenContent({
       handleCreateTerminalWithProfile,
       handleOpenSetupTab,
       handleOpenUrlInBrowserTab,
+      handleOpenExperiments,
       handleScriptTerminalStarted,
       handleViewScriptTerminal,
       headerRight,
@@ -3907,6 +3952,7 @@ function WorkspaceScreenContent({
       normalizedWorkspaceId,
       openImportSheet,
       showCreateBrowserTab,
+      showExperiments,
       showScreenHeader,
       showWorkspaceSetup,
       workspaceDirectory,
