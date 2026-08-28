@@ -31,6 +31,22 @@ const gatedCiJobs = new Map([
   ["cli-tests-3", { name: "cli-tests (shard 3/3)", contract: "cli" }],
 ]);
 
+const disabledOverlayJobs = new Set([
+  "format",
+  "server-tests-ubuntu",
+  "server-tests-windows",
+  "desktop-tests-ubuntu",
+  "desktop-tests-windows",
+  "playwright-1",
+  "playwright-2",
+  "playwright-3",
+  "playwright-4",
+  "relay-tests",
+  "cli-tests-1",
+  "cli-tests-2",
+  "cli-tests-3",
+]);
+
 function jobBlocks(source) {
   const jobs = new Map();
   let currentJob;
@@ -95,7 +111,24 @@ test("gated checks are statically named jobs with real job-level gating", () => 
     for (const contract of expected.contracts ?? [expected.contract]) {
       assert.match(job, new RegExp(`needs\\.changes\\.outputs\\.${contract} != 'false'`));
     }
+    if (disabledOverlayJobs.has(jobId)) {
+      assert.match(job, /^    if: \$\{\{ false && /m, `${jobId} must remain disabled on overlay`);
+    } else {
+      assert.doesNotMatch(
+        job,
+        /^    if: \$\{\{ false && /m,
+        `${jobId} must remain active on overlay`,
+      );
+    }
   }
+});
+
+test("active app CI runs only the Node unit project", () => {
+  const jobs = jobBlocks(readFileSync(ciWorkflowPath, "utf8"));
+  const app = jobs.get("app-tests")?.join("\n") ?? "";
+
+  assert.match(app, /npm run test --workspace=@getpaseo\/app -- --project unit/);
+  assert.doesNotMatch(app, /playwright install|test:e2e|--project browser/);
 });
 
 test("change gating allows superseded workflow runs to cancel", () => {

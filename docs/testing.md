@@ -183,7 +183,10 @@ Test suites in this repo are heavy. Running them in bulk freezes the machine, es
 - Never run `npm run test` for a whole workspace unless asked.
 - For a broad sweep, redirect to a file and read it after: `npx vitest run <path> --bail=1 > /tmp/test-output.txt 2>&1`
 - Never re-run a suite another agent already reported green.
-- For full-suite confidence, push to CI and check GitHub Actions.
+- Ordinary overlay CI runs Node unit tests, lint, and typecheck. The workflow retains the server,
+  CLI, relay, desktop, packaged-smoke, and app Playwright jobs behind constant-false gates so they
+  can be re-enabled without reconstructing them. Run a targeted retained job or test manually when
+  its behavior is part of the change.
 - Never run the full Playwright E2E suite locally — defer whole-suite verification to CI. Targeted Playwright specs are allowed when you changed or need to prove that specific flow.
 - App Playwright shares one warmed Metro server per run and gives every Playwright worker its own isolated daemon and `PASEO_HOME`. Spec files run concurrently without exposing one file's projects, agents, terminals, history, or provider configuration to another worker; tests within a file remain together so file-level setup is not repeated.
 - Playwright specs that exercise only the daemon import `daemonTest` from the shared fixtures so they do not create a browser context or page.
@@ -198,9 +201,11 @@ Test suites in this repo are heavy. Running them in bulk freezes the machine, es
 
 PR checks are routed by the behavior each suite proves, using `.github/ci-paths.yml`. A package does not inherit every test suite of its runtime consumers: app changes do not run CLI or Electron-wrapper tests, and protocol changes do not run every package that imports the protocol. Cross-package static compatibility belongs to `typecheck`; full integration coverage runs after merge on main and in manual CI runs.
 
-Required matrix legs are declared as statically named jobs. Their shared steps use YAML anchors, while job-level `if` conditions let GitHub report an unaffected leg as genuinely skipped without allocating a runner or losing the exact required-check name.
+Matrix legs are declared as statically named jobs. Their shared steps use YAML anchors. The overlay
+keeps jobs that exceed its five-minute CI budget behind constant-false job-level gates; do not delete
+their definitions when disabling them.
 
-The smallest meaningful contract wins over package ownership. Tiny structural invariants such as daemon launch supervision run unconditionally in the always-running routing job instead of maintaining a transitive file list; this check reads source entrypoints and builds no product. Routed integration contracts use stable domain directories. Browser changes select the required Playwright shards; desktop changes select the existing required desktop jobs, with renderer, real-Electron, and packaged-app coverage together in the Ubuntu leg. CLI-side Hub changes select one focused test inside the existing required server jobs. Repository scripts and the shared Vitest configuration run every PR contract because they are cross-cutting toolchain inputs.
+The smallest meaningful contract wins over package ownership. Tiny structural invariants such as daemon launch supervision run unconditionally in the always-running routing job instead of maintaining a transitive file list; this check reads source entrypoints and builds no product. Routed integration contracts use stable domain directories. Repository scripts and the shared Vitest configuration run every PR contract because they are cross-cutting toolchain inputs. App CI selects only the Node `unit` Vitest project and does not install Chromium.
 
 ## Agent authentication in tests
 
