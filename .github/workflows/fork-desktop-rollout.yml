@@ -37,6 +37,7 @@ jobs:
             package.json
             package-lock.json
             scripts
+            packages/desktop/src/features/fork-build-info.json
           ref: ${{ inputs.checkout_ref || 'overlay' }}
 
       - name: Resolve release metadata

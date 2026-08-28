@@ -35,9 +35,28 @@ export function resolveAppVersion(): string | null {
   return null;
 }
 
-export function resolveForkDistributionVersion(): string | null {
-  const extra = Constants.expoConfig?.extra as
-    | { forkBuild?: { displayVersion?: unknown } }
-    | undefined;
-  return toVersionOrNull(extra?.forkBuild?.displayVersion);
+export function resolveForkVersion(): string | null {
+  const extra = Constants.expoConfig?.extra as { forkBuild?: { version?: unknown } } | undefined;
+  return toVersionOrNull(extra?.forkBuild?.version);
+}
+
+export function compareNumericVersions(
+  leftVersion: string | null | undefined,
+  rightVersion: string | null | undefined,
+): number | null {
+  const parse = (value: string | null | undefined) => {
+    const match = value
+      ?.trim()
+      .replace(/^v/i, "")
+      .match(/^(\d+)\.(\d+)\.(\d+)$/);
+    return match ? match.slice(1).map((part) => Number.parseInt(part, 10)) : null;
+  };
+  const left = parse(leftVersion);
+  const right = parse(rightVersion);
+  if (!left || !right) return null;
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index] > right[index] ? 1 : -1;
+  }
+  return 0;
 }

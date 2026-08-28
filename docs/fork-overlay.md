@@ -40,7 +40,8 @@ review and retain historical conflict resolutions in the wrong order.
 After the rebase:
 
 1. Update `packages/desktop/src/features/fork-build-info.json` to the new official base and reset
-   its fork revision to `1`.
+   its fork revision to `1`. Derive the new fork version with the formula in
+   [release.md](release.md).
 2. Run formatting, lint, and typecheck.
 3. Run tests only when the user separately requests them.
 4. Compare `v<official-version>..overlay` to review only the remaining fork overlay.

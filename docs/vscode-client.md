@@ -149,6 +149,5 @@ the resource origin and throws a `SecurityError`. HTML assets use explicit `asWe
 and bundled React Native assets read `window.__PASEO_VSCODE_RESOURCE_ROOT__` instead.
 
 The `Fork VS Code Release` workflow builds the same stable asset. With `publish=true`, it attaches
-the VSIX to an existing fork release tag; with `publish=false`, it keeps a seven-day workflow
-artifact. The extension version follows the monorepo/upstream baseline, while the GitHub release
-continues to carry the fork display and installer versions.
+the VSIX to the canonical fork release tag; with `publish=false`, it keeps a seven-day workflow
+artifact. The packaged extension uses the same fork version as the release.

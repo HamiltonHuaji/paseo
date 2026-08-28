@@ -48,9 +48,7 @@ jobs:
 
       - name: Resolve release metadata
         shell: bash
-        run: |
-          node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
-          node scripts/emit-fork-build-env.mjs >> "$GITHUB_ENV"
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Validate EAS configuration
         env:
@@ -69,9 +67,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
-          notes=$(printf 'Fork version: `v%s`\n\nInstaller version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
-            "$FORK_DISPLAY_VERSION" "$RELEASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
+          title="Paseo Fork v${FORK_VERSION}"
+          notes=$(printf 'Version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s). Fork revision: `%s`.' \
+            "$FORK_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_REVISION")
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
           else

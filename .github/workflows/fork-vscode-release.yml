@@ -46,9 +46,7 @@ jobs:
 
       - name: Resolve release metadata
         shell: bash
-        run: |
-          node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
-          node scripts/emit-fork-build-env.mjs >> "$GITHUB_ENV"
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Ensure GitHub release exists
         if: env.SHOULD_PUBLISH == 'true'
@@ -57,9 +55,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
-          notes=$(printf 'Fork version: `v%s`\n\nInstaller version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
-            "$FORK_DISPLAY_VERSION" "$RELEASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
+          title="Paseo Fork v${FORK_VERSION}"
+          notes=$(printf 'Version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s). Fork revision: `%s`.' \
+            "$FORK_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_REVISION")
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
             exit 0
@@ -79,6 +77,17 @@ jobs:
 
       - name: Install JS dependencies
         run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
+
+      - name: Set VS Code extension version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const packagePath = 'packages/vscode/package.json';
+          const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+          packageJson.version = process.env.FORK_VERSION;
+          fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          NODE
 
       - name: Build VSIX
         run: npm run package:vscode

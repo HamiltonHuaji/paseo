@@ -1653,11 +1653,15 @@ export class VoiceAssistantWebSocketServer {
             packageName: currentDaemonDistribution.packageName,
             version: this.daemonVersion,
           };
+    const reportedVersion =
+      currentDaemonDistribution.kind === "bundled"
+        ? currentDaemonDistribution.version
+        : this.daemonVersion;
     return {
       status: "server_info",
       serverId: this.serverId,
       hostname: getHostname(),
-      version: this.daemonVersion,
+      version: reportedVersion,
       distribution,
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,

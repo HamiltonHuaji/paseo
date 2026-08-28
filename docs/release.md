@@ -9,18 +9,17 @@ documented in [fork-daemon-distribution.md](fork-daemon-distribution.md).
 
 ## Release identity
 
-A fork release has three identities:
+A fork release has two identities:
 
 - `origin/overlay` is the product branch.
-- `packages/desktop/src/features/fork-build-info.json` records the incorporated official version
-  and fork revision, such as `0.6.1-fork.4`.
-- The GitHub release tag is the monotonically increasing installer version, such as `v0.6.4`.
-  Electron, Debian, Android, and VS Code use it for upgrade ordering.
+- `packages/desktop/src/features/fork-build-info.json` records one fork version, the incorporated
+  official version, and the fork revision.
 
-The installer version can advance while the official base stays unchanged. Never reuse a
-published installer version for a functional update: clients cannot discover a different build
-with the same version. Re-run an existing tag only to retry a failed build whose assets were not
-published.
+For official `A.B.C` and revision `R` from 1 through 999, the fork version is
+`A.B.(C * 1000 + R)`. Official `0.6.1` revision `9` is fork `0.6.1009`. Use that exact version for
+the Git tag, desktop packages, app, daemon distribution, and optional Android or VSIX artifact.
+The release scripts reject metadata or a tag that does not match the formula. Reset the revision
+to `1` when the official base advances; otherwise increment it for every functional release.
 
 The desktop workflow creates the release tag with the exact overlay release commit as its target.
 Workflow dispatch uses `--ref overlay` so GitHub loads the fork workflow definition, while
@@ -43,13 +42,11 @@ unpublished artifact for testing.
 ## Preparation
 
 1. Fetch `origin`. Prepare only from a clean local `overlay` whose HEAD equals `origin/overlay`.
-2. Increment `revision` in `fork-build-info.json`. Reset it to `1` only when
-   `upstreamBaseVersion` advances.
-3. Choose an installer patch version greater than every published fork installer version.
-4. Run `npm run release:fork:check`. This runs formatting checks, lint, and typecheck only.
-5. Show the
-   release commit, installer version, fork display version, and artifact set to the user.
-6. Wait for explicit publish authorization. Keep all preparation local until then.
+2. Increment `forkRevision` in `fork-build-info.json` and update `version` from the formula. Reset
+   the revision to `1` only when `upstreamBaseVersion` advances.
+3. Run `npm run release:fork:check`. This runs formatting checks, lint, and typecheck only.
+4. Show the release commit, fork version, official base, revision, and artifact set to the user.
+5. Wait for explicit publish authorization. Keep all preparation local until then.
 
 Do not add or run Playwright, browser, E2E, integration, packaged smoke, or other test suites while
 preparing or publishing a release. Quick Checks may run existing Node unit tests independently,
@@ -80,7 +77,7 @@ independent, so a pending or failed Quick Checks run does not delay publication.
 gh workflow run fork-desktop-release.yml \
   --repo HamiltonHuaji/paseo \
   --ref overlay \
-  -f tag="v$INSTALLER_VERSION" \
+  -f tag="v$FORK_VERSION" \
   -f checkout_ref="$RELEASE_COMMIT" \
   -f platform=windows-linux \
   -f publish=true \
@@ -89,7 +86,7 @@ gh workflow run fork-desktop-release.yml \
 gh workflow run fork-daemon-release.yml \
   --repo HamiltonHuaji/paseo \
   --ref overlay \
-  -f tag="v$INSTALLER_VERSION" \
+  -f tag="v$FORK_VERSION" \
   -f checkout_ref="$RELEASE_COMMIT" \
   -f publish=true
 
@@ -104,7 +101,7 @@ When Android was explicitly requested:
 gh workflow run fork-android-release.yml \
   --repo HamiltonHuaji/paseo \
   --ref overlay \
-  -f tag="v$INSTALLER_VERSION" \
+  -f tag="v$FORK_VERSION" \
   -f checkout_ref="$RELEASE_COMMIT" \
   -f publish=true
 ```
@@ -123,6 +120,6 @@ is public and contains:
 - `paseo-fork.vsix`, only when explicitly requested;
 - the APK, only when requested.
 
-Confirm the release title shows the expected fork display version and official base. Report every
+Confirm the release title shows the expected fork version and official base. Report every
 workflow URL and asset URL to the user. Confirm the release tag resolves to `RELEASE_COMMIT`. Do
 not restart a running daemon while publishing.

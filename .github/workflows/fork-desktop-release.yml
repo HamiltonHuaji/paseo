@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Fork installer tag to build (e.g. v0.6.4)."
+        description: "Canonical fork tag to build (must match fork-build-info.json)."
         required: true
         type: string
       platform:
@@ -63,18 +63,16 @@ jobs:
 
       - name: Resolve release metadata
         shell: bash
-        run: |
-          node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
-          node scripts/emit-fork-build-env.mjs >> "$GITHUB_ENV"
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Create GitHub release
         if: env.IS_SMOKE_TAG != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          title="Paseo Fork v${FORK_DISPLAY_VERSION} (installer v${RELEASE_VERSION})"
-          notes=$(printf 'Fork version: `v%s`\n\nInstaller version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s).' \
-            "$FORK_DISPLAY_VERSION" "$RELEASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION")
+          title="Paseo Fork v${FORK_VERSION}"
+          notes=$(printf 'Version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s). Fork revision: `%s`.' \
+            "$FORK_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_REVISION")
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
           else
@@ -141,10 +139,15 @@ jobs:
           const version = process.env.DESKTOP_VERSION;
           if (!version) throw new Error('DESKTOP_VERSION env var is missing');
 
-          const packageJsonPath = path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json');
-          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-          packageJson.version = version;
-          fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          for (const packageJsonPath of [
+            path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
+            'packages/app/package.json',
+            'packages/server/package.json',
+          ]) {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
           NODE
 
       - name: Build desktop release
@@ -251,6 +254,7 @@ jobs:
           for (const packageJsonPath of [
             path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
             'packages/app/package.json',
+            'packages/server/package.json',
           ]) {
             const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
             packageJson.version = version;
@@ -366,6 +370,7 @@ jobs:
           for (const packageJsonPath of [
             path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
             'packages/app/package.json',
+            'packages/server/package.json',
           ]) {
             const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
             packageJson.version = version;

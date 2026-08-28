@@ -12,6 +12,6 @@ export const UPSTREAM_REPOSITORY = {
 
 // Reset the revision when the upstream baseline advances. Increment it only
 // for another fork build on the same upstream baseline.
+export const FORK_VERSION = metadata.version;
 export const FORK_UPSTREAM_BASE_VERSION = metadata.upstreamBaseVersion;
-export const FORK_REVISION = metadata.revision;
-export const FORK_DISPLAY_VERSION = `${FORK_UPSTREAM_BASE_VERSION}-fork.${FORK_REVISION}`;
+export const FORK_REVISION = metadata.forkRevision;

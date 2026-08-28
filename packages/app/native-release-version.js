@@ -13,14 +13,14 @@ function getNativeReleaseVersion(version) {
   const patch = Number(patchText);
   const betaNumber = betaText === undefined ? null : Number(betaText);
 
-  if (minor > 999 || patch > 999) {
+  if (major > 20 || minor > 99 || patch > 999_999) {
     throw new Error(`Cannot derive collision-free native version from: ${version}`);
   }
   if (betaNumber !== null && (betaNumber < 1 || betaNumber >= stableIosBuildSlot)) {
     throw new Error(`iOS beta number must be between 1 and 998: ${version}`);
   }
 
-  const versionCode = major * 1_000_000 + minor * 1_000 + patch;
+  const versionCode = major * 100_000_000 + minor * 1_000_000 + patch;
   if (!Number.isSafeInteger(versionCode) || versionCode <= 0 || versionCode > 2_100_000_000) {
     throw new Error(`Derived Android versionCode is out of range: ${versionCode}`);
   }

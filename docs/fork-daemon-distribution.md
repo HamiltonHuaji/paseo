@@ -29,8 +29,8 @@ replace the running fork daemon with the official daemon.
 The generated distribution manifest records the fork version, official daemon baseline, and
 install URL. Daemon self-update reads that manifest, runs npm directly with `--force`, and updates
 the same distribution. It never resolves `paseo` from `PATH`. The daemon advertises the exact
-distribution version so fork clients can distinguish revisions built on the same official base. An
-official installation without a manifest keeps using `@getpaseo/cli@latest`.
+distribution version as its daemon version. The same value identifies the matching client and
+desktop installer. An official installation without a manifest keeps using `@getpaseo/cli@latest`.
 
 Self-update restarts the worker through its existing supervisor. The replacement worker inherits
 the supervisor's startup environment and loads code from the updated package path. The supervisor

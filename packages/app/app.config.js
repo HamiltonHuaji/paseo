@@ -15,7 +15,6 @@ const isForkBuild = appVariant === "fork";
 const officialEasProjectId = "0e7f65ce-0367-46c8-a238-2b65963d235a";
 const forkEasProjectId = process.env.PASEO_FORK_EAS_PROJECT_ID?.trim();
 const forkEasOwner = process.env.PASEO_FORK_EAS_OWNER?.trim();
-const forkDisplayVersion = `${forkBuildMetadata.upstreamBaseVersion}-fork.${forkBuildMetadata.revision}`;
 
 const buildProfile = isFdroidBuild
   ? {
@@ -104,7 +103,9 @@ const variants = {
 };
 
 const variant = variants[appVariant] ?? variants.production;
-const nativeReleaseVersion = getNativeReleaseVersion(pkg.version);
+const nativeReleaseVersion = getNativeReleaseVersion(
+  isForkBuild ? forkBuildMetadata.version : pkg.version,
+);
 const easProjectId = isForkBuild ? forkEasProjectId : officialEasProjectId;
 const easOwner = isForkBuild ? forkEasOwner : "getpaseo";
 
@@ -208,9 +209,9 @@ export default {
       profileBuild: isProfileBuild,
       distribution: isForkBuild ? "fork" : "official",
       forkBuild: {
+        version: forkBuildMetadata.version,
         upstreamBaseVersion: forkBuildMetadata.upstreamBaseVersion,
-        revision: forkBuildMetadata.revision,
-        displayVersion: forkDisplayVersion,
+        forkRevision: forkBuildMetadata.forkRevision,
       },
       router: {},
       ...(easProjectId ? { eas: { projectId: easProjectId } } : {}),

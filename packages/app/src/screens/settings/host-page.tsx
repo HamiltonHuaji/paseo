@@ -64,8 +64,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { isVersionMismatch } from "@/desktop/updates/desktop-updates";
-import { resolveAppVersion, resolveForkDistributionVersion } from "@/utils/app-version";
+import { compareNumericVersions, resolveAppVersion, resolveForkVersion } from "@/utils/app-version";
 import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons";
 import { formatLatency } from "@/utils/latency";
 import { ICON_SIZE } from "@/styles/theme";
@@ -735,8 +734,8 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
   const supportsSelfUpdate = serverInfo?.features?.daemonSelfUpdate === true;
   const desktopManaged = serverInfo?.desktopManaged === true;
 
-  const appVersion = resolveForkDistributionVersion() ?? resolveAppVersion();
-  const hasVersionMismatch = isVersionMismatch(appVersion, daemonVersion);
+  const appVersion = resolveForkVersion() ?? resolveAppVersion();
+  const clientIsNewer = compareNumericVersions(appVersion, daemonVersion) === 1;
 
   useEffect(() => {
     return () => {
@@ -916,7 +915,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     [theme.iconSize.sm, theme.colors.foreground],
   );
 
-  const shouldShowUpdate = supportsSelfUpdate || (hasVersionMismatch && desktopManaged);
+  const shouldShowUpdate = clientIsNewer && (supportsSelfUpdate || desktopManaged);
   if (!shouldShowUpdate) {
     return null;
   }
