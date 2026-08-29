@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentSkillSelection } from "@getpaseo/protocol/messages";
-import { listFilesRecursive, removeSkill, syncSkills } from "./sync.js";
+import { removeSkill, syncSkills } from "./sync.js";
 
 export type SkillsState = "not-installed" | "up-to-date" | "drift";
 
@@ -21,8 +20,7 @@ export interface SkillsStatus {
   available: string[];
   /**
    * Managed skills with a directory in at least one agent home, sorted. An `add`
-   * op means "missing from at least one target", so it cannot answer whether
-   * there is anything on disk to delete — this can.
+   * op means "missing from every target".
    */
   installed: string[];
 }
@@ -43,8 +41,7 @@ export const LEGACY_SKILL_NAMES = [
   "paseo-orchestrator",
 ] as const;
 
-type SkillFiles = Map<string, string>;
-type TargetSkills = Map<string, SkillFiles>;
+type TargetSkills = Set<string>;
 
 /**
  * The bundle directory is the catalog. Reading it instead of a hardcoded list is
@@ -63,7 +60,7 @@ function managedSkillNames(available: readonly string[]): string[] {
   return [...new Set([...available, ...LEGACY_SKILL_NAMES])].sort(compareStrings);
 }
 
-/** The names a convergence may create, replace, or delete. */
+/** The names a convergence may manage. */
 export async function listManagedSkillNames(sourceDir: string): Promise<string[]> {
   return managedSkillNames(await listBundledSkills(sourceDir));
 }
@@ -77,48 +74,29 @@ function resolveDesiredSkills(
   return new Set(available.filter((name) => chosen.has(name)));
 }
 
-async function hashSkillDir(skillDir: string): Promise<SkillFiles | null> {
-  const stat = await fs.stat(skillDir).catch(() => null);
-  if (!stat?.isDirectory()) return null;
-
-  const rels = await listFilesRecursive(skillDir);
-  const files: SkillFiles = new Map();
-  for (const rel of rels) {
-    const buf = await fs.readFile(path.join(skillDir, rel));
-    const sha = createHash("sha256").update(buf).digest("hex");
-    files.set(toPosix(rel), sha);
-  }
-  return files;
-}
-
-async function hashSkills(rootDir: string, names: readonly string[]): Promise<TargetSkills> {
-  const out: TargetSkills = new Map();
+async function findInstalledSkills(
+  rootDir: string,
+  names: readonly string[],
+): Promise<TargetSkills> {
+  const out: TargetSkills = new Set();
   for (const name of names) {
-    const files = await hashSkillDir(path.join(rootDir, name));
-    if (files !== null) out.set(name, files);
+    const stat = await fs.stat(path.join(rootDir, name)).catch(() => null);
+    if (stat?.isDirectory()) out.add(name);
   }
   return out;
 }
 
 function diff(
-  bundle: TargetSkills,
   disks: readonly TargetSkills[],
   names: readonly string[],
   desired: ReadonlySet<string>,
 ): SkillOp[] {
   const ops: SkillOp[] = [];
   for (const name of names) {
-    const b = desired.has(name) ? bundle.get(name) : undefined;
-    const targetFiles = disks.map((disk) => disk.get(name));
-    const installedTargets = targetFiles.filter(
-      (files): files is SkillFiles => files !== undefined,
-    );
-    if (b) {
-      const missingTargets = installedTargets.length < disks.length;
-      const changedTargets = installedTargets.some((files) => !bundleFilesMatch(b, files));
-      if (missingTargets) ops.push({ kind: "add", name });
-      else if (changedTargets) ops.push({ kind: "update", name });
-    } else if (installedTargets.length > 0) {
+    const installed = disks.some((disk) => disk.has(name));
+    if (desired.has(name)) {
+      if (!installed) ops.push({ kind: "add", name });
+    } else if (installed) {
       ops.push({ kind: "delete", name });
     }
   }
@@ -134,21 +112,19 @@ function installedSkillNames(disks: readonly TargetSkills[], names: readonly str
   return names.filter((name) => disks.some((disk) => disk.has(name)));
 }
 
-function bundleFilesMatch(bundle: SkillFiles, disk: SkillFiles): boolean {
-  for (const [rel, sha] of bundle) {
-    if (disk.get(rel) !== sha) return false;
-  }
-  return true;
-}
-
-function toPosix(p: string): string {
-  return p.split(path.sep).join("/");
-}
-
 function compareStrings(a: string, b: string): number {
   if (a < b) return -1;
   if (a > b) return 1;
   return 0;
+}
+
+async function isInstalledAnywhere(targets: SkillTargets, name: string): Promise<boolean> {
+  const stats = await Promise.all(
+    [targets.agentsDir, targets.claudeDir, targets.codexDir].map((rootDir) =>
+      fs.stat(path.join(rootDir, name)).catch(() => null),
+    ),
+  );
+  return stats.some((stat) => stat?.isDirectory());
 }
 
 export async function getSkillsStatus(
@@ -157,14 +133,13 @@ export async function getSkillsStatus(
 ): Promise<SkillsStatus> {
   const available = await listBundledSkills(targets.sourceDir);
   const names = managedSkillNames(available);
-  const [bundle, agentsDisk, claudeDisk, codexDisk] = await Promise.all([
-    hashSkills(targets.sourceDir, available),
-    hashSkills(targets.agentsDir, names),
-    hashSkills(targets.claudeDir, names),
-    hashSkills(targets.codexDir, names),
+  const [agentsDisk, claudeDisk, codexDisk] = await Promise.all([
+    findInstalledSkills(targets.agentsDir, names),
+    findInstalledSkills(targets.claudeDir, names),
+    findInstalledSkills(targets.codexDir, names),
   ]);
   const disks = [agentsDisk, claudeDisk, codexDisk];
-  const ops = diff(bundle, disks, names, resolveDesiredSkills(selection, available));
+  const ops = diff(disks, names, resolveDesiredSkills(selection, available));
   const installed = installedSkillNames(disks, names);
 
   if (!hasInstalledPaseoSkill(disks)) return { state: "not-installed", ops, available, installed };
@@ -179,9 +154,15 @@ async function applySkills(
 ): Promise<SkillsStatus> {
   const status = initialStatus ?? (await getSkillsStatus(targets, selection));
 
-  const writes = status.ops
-    .filter((op) => op.kind === "add" || op.kind === "update")
-    .map((op) => op.name);
+  const writes: string[] = [];
+  for (const op of status.ops) {
+    if (op.kind === "update") {
+      writes.push(op.name);
+      continue;
+    }
+    if (op.kind !== "add") continue;
+    if (!(await isInstalledAnywhere(targets, op.name))) writes.push(op.name);
+  }
   if (writes.length > 0) {
     await syncSkills({
       sourceDir: targets.sourceDir,
@@ -231,8 +212,8 @@ export async function autoUpdateInstalledSkills(
 ): Promise<SkillsStatus> {
   const status = await getSkillsStatus(targets, selection);
   if (status.state !== "drift") return status;
-  // Automatic maintenance may repair selected skills, but removal is an
-  // interactive operation because managed directories can contain user files.
+  // Automatic maintenance may install absent selected names, but it never
+  // rewrites an existing same-named directory or removes user files.
   return applySkills(targets, selection, nonDestructivePlan(status));
 }
 

@@ -403,8 +403,8 @@ describe("skills controller", () => {
     await rm(harness.targets.agentsDir, { force: true });
 
     expect(await harness.controller.status()).toEqual({
-      state: "drift",
-      ops: [{ kind: "add", name: "paseo" }],
+      state: "up-to-date",
+      ops: [],
       available: BUNDLED_SKILLS,
       installed: ["paseo"],
       selection: { mode: "custom", skills: ["paseo"] },
@@ -1194,8 +1194,8 @@ describe("skills controller", () => {
 
   it("serializes startup convergence with an interactive save", async () => {
     await harness.controller.install();
-    // Startup finds drift it wants to repair while the user narrows the
-    // selection. Whichever runs first, disk must end up matching what is saved.
+    // Startup scans while the user narrows the selection. Whichever runs first,
+    // disk must end up matching what is saved.
     await rm(path.join(harness.targets.claudeDir, "paseo-loop"), {
       recursive: true,
       force: true,
@@ -1221,7 +1221,7 @@ describe("skills controller", () => {
     });
   });
 
-  it("updates a drifted install without touching the saved selection", async () => {
+  it("does not overwrite a same-named skill during update", async () => {
     await harness.controller.save({ mode: "custom", skills: ["paseo"] });
     await writeFile(path.join(harness.targets.agentsDir, "paseo", "SKILL.md"), "stale");
 
@@ -1232,6 +1232,9 @@ describe("skills controller", () => {
       installed: ["paseo"],
       selection: { mode: "custom", skills: ["paseo"] },
     });
+    expect(await readFile(path.join(harness.targets.agentsDir, "paseo", "SKILL.md"), "utf8")).toBe(
+      "stale",
+    );
   });
 
   it("does not remove deselected directories during a manual update", async () => {

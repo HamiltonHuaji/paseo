@@ -829,6 +829,8 @@ Ship a `track-experiments` orchestration skill. It teaches agents to:
 - configure a plan and log or command source once for long-running work;
 - never poll progress merely to keep the project record current;
 - request blob paths instead of constructing them;
+- keep one-off machine-learning configs and scripts in Experiment or Attempt storage so project
+  config and script directories remain reusable;
 - configure static viewer mounts and entries after generating results;
 - close an Experiment only after recording its conclusion;
 - keep detailed coding progress in the agent's own plan.

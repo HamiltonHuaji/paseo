@@ -16,6 +16,12 @@ If tool search cannot find the Paseo experiment tools, ask the user to enable **
 the host and reload the agent. Do not replace missing Experiment tools by editing `.paseo/v1/state.db`
 directly.
 
+The latest copy of this skill is
+[`skills/track-experiments`](https://github.com/HamiltonHuaji/paseo/tree/overlay/skills/track-experiments)
+in the Paseo fork. To try it before the next daemon release, copy that directory to
+`~/.agents/skills/track-experiments`, `~/.codex/skills/track-experiments`, or
+`~/.claude/skills/track-experiments`, according to the current agent's skill root.
+
 ## Choose an experiment or attempt
 
 An experiment is a durable, user-visible unit of work with a stable subject, intended outcome, and completion criterion. It may be a model setting, software build, benchmark configuration, data-processing job, artifact, or any other independently meaningful work. A broader goal may group several experiments; each experiment must be able to reach its own conclusion or produce its own result.
@@ -43,6 +49,7 @@ Do not synthesize IDs or storage paths. Use handles and paths returned by the to
 - Attach `progressPlans` and `progressSource` to a long-running attempt as soon as its job and output locations are known so clients can refresh it without another agent turn. Set `progressPlans.sourceUnit` to the coordinate reported by the source; it may be any project-defined unit such as a step, sample, frame, or token. Add one entry to `progressPlans.units` for every axis users should be able to select for that attempt. Each entry owns its total and tracks. Put schedule dimensions that vary in parallel into separate `tracks`; segments may overlap across tracks but not within one track. For a non-source unit, add piecewise-linear `projection` ranges from `sourceUnit` only where the conversion is known; leave unknown ranges uncovered instead of guessing or scaling by the ratio between totals. Prefer a log source when the job already writes `sourceUnit`. Use a command source when progress requires a query. Paseo runs the command without a shell.
 - Configure viewers with `configure_experiment_viewers`. Mount the narrow directories the viewer needs; one viewer may have several mounts. Use variables returned by the storage and attempt context rather than hard-coded generated paths.
 - Call `get_experiment_storage` before writing coordination artifacts or generated visualizations under `.paseo/v1/blobs`.
+- For machine-learning work, also use Experiment or Attempt storage for one-off configs and scripts. Use Attempt storage for one operation and Experiment storage for files shared by its attempts. Copy reusable templates into storage before editing them. Reserve project `configs/` and `scripts/` for reusable baseline configs and templates, per-module or per-dataset configs, common scripts, and files intended to ship with the project.
 
 Omit fields that should remain unchanged. Pass `null` on update only to clear a nullable field. The daemon owns IDs and timestamps.
 
