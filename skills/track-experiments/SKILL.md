@@ -26,7 +26,7 @@ Create a new experiment when the identity of the intended result changes: its ta
 
 ## Start or resume work
 
-1. Call `list_experiments` before creating anything. Reuse an existing experiment when its subject, intended result, and completion criterion match the work.
+1. Call `list_experiments` before creating anything and read candidates from its `experiments` array. Reuse an existing experiment when its subject, intended result, and completion criterion match the work.
 2. Call `get_experiment` to inspect its attempts before acting.
 3. Call `list_agents` and inspect `experimentTouches` when another agent may already own or have context for the work.
 4. Call `create_experiment` only for a new independently meaningful result. Pass `basedOn` when it branches from an existing experiment. Pass the human goal name when the work belongs to a longer-running goal; omit it when ungrouped.

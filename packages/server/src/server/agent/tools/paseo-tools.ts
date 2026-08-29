@@ -581,7 +581,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     return experimentService;
   };
 
-  const experimentToolResult = (value: unknown): PaseoToolResult => {
+  const experimentToolResult = (value: Record<string, unknown>): PaseoToolResult => {
     const valid = ensureValidJson(value);
     return {
       content: [{ type: "text", text: JSON.stringify(valid, null, 2) }],
@@ -3198,7 +3198,8 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       "list_experiments",
       {
         title: "List experiments",
-        description: "List project Experiments. Goal values are names, not internal IDs.",
+        description:
+          "List project Experiments in the returned experiments array. Goal values are names, not internal IDs.",
         inputSchema: z.object({
           goal: z.string().min(1).optional(),
           includeClosed: z.boolean().optional(),
@@ -3207,13 +3208,13 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       },
       async (input) => {
         const projectId = await resolveCallerProjectId();
-        return experimentToolResult(
-          await requireExperimentService().list(projectId, {
+        return experimentToolResult({
+          experiments: await requireExperimentService().list(projectId, {
             ...input,
             includeClosed: input.includeClosed ?? false,
             includeArchived: input.includeArchived ?? false,
           }),
-        );
+        });
       },
     );
 

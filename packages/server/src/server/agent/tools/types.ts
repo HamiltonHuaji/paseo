@@ -7,7 +7,7 @@ export interface PaseoToolExecutionContext {
 
 export interface PaseoToolResult {
   content: Array<{ type: string; text?: string; [key: string]: unknown }>;
-  structuredContent?: unknown;
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 

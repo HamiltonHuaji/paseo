@@ -22,7 +22,6 @@ import {
   RefreshCw,
 } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import { useShallow } from "zustand/shallow";
 import type {
   ExperimentAttempt,
   ExperimentBoardPlacement,
@@ -419,20 +418,21 @@ function ExperimentDetailPanel({
     [detailQuery.data?.attempts],
   );
   const latestAttemptId = attempts.at(-1)?.id ?? null;
-  const involvedAgents = useSessionStore(
-    useShallow((state) => {
-      const agents = state.sessions[serverId]?.agents;
-      if (!agents) return [];
-      return [...agents.values()]
-        .map((agent) => ({
-          agent,
-          touch: agent.experimentTouches?.find((touch) => touch.experiment === experiment),
-        }))
-        .filter((entry) => entry.touch !== undefined)
-        .sort((left, right) =>
-          (right.touch?.lastTouchedAt ?? "").localeCompare(left.touch?.lastTouchedAt ?? ""),
-        );
-    }),
+  const agents = useSessionStore((state) => state.sessions[serverId]?.agents);
+  const involvedAgents = useMemo(
+    () =>
+      agents
+        ? [...agents.values()]
+            .map((agent) => ({
+              agent,
+              touch: agent.experimentTouches?.find((touch) => touch.experiment === experiment),
+            }))
+            .filter((entry) => entry.touch !== undefined)
+            .sort((left, right) =>
+              (right.touch?.lastTouchedAt ?? "").localeCompare(left.touch?.lastTouchedAt ?? ""),
+            )
+        : [],
+    [agents, experiment],
   );
 
   const basedOnId = detailQuery.data?.experiment.basedOn ?? null;
