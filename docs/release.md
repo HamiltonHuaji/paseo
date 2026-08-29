@@ -34,10 +34,11 @@ Every fork release builds:
 - Linux x64 Debian package;
 - `paseo-fork.tgz`, the fork CLI and daemon distribution.
 
-The VS Code extension is unfinished and its VSIX is opt-in. Android is opt-in because EAS signing
-and native compilation are slow. Build either only when the user explicitly requests it. The fork
-does not have an npm beta channel. Use `publish=false` on an individual workflow when you need an
-unpublished artifact for testing.
+The VS Code extension is unfinished and its VSIX is opt-in. A full release includes Android and
+does not include VSIX. For an ordinary release, Android is opt-in because EAS signing and native
+compilation are slow. Build VSIX only when the user explicitly names it. The fork does not have an
+npm beta channel. Use `publish=false` on an individual workflow when you need an unpublished
+artifact for testing.
 
 ## Preparation
 
@@ -68,10 +69,11 @@ git push origin overlay
 RELEASE_COMMIT=$(git rev-parse origin/overlay)
 ```
 
-Dispatch the fork workflows explicitly. The desktop workflow creates the release and its tag; the
-other workflows tolerate racing with that creation and attach their assets to the same release.
-Dispatch immediately after pushing the release commit. Quick Checks and release workflows are
-independent, so a pending or failed Quick Checks run does not delay publication.
+Dispatch the fork workflows explicitly. The desktop workflow creates a public release and its tag
+before builds finish; the other workflows tolerate racing with that creation and attach their
+assets to the same release. Dispatch immediately after pushing the release commit. Quick Checks
+and release workflows are independent, so a pending or failed Quick Checks run does not delay
+publication.
 
 ```bash
 gh workflow run fork-desktop-release.yml \
@@ -106,8 +108,8 @@ gh workflow run fork-android-release.yml \
   -f publish=true
 ```
 
-Each selected workflow publishes the release after uploading its artifact. Do not wait for a
-slower platform before exposing artifacts that have already finished.
+Each selected workflow uploads its artifact directly to the already-public release. Do not wait
+for a slower platform before exposing artifacts that have already finished.
 
 ## Completion
 

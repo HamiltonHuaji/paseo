@@ -74,7 +74,7 @@ jobs:
           notes=$(printf 'Version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s). Fork revision: `%s`.' \
             "$FORK_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_REVISION")
           if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes"
+            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes" --draft=false
           else
             prerelease_flag=""
             if [[ "$IS_PRERELEASE" == "true" ]]; then
@@ -85,7 +85,6 @@ jobs:
               --target "$CHECKOUT_REF" \
               --title "$title" \
               --notes "$notes" \
-              --draft \
               $prerelease_flag || gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null
           fi
 
@@ -302,13 +301,6 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
 
-      - name: Publish release with available Linux artifacts
-        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: gh release edit "$RELEASE_TAG" --draft=false --repo "${{ github.repository }}"
-
       - name: Upload desktop artifacts to workflow
         if: env.SHOULD_PUBLISH != 'true'
         uses: actions/upload-artifact@v4
@@ -417,13 +409,6 @@ jobs:
             exit 1
           fi
           gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
-
-      - name: Publish release with available Windows artifacts
-        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: gh release edit "$RELEASE_TAG" --draft=false --repo "${{ github.repository }}"
 
       - name: Upload desktop artifacts to workflow
         if: env.SHOULD_PUBLISH != 'true'
