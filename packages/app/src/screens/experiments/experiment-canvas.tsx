@@ -74,6 +74,7 @@ export function ExperimentCanvas({
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const cameraRef = useRef(camera);
   const viewportRef = useRef<View>(null);
+  const pointerInsideViewportRef = useRef(false);
   const panOriginRef = useRef({ x: 0, y: 0 });
   const placements = useMemo(
     () =>
@@ -123,13 +124,27 @@ export function ExperimentCanvas({
     if (!isWeb) return;
     const element = viewportRef.current as unknown as HTMLElement | null;
     if (!element) return;
+    const handlePointerEnter = () => {
+      pointerInsideViewportRef.current = true;
+    };
+    const handlePointerLeave = () => {
+      pointerInsideViewportRef.current = false;
+    };
     const handleWheel = (event: WheelEvent) => {
+      if (!pointerInsideViewportRef.current && !element.matches(":hover")) return;
       if (event.cancelable) event.preventDefault();
       const current = cameraRef.current;
       updateCamera({ x: current.x - event.deltaX, y: current.y - event.deltaY });
     };
+    element.addEventListener("pointerenter", handlePointerEnter);
+    element.addEventListener("pointerleave", handlePointerLeave);
     element.addEventListener("wheel", handleWheel, { passive: false });
-    return () => element.removeEventListener("wheel", handleWheel);
+    return () => {
+      pointerInsideViewportRef.current = false;
+      element.removeEventListener("pointerenter", handlePointerEnter);
+      element.removeEventListener("pointerleave", handlePointerLeave);
+      element.removeEventListener("wheel", handleWheel);
+    };
   }, [updateCamera]);
   const canvasPanResponder = useMemo(
     () =>
@@ -338,7 +353,13 @@ function CanvasCard({
         {progressRatio !== null && latestProgress ? (
           <View style={styles.cardProgressBlock}>
             <View style={styles.cardProgressTrack}>
-              <View style={[styles.cardProgressFill, percentageWidth(progressRatio)]} />
+              <View
+                style={[
+                  styles.cardProgressFill,
+                  latestProgress.progress?.ended ? styles.cardProgressFillEnded : null,
+                  percentageWidth(progressRatio),
+                ]}
+              />
             </View>
             <Text style={styles.cardProgressText} numberOfLines={1}>
               {latestProgress.shortDescription} · {formatNumber(latestProgress.progress!.current)}
@@ -660,6 +681,7 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.accent,
   },
+  cardProgressFillEnded: { backgroundColor: theme.colors.statusSuccess },
   cardProgressText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   resizeHandle: {
     position: "absolute",
