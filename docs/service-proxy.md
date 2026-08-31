@@ -15,7 +15,9 @@ encryption. The daemon target is either an arbitrary host and port or a named in
 This is ordinary TCP forwarding. It does not restrict targets or add a second authorization layer.
 Opening the Paseo client connection is the access boundary. Use operating-system-assigned ports so
 callers do not configure ports or resolve collisions. Experiment viewers target the named `viewers`
-service, whose daemon-side port is also assigned automatically.
+service, whose daemon-side port is also assigned automatically. Paseo Desktop uses this local
+forwarder for both relay and direct TCP connections; it does not open viewer paths on the daemon's
+main HTTP port.
 
 ## How it works
 
