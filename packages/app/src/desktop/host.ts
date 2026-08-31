@@ -64,14 +64,24 @@ export interface DesktopOpenerBridge {
   openUrl?: (url: string) => Promise<void>;
 }
 
-export interface DesktopTunnelBridge {
-  ensure?: (input: {
-    serverId: string;
-    connection: {
+export type DesktopTunnelConnection =
+  | {
+      type: "relay";
       relayEndpoint: string;
       useTls?: boolean;
       daemonPublicKeyB64: string;
+    }
+  | {
+      type: "directTcp";
+      endpoint: string;
+      useTls?: boolean;
+      password?: string;
     };
+
+export interface DesktopTunnelBridge {
+  ensure?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
     target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
   }) => Promise<{ origin: string }>;
 }

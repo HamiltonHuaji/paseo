@@ -7,6 +7,7 @@ import {
   type LocalTunnelForwarder,
 } from "@getpaseo/client/node/local-tunnel-forwarder";
 import {
+  buildDaemonWebSocketUrl,
   buildRelayWebSocketUrl,
   shouldUseTlsForDefaultHostedRelay,
 } from "@getpaseo/protocol/daemon-endpoints";
@@ -16,11 +17,20 @@ import { z } from "zod";
 
 const EnsureTunnelInputSchema = z.object({
   serverId: z.string().min(1),
-  connection: z.object({
-    relayEndpoint: z.string().min(1),
-    useTls: z.boolean().optional(),
-    daemonPublicKeyB64: z.string().min(1),
-  }),
+  connection: z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("relay"),
+      relayEndpoint: z.string().min(1),
+      useTls: z.boolean().optional(),
+      daemonPublicKeyB64: z.string().min(1),
+    }),
+    z.object({
+      type: z.literal("directTcp"),
+      endpoint: z.string().min(1),
+      useTls: z.boolean().optional(),
+      password: z.string().optional(),
+    }),
+  ]),
   target: TunnelTargetSchema,
 });
 
@@ -63,25 +73,33 @@ export async function closeAllTunnelForwarders(): Promise<void> {
 async function createManagedTunnel(
   input: z.infer<typeof EnsureTunnelInputSchema>,
 ): Promise<ManagedTunnel> {
-  const useTls =
-    input.connection.useTls ?? shouldUseTlsForDefaultHostedRelay(input.connection.relayEndpoint);
+  const connection = input.connection;
+  const isRelay = connection.type === "relay";
+  const useTls = isRelay
+    ? (connection.useTls ?? shouldUseTlsForDefaultHostedRelay(connection.relayEndpoint))
+    : (connection.useTls ?? false);
   const client = new DaemonClient({
-    url: buildRelayWebSocketUrl({
-      endpoint: input.connection.relayEndpoint,
-      useTls,
-      serverId: input.serverId,
-      role: "client",
-    }),
+    url: isRelay
+      ? buildRelayWebSocketUrl({
+          endpoint: connection.relayEndpoint,
+          useTls,
+          serverId: input.serverId,
+          role: "client",
+        })
+      : buildDaemonWebSocketUrl(connection.endpoint, { useTls }),
     clientId: `desktop-tunnel-${randomUUID()}`,
     clientType: "cli",
+    password: isRelay ? undefined : connection.password,
     webSocketFactory: (url, options) =>
       new WebSocket(url, options?.protocols, {
         headers: options?.headers,
       }) as unknown as WebSocketLike,
-    e2ee: {
-      enabled: true,
-      daemonPublicKeyB64: input.connection.daemonPublicKeyB64,
-    },
+    e2ee: isRelay
+      ? {
+          enabled: true,
+          daemonPublicKeyB64: connection.daemonPublicKeyB64,
+        }
+      : undefined,
     reconnect: { enabled: true },
   });
   try {

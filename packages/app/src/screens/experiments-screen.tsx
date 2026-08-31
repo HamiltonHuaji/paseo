@@ -49,7 +49,7 @@ import { useSessionStore, type Agent } from "@/stores/session-store";
 import { buildHostAgentDetailRoute } from "@/utils/host-routes";
 import { useFetchQueries, useFetchQuery } from "@/data/query";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
-import type { RelayHostConnection } from "@/types/host-connection";
+import type { DirectTcpHostConnection, RelayHostConnection } from "@/types/host-connection";
 import { ExperimentCanvas } from "@/screens/experiments/experiment-canvas";
 import { ExperimentProgressSchedule } from "@/screens/experiments/experiment-progress-schedule";
 import { resolveAttemptExpanded } from "@/screens/experiments/experiment-attempt-expansion";
@@ -66,6 +66,7 @@ import {
 
 const EMPTY_ATTEMPTS: ExperimentAttempt[] = [];
 const EMPTY_EXPERIMENTS: ExperimentRecord[] = [];
+type ViewerTunnelConnection = DirectTcpHostConnection | RelayHostConnection;
 const EXPERIMENT_VIEW_STORAGE_KEY = "experiment-board-view-mode";
 type ExperimentViewMode = "list" | "canvas";
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner, (theme) => ({
@@ -772,7 +773,11 @@ function AttemptPanel({
         viewerEntries={viewerQuery.data}
         resolveDirectUrl={resolveDirectUrl}
         serverId={serverId}
-        relayConnection={activeConnection?.type === "relay" ? activeConnection : null}
+        tunnelConnection={
+          activeConnection?.type === "relay" || activeConnection?.type === "directTcp"
+            ? activeConnection
+            : null
+        }
       />
     </View>
   );
@@ -831,7 +836,7 @@ function AttemptExpandedContent({
   viewerEntries,
   resolveDirectUrl,
   serverId,
-  relayConnection,
+  tunnelConnection,
 }: {
   hidden: boolean;
   attempt: ExperimentAttempt;
@@ -842,7 +847,7 @@ function AttemptExpandedContent({
   viewerEntries: ResolvedViewerEntry[] | undefined;
   resolveDirectUrl: (url: string) => string | null;
   serverId: string;
-  relayConnection: RelayHostConnection | null;
+  tunnelConnection: ViewerTunnelConnection | null;
 }) {
   if (hidden) return null;
   return (
@@ -867,7 +872,7 @@ function AttemptExpandedContent({
               entry={entry}
               directUrl={resolveDirectUrl(entry.url)}
               serverId={serverId}
-              relayConnection={relayConnection}
+              tunnelConnection={tunnelConnection}
             />
           ))}
         </View>
@@ -880,37 +885,35 @@ function ViewerEntry({
   entry,
   directUrl,
   serverId,
-  relayConnection,
+  tunnelConnection,
 }: {
   entry: ResolvedViewerEntry;
   directUrl: string | null;
   serverId: string;
-  relayConnection: RelayHostConnection | null;
+  tunnelConnection: ViewerTunnelConnection | null;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const usable = entry.available && (directUrl !== null || relayConnection !== null);
+  const usable = entry.available && (directUrl !== null || tunnelConnection !== null);
   const onPress = useCallback(() => {
     void (async () => {
       setError(null);
       try {
-        if (directUrl) {
-          await openExternalUrl(directUrl);
+        const tunnel = getDesktopHost()?.tunnel?.ensure;
+        if (tunnel && tunnelConnection) {
+          const { origin } = await tunnel({
+            serverId,
+            connection: tunnelConnection,
+            target: { type: "service", name: "viewers" },
+          });
+          await openExternalUrl(`${origin}${entry.url}`);
           return;
         }
-        if (!relayConnection) return;
-        const tunnel = getDesktopHost()?.tunnel?.ensure;
-        if (!tunnel) throw new Error("Relay viewers require the Paseo desktop app");
-        const { origin } = await tunnel({
-          serverId,
-          connection: relayConnection,
-          target: { type: "service", name: "viewers" },
-        });
-        await openExternalUrl(`${origin}${entry.url}`);
+        if (directUrl) await openExternalUrl(directUrl);
       } catch (cause) {
         setError(errorMessage(cause));
       }
     })();
-  }, [directUrl, entry.url, relayConnection, serverId]);
+  }, [directUrl, entry.url, serverId, tunnelConnection]);
   return (
     <Pressable disabled={!usable} onPress={onPress} style={styles.viewerRow}>
       <ThemedExternalLink size={14} />
@@ -918,7 +921,7 @@ function ViewerEntry({
       {!entry.available && entry.unavailableReason ? (
         <Text style={styles.meta}>{entry.unavailableReason}</Text>
       ) : null}
-      {!directUrl && !relayConnection ? (
+      {!directUrl && !tunnelConnection ? (
         <Text style={styles.meta}>open from desktop or connect directly</Text>
       ) : null}
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
