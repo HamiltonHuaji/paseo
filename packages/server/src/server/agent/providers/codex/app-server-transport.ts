@@ -28,6 +28,7 @@ interface JsonRpcNotification {
 }
 
 interface PendingRequest {
+  method: string;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timer: NodeJS.Timeout;
@@ -36,6 +37,7 @@ interface PendingRequest {
 export class CodexAppServerRpcError extends Error {
   constructor(
     message: string,
+    readonly method: string,
     readonly code: string | number | undefined,
     readonly data: unknown,
   ) {
@@ -236,7 +238,7 @@ export class CodexAppServerClient {
         this.pending.delete(id);
         reject(new Error(`Codex app-server request timed out for ${method}`));
       }, timeoutMs);
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { method, resolve, reject, timer });
     });
   }
 
@@ -344,6 +346,7 @@ export class CodexAppServerClient {
           pending.reject(
             new CodexAppServerRpcError(
               raw.error.message ?? "Unknown error",
+              pending.method,
               raw.error.code,
               raw.error.data,
             ),

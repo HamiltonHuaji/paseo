@@ -3879,7 +3879,18 @@ export class CodexAppServerAgentSession implements AgentSession {
         this.logger.info({ threadId }, "Unarchived Codex thread to restore active Paseo agent");
         return;
       }
-      this.logger.warn({ error, threadId }, "Failed to resume persisted Codex thread");
+      const rpcError = error instanceof CodexAppServerRpcError ? error : null;
+      this.logger.warn(
+        {
+          err: error,
+          provider: CODEX_PROVIDER,
+          threadId,
+          rpcMethod: rpcError?.method,
+          rpcCode: rpcError?.code,
+          rpcData: rpcError?.data,
+        },
+        "Failed to resume persisted Codex thread",
+      );
       throw new Error(`Failed to resume Codex thread ${threadId}: ${message}`, { cause: error });
     }
   }
@@ -6896,6 +6907,7 @@ export class CodexAppServerAgentSession implements AgentSession {
 export class CodexAppServerAgentClient implements AgentClient {
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
+  readonly requiresExclusiveSessionResume = true;
   private goalsEnabledPromise: Promise<boolean> | null = null;
   private autoReviewEnabledPromise: Promise<boolean> | null = null;
 

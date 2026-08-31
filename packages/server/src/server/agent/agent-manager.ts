@@ -1463,46 +1463,149 @@ export class AgentManager {
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(refreshConfig, agentId);
     const launchContext = await this.buildLaunchContext(agentId, client, storedConfig.cwd);
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+    const reloadLock = this.runs.createPendingRun(agentId);
 
-    const session = handle
-      ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
-      : await client.createSession(providerLaunchConfig, launchContext);
-    await this.requireExternalMcpSupport(session, storedConfig);
+    const openSession = async (
+      config: AgentSessionConfig,
+      context: AgentLaunchContext,
+      configForValidation: AgentSessionConfig,
+    ): Promise<AgentSession> => {
+      const session = handle
+        ? await client.resumeSession(handle, config, context)
+        : await client.createSession(config, context);
+      await this.requireExternalMcpSupport(session, configForValidation);
+      return session;
+    };
 
-    let handedToRegistration = false;
-    try {
-      this.assertAcceptingAgentRegistrations();
-
-      this.cancelRunningProviderSubagents(agentId);
-      const closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
+    const installSession = async (
+      session: AgentSession,
+      nextStoredConfig: AgentSessionConfig,
+      existingSessionClosed: boolean,
+    ): Promise<ManagedAgent> => {
+      let handedToRegistration = false;
       try {
-        await this.persistSnapshot(closedExisting);
+        this.assertAcceptingAgentRegistrations();
+        this.cancelRunningProviderSubagents(agentId);
+        const closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
+        try {
+          await this.persistSnapshot(closedExisting);
+        } finally {
+          if (!existingSessionClosed) {
+            await this.closeReloadedSession(existing.session, agentId);
+          }
+        }
+
+        // Preserve existing labels and timeline during reload.
+        handedToRegistration = true;
+        return this.registerSession(session, nextStoredConfig, agentId, {
+          labels: existing.labels,
+          workspaceId: existing.workspaceId,
+          owner: existing.owner,
+          createdAt: existing.createdAt,
+          updatedAt: existing.updatedAt,
+          lastUserMessageAt: existing.lastUserMessageAt,
+          historyPrimed: preservedHistoryPrimed,
+          lastUsage: preservedLastUsage,
+          lastError: preservedLastError,
+          attention: preservedAttention,
+        });
       } finally {
-        await this.closeReloadedSession(existing.session, agentId);
+        if (!handedToRegistration) {
+          await this.closeUnregisteredSession(session);
+        }
+      }
+    };
+
+    try {
+      let existingSessionClosed = false;
+      if (client.requiresExclusiveSessionResume) {
+        existingSessionClosed = await this.closeReloadedSession(existing.session, agentId);
+        if (!existingSessionClosed) {
+          throw new Error(
+            `Cannot reload agent ${agentId} because its previous ${provider} session did not close`,
+          );
+        }
       }
 
-      // Preserve existing labels and timeline during reload.
-      handedToRegistration = true;
-      return this.registerSession(session, storedConfig, agentId, {
-        labels: existing.labels,
-        workspaceId: existing.workspaceId,
-        owner: existing.owner,
-        createdAt: existing.createdAt,
-        updatedAt: existing.updatedAt,
-        lastUserMessageAt: existing.lastUserMessageAt,
-        historyPrimed: preservedHistoryPrimed,
-        lastUsage: preservedLastUsage,
-        lastError: preservedLastError,
-        attention: preservedAttention,
-      });
-    } finally {
-      if (!handedToRegistration) {
-        await this.closeUnregisteredSession(session);
+      let session: AgentSession;
+      try {
+        session = await openSession(providerLaunchConfig, launchContext, storedConfig);
+      } catch (reloadError) {
+        this.logger.error(
+          {
+            err: reloadError,
+            agentId,
+            provider,
+            sessionId: handle?.sessionId,
+            exclusiveResume: client.requiresExclusiveSessionResume === true,
+          },
+          "Failed to open replacement agent session during reload",
+        );
+        if (!existingSessionClosed) {
+          throw reloadError;
+        }
+
+        try {
+          const recoveryConfig = {
+            ...existing.config,
+            provider,
+          } as AgentSessionConfig;
+          const preparedRecovery = await this.prepareSessionConfig(recoveryConfig, agentId);
+          const recoveryContext = await this.buildLaunchContext(
+            agentId,
+            client,
+            preparedRecovery.storedConfig.cwd,
+          );
+          const recoveryLaunchConfig = this.resolveProviderLaunchConfig(
+            preparedRecovery.launchConfig,
+            recoveryContext,
+          );
+          const recoveredSession = await openSession(
+            recoveryLaunchConfig,
+            recoveryContext,
+            preparedRecovery.storedConfig,
+          );
+          await installSession(recoveredSession, preparedRecovery.storedConfig, true);
+          this.logger.warn(
+            { agentId, provider, sessionId: handle?.sessionId },
+            "Reload failed; restored agent with its previous configuration",
+          );
+        } catch (recoveryError) {
+          this.logger.error(
+            {
+              err: recoveryError,
+              agentId,
+              provider,
+              sessionId: handle?.sessionId,
+            },
+            "Failed to restore agent after replacement reload failed",
+          );
+          this.cancelRunningProviderSubagents(agentId);
+          const closedExisting = this.prepareAgentForClosure(existing, "agent reload failed");
+          try {
+            await this.persistSnapshot(closedExisting);
+          } finally {
+            this.emitClosedAgent(closedExisting, { persist: false });
+          }
+          const reloadMessage =
+            reloadError instanceof Error ? reloadError.message : String(reloadError);
+          const recoveryMessage =
+            recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+          throw new Error(
+            `Failed to reload agent: ${reloadMessage}; restoring the previous session also failed: ${recoveryMessage}`,
+            { cause: recoveryError },
+          );
+        }
+        throw reloadError;
       }
+
+      return await installSession(session, storedConfig, existingSessionClosed);
+    } finally {
+      this.runs.settleForegroundRun(agentId, reloadLock.token);
     }
   }
 
-  private async closeReloadedSession(session: AgentSession, agentId: string): Promise<void> {
+  private async closeReloadedSession(session: AgentSession, agentId: string): Promise<boolean> {
     try {
       const result = await this.waitWithTimeout({
         operation: session.close(),
@@ -1520,9 +1623,12 @@ export class AgentManager {
           { agentId, timeoutMs: this.rescueTimeouts.reloadSessionCloseMs },
           "Timed out closing previous session during refresh",
         );
+        return false;
       }
+      return true;
     } catch (error) {
       this.logger.warn({ err: error, agentId }, "Failed to close previous session during refresh");
+      return false;
     }
   }
 

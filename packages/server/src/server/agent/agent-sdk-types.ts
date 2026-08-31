@@ -720,6 +720,8 @@ export interface ResolveAgentDefaultModeInput {
 export interface AgentClient {
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
+  /** Resume must not overlap another live session for the same durable provider handle. */
+  readonly requiresExclusiveSessionResume?: boolean;
   createSession(
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,
