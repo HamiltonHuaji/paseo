@@ -47,6 +47,8 @@ export async function revertCodexConversation(input: {
   cwd?: string | null;
   model?: string | null;
   serviceTier?: string | null;
+  config?: Record<string, unknown> | null;
+  developerInstructions?: string | null;
   userMessageTurns: CodexUserMessageTurnIndex;
   setThreadId: (threadId: string) => void | Promise<void>;
 }): Promise<void> {
@@ -72,6 +74,8 @@ export async function revertCodexConversation(input: {
     cwd: input.cwd ?? null,
     model: input.model ?? null,
     serviceTier: input.serviceTier ?? null,
+    ...(input.config ? { config: input.config } : {}),
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
     excludeTurns: false,
     persistExtendedHistory: true,
   });

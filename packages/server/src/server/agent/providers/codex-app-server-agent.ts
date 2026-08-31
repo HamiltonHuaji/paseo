@@ -4680,6 +4680,11 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
 
     const targetConfig = input.targetConfig;
+    const codexConfig = this.buildCodexInnerConfig();
+    const developerInstructions = composeSystemPromptParts(
+      targetConfig.systemPrompt,
+      targetConfig.daemonAppendSystemPrompt,
+    );
     const serviceTier =
       targetConfig.featureValues?.fast_mode === true &&
       codexModelSupportsFastMode(targetConfig.model)
@@ -4698,6 +4703,8 @@ export class CodexAppServerAgentSession implements AgentSession {
       cwd: targetConfig.cwd,
       model: targetConfig.model ?? null,
       serviceTier,
+      ...(codexConfig ? { config: codexConfig } : {}),
+      ...(developerInstructions ? { developerInstructions } : {}),
       excludeTurns: false,
     });
     this.currentThreadId = forked.thread.id;
@@ -4723,6 +4730,11 @@ export class CodexAppServerAgentSession implements AgentSession {
       cwd: this.config.cwd ?? null,
       model: this.config.model ?? null,
       serviceTier: this.serviceTier,
+      config: this.buildCodexInnerConfig(),
+      developerInstructions: composeSystemPromptParts(
+        this.config.systemPrompt,
+        this.config.daemonAppendSystemPrompt,
+      ),
       userMessageTurns: this.codexUserMessageTurns(),
       setThreadId: async (threadId) => {
         this.currentThreadId = threadId;
