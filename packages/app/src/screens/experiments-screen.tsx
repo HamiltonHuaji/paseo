@@ -21,6 +21,7 @@ import {
   List,
   RefreshCw,
 } from "lucide-react-native";
+import Svg, { Circle } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type {
   ExperimentAttempt,
@@ -63,6 +64,11 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner, (theme) => ({
 const ThemedExternalLink = withUnistyles(ExternalLink, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
+const ATTEMPT_PROGRESS_RING_SIZE = 18;
+const ATTEMPT_PROGRESS_RING_STROKE = 2.5;
+const ATTEMPT_PROGRESS_RING_RADIUS =
+  (ATTEMPT_PROGRESS_RING_SIZE - ATTEMPT_PROGRESS_RING_STROKE) / 2;
+const ATTEMPT_PROGRESS_RING_CIRCUMFERENCE = 2 * Math.PI * ATTEMPT_PROGRESS_RING_RADIUS;
 
 interface ExperimentsScreenProps {
   serverId: string;
@@ -639,12 +645,14 @@ function AttemptPanel({
     staleTimeMs: 5_000,
   });
   const ratio = progressRatio(observation);
+  const collapsedProgressRatio = attemptProgressRatio(attempt, observation);
   const progressFillStyle = useMemo(
     () => [
       styles.progressFill,
+      observation?.ended ? styles.progressFillEnded : null,
       inlineUnistylesStyle<ViewStyle>({ width: `${Math.round(ratio * 100)}%` }),
     ],
-    [ratio],
+    [observation?.ended, ratio],
   );
   const toggleCollapsed = useCallback(
     () => onExpandedChange(attempt.id, !expanded),
@@ -683,14 +691,13 @@ function AttemptPanel({
         <Text style={styles.attemptPosition}>
           Attempt {position} · {formatTimestamp(attempt.createdAt)}
         </Text>
-        <Button
-          variant="ghost"
-          size="xs"
-          leftIcon={collapsed ? ChevronRight : ChevronDown}
-          onPress={toggleCollapsed}
-        >
-          {collapsed ? "Expand" : "Collapse"}
-        </Button>
+        <AttemptCollapseActions
+          attempt={attempt}
+          observation={observation}
+          collapsed={collapsed}
+          ratio={collapsedProgressRatio}
+          onToggle={toggleCollapsed}
+        />
       </View>
       <View style={styles.attemptHeader}>
         <View style={styles.flexOne}>
@@ -719,6 +726,40 @@ function AttemptPanel({
             : null
         }
       />
+    </View>
+  );
+}
+
+function AttemptCollapseActions({
+  attempt,
+  observation,
+  collapsed,
+  ratio,
+  onToggle,
+}: {
+  attempt: ExperimentAttempt;
+  observation: ProgressObservation | null;
+  collapsed: boolean;
+  ratio: number;
+  onToggle: () => void;
+}) {
+  return (
+    <View style={styles.attemptCollapseActions}>
+      {collapsed && hasAttemptProgress(attempt, observation) ? (
+        <ThemedAttemptProgressRing
+          ratio={ratio}
+          ended={observation?.ended ?? false}
+          uniProps={attemptProgressRingPaletteMapping}
+        />
+      ) : null}
+      <Button
+        variant="ghost"
+        size="xs"
+        leftIcon={collapsed ? ChevronRight : ChevronDown}
+        onPress={onToggle}
+      >
+        {collapsed ? "Expand" : "Collapse"}
+      </Button>
     </View>
   );
 }
@@ -939,6 +980,81 @@ function progressRatio(observation: ProgressObservation | null): number {
   return Math.max(0, Math.min(1, observation.current / observation.total));
 }
 
+function hasAttemptProgress(
+  attempt: ExperimentAttempt,
+  observation: ProgressObservation | null,
+): boolean {
+  return Boolean(observation || attempt.progressSource || attempt.progressPlans);
+}
+
+function attemptProgressRatio(
+  attempt: ExperimentAttempt,
+  observation: ProgressObservation | null,
+): number {
+  if (observation?.ended) return 1;
+  const sourcePlan = attempt.progressPlans?.units.find(
+    (plan) => plan.unit === attempt.progressPlans?.sourceUnit,
+  );
+  const total = sourcePlan?.total ?? observation?.total;
+  if (!observation || !total || total <= 0) return 0;
+  return Math.max(0, Math.min(1, observation.current / total));
+}
+
+function AttemptProgressRing({
+  ratio,
+  ended,
+  trackColor,
+  progressColor,
+}: {
+  ratio: number;
+  ended: boolean;
+  trackColor: string;
+  progressColor: string;
+}) {
+  const dashOffset = ATTEMPT_PROGRESS_RING_CIRCUMFERENCE * (1 - ratio);
+  const center = ATTEMPT_PROGRESS_RING_SIZE / 2;
+  return (
+    <Svg
+      width={ATTEMPT_PROGRESS_RING_SIZE}
+      height={ATTEMPT_PROGRESS_RING_SIZE}
+      viewBox={`0 0 ${ATTEMPT_PROGRESS_RING_SIZE} ${ATTEMPT_PROGRESS_RING_SIZE}`}
+      accessibilityLabel={ended ? "Progress complete" : `Progress ${Math.round(ratio * 100)}%`}
+    >
+      <Circle
+        cx={center}
+        cy={center}
+        r={ATTEMPT_PROGRESS_RING_RADIUS}
+        fill={ended ? progressColor : "none"}
+        stroke={trackColor}
+        strokeWidth={ATTEMPT_PROGRESS_RING_STROKE}
+      />
+      {!ended && ratio > 0 ? (
+        <Circle
+          cx={center}
+          cy={center}
+          r={ATTEMPT_PROGRESS_RING_RADIUS}
+          fill="none"
+          stroke={progressColor}
+          strokeWidth={ATTEMPT_PROGRESS_RING_STROKE}
+          strokeLinecap="round"
+          strokeDasharray={ATTEMPT_PROGRESS_RING_CIRCUMFERENCE}
+          strokeDashoffset={dashOffset}
+          rotation={-90}
+          origin={`${center}, ${center}`}
+        />
+      ) : null}
+    </Svg>
+  );
+}
+
+const ThemedAttemptProgressRing = withUnistyles(AttemptProgressRing);
+const attemptProgressRingPaletteMapping = (theme: {
+  colors: { surface3: string; statusSuccess: string };
+}) => ({
+  trackColor: theme.colors.surface3,
+  progressColor: theme.colors.statusSuccess,
+});
+
 function formatProgress(observation: ProgressObservation): string {
   return observation.total === null
     ? formatNumber(observation.current)
@@ -1039,6 +1155,11 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[3],
   },
   attemptPosition: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  attemptCollapseActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+  },
   attemptHeader: { flexDirection: "row", alignItems: "flex-start", gap: theme.spacing[3] },
   attemptTitle: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
   flexOne: { flex: 1, minWidth: 0, gap: theme.spacing[1] },
@@ -1054,6 +1175,7 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.accent,
   },
+  progressFillEnded: { backgroundColor: theme.colors.statusSuccess },
   fields: { gap: theme.spacing[2] },
   compactFields: { gap: theme.spacing[1] },
   fieldRow: { flexDirection: "row", gap: theme.spacing[3] },

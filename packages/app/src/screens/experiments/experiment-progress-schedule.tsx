@@ -49,8 +49,30 @@ export function ExperimentProgressSchedule({ plan, observation }: ExperimentProg
     ? projectProgressCurrent(observation.current, plan.sourceUnit, selectedPlan)
     : null;
   const ratio = current === null ? null : clamp(current / selectedPlan.total, 0, 1);
-  const fillStyle = useMemo(() => [styles.actualFill, percentWidth(ratio ?? 0)], [ratio]);
-  const markerStyle = useMemo(() => [styles.actualMarker, percentLeft(ratio ?? 0)], [ratio]);
+  const fillStyle = useMemo(
+    () => [
+      styles.actualFill,
+      observation?.ended ? styles.actualFillEnded : null,
+      percentWidth(ratio ?? 0),
+    ],
+    [observation?.ended, ratio],
+  );
+  const markerStyle = useMemo(
+    () => [
+      styles.actualMarker,
+      observation?.ended ? styles.actualMarkerEnded : null,
+      percentLeft(ratio ?? 0),
+    ],
+    [observation?.ended, ratio],
+  );
+  const remainingStyle = useMemo(
+    () => [styles.remainingShade, remainingGeometry(ratio ?? 0)],
+    [ratio],
+  );
+  const completionBoundaryStyle = useMemo(
+    () => [styles.completionBoundary, percentLeft(ratio ?? 0)],
+    [ratio],
+  );
   let observationSummary = (
     <Text style={styles.mutedText}>Waiting for the first progress observation.</Text>
   );
@@ -123,6 +145,12 @@ export function ExperimentProgressSchedule({ plan, observation }: ExperimentProg
                 </Text>
               </View>
             ))}
+            {ratio !== null && ratio < 1 ? (
+              <View pointerEvents="none" style={remainingStyle} />
+            ) : null}
+            {ratio !== null && ratio > 0 && ratio < 1 ? (
+              <View pointerEvents="none" style={completionBoundaryStyle} />
+            ) : null}
           </View>
         </View>
       ))}
@@ -183,6 +211,10 @@ function percentWidth(ratio: number): ViewStyle {
 
 function percentLeft(ratio: number): ViewStyle {
   return inlineUnistylesStyle({ left: `${ratio * 100}%` });
+}
+
+function remainingGeometry(ratio: number): ViewStyle {
+  return inlineUnistylesStyle({ left: `${ratio * 100}%`, right: 0 });
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -259,6 +291,22 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
   },
+  remainingShade: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    backgroundColor: theme.colors.surface0,
+    opacity: theme.opacity[50],
+  },
+  completionBoundary: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 2,
+    marginLeft: -1,
+    backgroundColor: theme.colors.accentForeground,
+    opacity: theme.opacity[50],
+  },
   actualTrack: {
     flex: 1,
     height: 18,
@@ -273,9 +321,10 @@ const styles = StyleSheet.create((theme) => ({
     top: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: theme.colors.surface3,
+    backgroundColor: theme.colors.accent,
     borderRadius: theme.borderRadius.md,
   },
+  actualFillEnded: { backgroundColor: theme.colors.statusSuccess },
   actualMarker: {
     position: "absolute",
     top: 2,
@@ -287,6 +336,7 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: 2,
     borderColor: theme.colors.surface0,
   },
+  actualMarkerEnded: { backgroundColor: theme.colors.statusSuccess },
   observationRow: { flexDirection: "row", gap: theme.spacing[2] },
   observationTextBlock: { flex: 1, gap: theme.spacing[1] },
   observationText: { color: theme.colors.foreground, fontSize: theme.fontSize.sm },
