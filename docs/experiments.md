@@ -330,8 +330,10 @@ The client explicitly calls:
 }
 ```
 
-through `experiment.attempt.progress.refresh.request`. While an Attempt is visible, the client uses
-the returned `nextRefreshAfterMs` to schedule another request. The daemon coalesces concurrent
+through `experiment.attempt.progress.refresh.request`. While the Experiments surface is active, the
+client polls every Attempt that has a progress source and no terminal observation. It uses the
+returned `nextRefreshAfterMs` for each Attempt and writes results into the shared Experiment-detail
+cache, so cards and expanded details show the same observation. The daemon coalesces concurrent
 refreshes, but every new request after the current refresh completes reads the log or runs the
 command again.
 
