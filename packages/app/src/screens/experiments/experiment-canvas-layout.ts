@@ -3,6 +3,7 @@ import type {
   ExperimentDetail,
   ExperimentRecord,
 } from "@getpaseo/protocol/experiments";
+import { selectCardProgressAttempts } from "./experiment-progress-state";
 
 export const EXPERIMENT_CANVAS_GRID_SIZE = 24;
 export const EXPERIMENT_CANVAS_MIN_ROWS = 30;
@@ -149,13 +150,9 @@ function automaticCardSize(
   detail: ExperimentDetail | null,
 ): Pick<ResolvedPlacement, "width" | "height"> {
   const width = experiment.shortDescription.length > 48 ? 14 : DEFAULT_WIDTH;
-  const hasProgress = detail?.attempts.some(
-    (attempt) =>
-      attempt.progress !== null ||
-      attempt.progressSource !== null ||
-      Boolean(attempt.progressPlans),
-  );
-  return { width, height: hasProgress ? 8 : DEFAULT_HEIGHT };
+  const progressCount = detail ? selectCardProgressAttempts(detail).length : 0;
+  const height = progressCount > 0 ? 8 + Math.max(0, progressCount - 1) : DEFAULT_HEIGHT;
+  return { width, height };
 }
 
 function compareExperiments(left: ExperimentRecord, right: ExperimentRecord): number {

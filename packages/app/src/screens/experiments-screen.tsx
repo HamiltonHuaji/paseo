@@ -53,6 +53,16 @@ import type { DirectTcpHostConnection, RelayHostConnection } from "@/types/host-
 import { ExperimentCanvas } from "@/screens/experiments/experiment-canvas";
 import { ExperimentProgressSchedule } from "@/screens/experiments/experiment-progress-schedule";
 import { resolveAttemptExpanded } from "@/screens/experiments/experiment-attempt-expansion";
+import {
+  hasAttemptProgress,
+  resolveAttemptProgressState,
+} from "@/screens/experiments/experiment-progress-state";
+import {
+  updateCachedAttemptProgress,
+  updateCachedAttemptProgressError,
+  useExperimentProgressPolling,
+  type ExperimentProgressTarget,
+} from "@/screens/experiments/use-experiment-progress-polling";
 
 const EMPTY_ATTEMPTS: ExperimentAttempt[] = [];
 const EMPTY_EXPERIMENTS: ExperimentRecord[] = [];
@@ -87,6 +97,7 @@ export function ExperimentsScreen({
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const queryClient = useQueryClient();
+  const isFocused = useIsFocused();
   const isCompactLayout = useIsCompactFormFactor();
   const fetchEnabled = canFetchExperiments(active, Boolean(client), connected, Boolean(projectId));
   const listQuery = useFetchQuery({
@@ -130,6 +141,18 @@ export function ExperimentsScreen({
       ),
     [detailQueries, experiments],
   );
+  const progressTargets = useMemo(
+    () => collectProgressTargets(detailByExperiment),
+    [detailByExperiment],
+  );
+  useExperimentProgressPolling({
+    client,
+    queryClient,
+    serverId,
+    projectId,
+    targets: progressTargets,
+    enabled: fetchEnabled && isFocused,
+  });
   const experimentById = useMemo(
     () => new Map(experiments.map((experiment) => [experiment.id, experiment])),
     [experiments],
@@ -597,73 +620,53 @@ function AttemptPanel({
   screenActive: boolean;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const queryClient = useQueryClient();
   const hosts = useHosts();
   const runtime = useHostRuntimeSnapshot(serverId);
   const host = hosts.find((candidate) => candidate.serverId === serverId);
   const activeConnection = host?.connections.find(
     (connection) => connection.id === runtime?.activeConnectionId,
   );
-  const isFocused = useIsFocused();
-  const [observation, setObservation] = useState(attempt.progress);
-  const [progressError, setProgressError] = useState(attempt.progressError);
   const [refreshing, setRefreshing] = useState(false);
   const collapsed = !expanded;
-
-  useEffect(() => {
-    setObservation(attempt.progress);
-    setProgressError(attempt.progressError);
-  }, [attempt.id, attempt.progress, attempt.progressError]);
+  const observation = attempt.progress;
+  const progressError = attempt.progressError;
 
   const refresh = useCallback(async () => {
     if (!client || !attempt.progressSource) return null;
     setRefreshing(true);
     try {
       const result = await client.refreshExperimentProgress({ projectId, attempt: attempt.id });
-      setObservation(result.observation);
-      setProgressError(result.error);
+      updateCachedAttemptProgress(
+        queryClient,
+        serverId,
+        projectId,
+        { experiment: attempt.experiment, attempt: attempt.id },
+        result,
+      );
       return result;
     } catch (error) {
-      setProgressError(errorMessage(error));
+      updateCachedAttemptProgressError(
+        queryClient,
+        serverId,
+        projectId,
+        { experiment: attempt.experiment, attempt: attempt.id },
+        errorMessage(error),
+      );
       return null;
     } finally {
       setRefreshing(false);
     }
-  }, [attempt.id, attempt.progressSource, client, projectId]);
-  const handleRefresh = useCallback(() => void refresh(), [refresh]);
-
-  useEffect(() => {
-    if (
-      !client ||
-      collapsed ||
-      !isFocused ||
-      !screenActive ||
-      !attempt.progressSource ||
-      observation?.ended
-    )
-      return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const poll = async () => {
-      const result = await refresh().catch(() => null);
-      if (!cancelled && result?.nextRefreshAfterMs) {
-        timer = setTimeout(() => void poll(), result.nextRefreshAfterMs);
-      }
-    };
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
   }, [
+    attempt.experiment,
     attempt.id,
     attempt.progressSource,
     client,
-    collapsed,
-    isFocused,
-    observation?.ended,
-    refresh,
-    screenActive,
+    projectId,
+    queryClient,
+    serverId,
   ]);
+  const handleRefresh = useCallback(() => void refresh(), [refresh]);
 
   const viewerQuery = useFetchQuery({
     queryKey: ["experiment-viewers", serverId, projectId, attempt.id],
@@ -677,15 +680,16 @@ function AttemptPanel({
     dataShape: "list",
     staleTimeMs: 5_000,
   });
-  const ratio = progressRatio(observation);
-  const collapsedProgressRatio = attemptProgressRatio(attempt, observation);
+  const progressState = resolveAttemptProgressState(attempt, observation);
   const progressFillStyle = useMemo(
     () => [
       styles.progressFill,
       observation?.ended ? styles.progressFillEnded : null,
-      inlineUnistylesStyle<ViewStyle>({ width: `${Math.round(ratio * 100)}%` }),
+      inlineUnistylesStyle<ViewStyle>({
+        width: `${Math.round((progressState.ratio ?? 0) * 100)}%`,
+      }),
     ],
-    [observation?.ended, ratio],
+    [observation?.ended, progressState.ratio],
   );
   const toggleCollapsed = useCallback(
     () => onExpandedChange(attempt.id, !expanded),
@@ -704,7 +708,11 @@ function AttemptPanel({
     progressContent = (
       <View style={styles.progressBlock}>
         <View style={styles.progressTrack}>
-          <View style={progressFillStyle} />
+          {progressState.ratio !== null ? (
+            <View style={progressFillStyle} />
+          ) : (
+            <View style={styles.progressFillIndeterminate} />
+          )}
         </View>
         <Text style={styles.meta}>
           {formatProgress(observation)}
@@ -728,7 +736,8 @@ function AttemptPanel({
           attempt={attempt}
           observation={observation}
           collapsed={collapsed}
-          ratio={collapsedProgressRatio}
+          ratio={progressState.ratio}
+          progressError={progressError}
           onToggle={toggleCollapsed}
         />
       </View>
@@ -768,22 +777,31 @@ function AttemptCollapseActions({
   observation,
   collapsed,
   ratio,
+  progressError,
   onToggle,
 }: {
   attempt: ExperimentAttempt;
   observation: ProgressObservation | null;
   collapsed: boolean;
-  ratio: number;
+  ratio: number | null;
+  progressError: string | null;
   onToggle: () => void;
 }) {
   return (
     <View style={styles.attemptCollapseActions}>
-      {collapsed && hasAttemptProgress(attempt, observation) ? (
+      {collapsed && hasAttemptProgress(attempt) ? (
         <ThemedAttemptProgressRing
           ratio={ratio}
           ended={observation?.ended ?? false}
+          known={observation !== null}
+          error={progressError !== null}
           uniProps={attemptProgressRingPaletteMapping}
         />
+      ) : null}
+      {collapsed && !observation && hasAttemptProgress(attempt) ? (
+        <Text style={progressError ? styles.progressUnknownError : styles.progressUnknown}>
+          {progressError ? "error" : "unknown"}
+        </Text>
       ) : null}
       <Button
         variant="ghost"
@@ -967,6 +985,18 @@ function canFetchExperimentDetail(active: boolean, hasClient: boolean): boolean 
   return active && hasClient;
 }
 
+function collectProgressTargets(
+  detailByExperiment: Map<string, ExperimentDetail>,
+): ExperimentProgressTarget[] {
+  return [...detailByExperiment.entries()].flatMap(([experiment, detail]) =>
+    detail.attempts.flatMap((attempt) =>
+      attempt.progressSource && !attempt.progress?.ended
+        ? [{ experiment, attempt: attempt.id }]
+        : [],
+    ),
+  );
+}
+
 function findLatestProgressAttempt(attempts: ExperimentAttempt[]): ExperimentAttempt | null {
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
     const attempt = attempts[index];
@@ -1008,84 +1038,101 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
 }
 
-function progressRatio(observation: ProgressObservation | null): number {
-  if (!observation?.total || observation.total <= 0) return 0;
-  return Math.max(0, Math.min(1, observation.current / observation.total));
-}
-
-function hasAttemptProgress(
-  attempt: ExperimentAttempt,
-  observation: ProgressObservation | null,
-): boolean {
-  return Boolean(observation || attempt.progressSource || attempt.progressPlans);
-}
-
-function attemptProgressRatio(
-  attempt: ExperimentAttempt,
-  observation: ProgressObservation | null,
-): number {
-  if (observation?.ended) return 1;
-  const sourcePlan = attempt.progressPlans?.units.find(
-    (plan) => plan.unit === attempt.progressPlans?.sourceUnit,
-  );
-  const total = sourcePlan?.total ?? observation?.total;
-  if (!observation || !total || total <= 0) return 0;
-  return Math.max(0, Math.min(1, observation.current / total));
-}
-
 function AttemptProgressRing({
   ratio,
   ended,
+  known,
+  error,
   trackColor,
   progressColor,
+  errorColor,
 }: {
-  ratio: number;
+  ratio: number | null;
   ended: boolean;
+  known: boolean;
+  error: boolean;
   trackColor: string;
   progressColor: string;
+  errorColor: string;
 }) {
-  const dashOffset = ATTEMPT_PROGRESS_RING_CIRCUMFERENCE * (1 - ratio);
+  const dashOffset = ATTEMPT_PROGRESS_RING_CIRCUMFERENCE * (1 - (ratio ?? 0));
   const center = ATTEMPT_PROGRESS_RING_SIZE / 2;
+  const accessibilityLabel = attemptProgressAccessibilityLabel({ ended, known, error, ratio });
+  let progressArc = null;
+  if (!ended && ratio !== null && ratio > 0) {
+    progressArc = (
+      <Circle
+        cx={center}
+        cy={center}
+        r={ATTEMPT_PROGRESS_RING_RADIUS}
+        fill="none"
+        stroke={progressColor}
+        strokeWidth={ATTEMPT_PROGRESS_RING_STROKE}
+        strokeLinecap="round"
+        strokeDasharray={ATTEMPT_PROGRESS_RING_CIRCUMFERENCE}
+        strokeDashoffset={dashOffset}
+        rotation={-90}
+        origin={`${center}, ${center}`}
+      />
+    );
+  } else if (!ended && known && ratio === null) {
+    progressArc = (
+      <Circle
+        cx={center}
+        cy={center}
+        r={ATTEMPT_PROGRESS_RING_RADIUS}
+        fill="none"
+        stroke={progressColor}
+        strokeWidth={ATTEMPT_PROGRESS_RING_STROKE}
+        strokeLinecap="round"
+        strokeDasharray="2 3"
+      />
+    );
+  }
   return (
     <Svg
       width={ATTEMPT_PROGRESS_RING_SIZE}
       height={ATTEMPT_PROGRESS_RING_SIZE}
       viewBox={`0 0 ${ATTEMPT_PROGRESS_RING_SIZE} ${ATTEMPT_PROGRESS_RING_SIZE}`}
-      accessibilityLabel={ended ? "Progress complete" : `Progress ${Math.round(ratio * 100)}%`}
+      accessibilityLabel={accessibilityLabel}
     >
       <Circle
         cx={center}
         cy={center}
         r={ATTEMPT_PROGRESS_RING_RADIUS}
         fill={ended ? progressColor : "none"}
-        stroke={trackColor}
+        stroke={!known && error ? errorColor : trackColor}
         strokeWidth={ATTEMPT_PROGRESS_RING_STROKE}
       />
-      {!ended && ratio > 0 ? (
-        <Circle
-          cx={center}
-          cy={center}
-          r={ATTEMPT_PROGRESS_RING_RADIUS}
-          fill="none"
-          stroke={progressColor}
-          strokeWidth={ATTEMPT_PROGRESS_RING_STROKE}
-          strokeLinecap="round"
-          strokeDasharray={ATTEMPT_PROGRESS_RING_CIRCUMFERENCE}
-          strokeDashoffset={dashOffset}
-          rotation={-90}
-          origin={`${center}, ${center}`}
-        />
-      ) : null}
+      {progressArc}
     </Svg>
   );
 }
 
+function attemptProgressAccessibilityLabel({
+  ended,
+  known,
+  error,
+  ratio,
+}: {
+  ended: boolean;
+  known: boolean;
+  error: boolean;
+  ratio: number | null;
+}): string {
+  if (ended) return "Progress complete";
+  if (!known) return error ? "Progress unavailable" : "Progress unknown";
+  if (ratio === null) return "Progress total unknown";
+  return `Progress ${Math.round(ratio * 100)}%`;
+}
+
 const ThemedAttemptProgressRing = withUnistyles(AttemptProgressRing);
 const attemptProgressRingPaletteMapping = (theme: {
-  colors: { surface3: string; statusSuccess: string };
+  colors: { surface3: string; statusSuccess: string; statusDanger: string };
 }) => ({
   trackColor: theme.colors.surface3,
   progressColor: theme.colors.statusSuccess,
+  errorColor: theme.colors.statusDanger,
 });
 
 function formatProgress(observation: ProgressObservation): string {
@@ -1210,6 +1257,15 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.accent,
   },
   progressFillEnded: { backgroundColor: theme.colors.statusSuccess },
+  progressFillIndeterminate: {
+    width: "24%",
+    height: "100%",
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+    opacity: theme.opacity[50],
+  },
+  progressUnknown: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  progressUnknownError: { color: theme.colors.statusDanger, fontSize: theme.fontSize.sm },
   fields: { gap: theme.spacing[2] },
   compactFields: { gap: theme.spacing[1] },
   fieldRow: { flexDirection: "row", gap: theme.spacing[3] },

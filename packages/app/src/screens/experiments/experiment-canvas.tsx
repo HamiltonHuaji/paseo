@@ -12,6 +12,7 @@ import { Grip, Maximize2 } from "lucide-react-native";
 import Svg, { Polygon, Polyline } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import type {
+  ExperimentAttempt,
   ExperimentBoardPlacement,
   ExperimentDetail,
   ExperimentRecord,
@@ -29,6 +30,11 @@ import {
   resolvePlacement,
   type ResolvedPlacement,
 } from "./experiment-canvas-layout";
+import {
+  progressUnit,
+  resolveAttemptProgressState,
+  selectCardProgressAttempts,
+} from "./experiment-progress-state";
 
 const GRID_SIZE = EXPERIMENT_CANVAS_GRID_SIZE;
 const MIN_WIDTH = 9;
@@ -315,16 +321,14 @@ function CanvasCard({
     ],
     [placement, selected],
   );
-  const latestProgress = detail ? latestProgressAttempt(detail) : null;
-  const progressPlan = latestProgress?.progressPlans;
-  const sourcePlan = progressPlan?.units.find((plan) => plan.unit === progressPlan.sourceUnit);
-  const progressRatio = latestProgress?.progress
-    ? clamp(
-        latestProgress.progress.current / (sourcePlan?.total ?? latestProgress.progress.total ?? 1),
-        0,
-        1,
-      )
-    : null;
+  const progressAttempts = detail ? selectCardProgressAttempts(detail) : [];
+  const progressRowCapacity = Math.max(1, Math.floor((placement.height * GRID_SIZE - 118) / 28));
+  const visibleProgressCount =
+    progressAttempts.length > progressRowCapacity
+      ? Math.max(1, progressRowCapacity - 1)
+      : progressRowCapacity;
+  const visibleProgressAttempts = progressAttempts.slice(-visibleProgressCount);
+  const hiddenProgressCount = progressAttempts.length - visibleProgressAttempts.length;
   const handleSelect = useCallback(() => onSelect(experiment.id), [experiment.id, onSelect]);
 
   return (
@@ -350,21 +354,16 @@ function CanvasCard({
           ) : null}
           {experiment.conclusion ? <StatusBadge label="concluded" variant="success" /> : null}
         </View>
-        {progressRatio !== null && latestProgress ? (
-          <View style={styles.cardProgressBlock}>
-            <View style={styles.cardProgressTrack}>
-              <View
-                style={[
-                  styles.cardProgressFill,
-                  latestProgress.progress?.ended ? styles.cardProgressFillEnded : null,
-                  percentageWidth(progressRatio),
-                ]}
-              />
-            </View>
-            <Text style={styles.cardProgressText} numberOfLines={1}>
-              {latestProgress.shortDescription} · {formatNumber(latestProgress.progress!.current)}
-              {progressPlan ? ` ${progressPlan.sourceUnit}` : ""}
-            </Text>
+        {progressAttempts.length > 0 ? (
+          <View style={styles.cardProgressList}>
+            {visibleProgressAttempts.map((attempt) => (
+              <CardAttemptProgress key={attempt.id} attempt={attempt} />
+            ))}
+            {hiddenProgressCount > 0 ? (
+              <Text style={styles.cardProgressOverflowText} numberOfLines={1}>
+                +{hiddenProgressCount} more unfinished
+              </Text>
+            ) : null}
           </View>
         ) : null}
       </Pressable>
@@ -377,6 +376,69 @@ function CanvasCard({
       </View>
     </View>
   );
+}
+
+function CardAttemptProgress({ attempt }: { attempt: ExperimentAttempt }) {
+  const state = resolveAttemptProgressState(attempt);
+  const observation = attempt.progress;
+  const status = cardProgressStatus(attempt, state.kind);
+  return (
+    <View style={styles.cardProgressRow}>
+      <Text
+        style={[
+          styles.cardProgressText,
+          attempt.progressError ? styles.cardProgressTextError : null,
+        ]}
+        numberOfLines={1}
+      >
+        {attempt.shortDescription} · {status}
+      </Text>
+      <View style={styles.cardProgressTrack}>
+        <CardProgressTrackFill state={state} hasObservation={observation !== null} />
+      </View>
+    </View>
+  );
+}
+
+function cardProgressStatus(
+  attempt: ExperimentAttempt,
+  kind: ReturnType<typeof resolveAttemptProgressState>["kind"],
+): string {
+  const observation = attempt.progress;
+  if (!observation) return attempt.progressError ? "unavailable" : "unknown";
+  const unit = progressUnit(attempt);
+  const value = formatNumber(observation.current);
+  const suffix = unit ? ` ${unit}` : "";
+  if (kind === "indeterminate") return `${value}${suffix} · total unknown`;
+  const state = resolveAttemptProgressState(attempt);
+  const total = state.total === null ? "?" : formatNumber(state.total);
+  let ending = "";
+  if (kind === "ended") ending = " · ended";
+  else if (attempt.progressError) ending = " · stale";
+  return `${value} / ${total}${suffix}${ending}`;
+}
+
+function CardProgressTrackFill({
+  state,
+  hasObservation,
+}: {
+  state: ReturnType<typeof resolveAttemptProgressState>;
+  hasObservation: boolean;
+}) {
+  if (state.ratio !== null) {
+    return (
+      <View
+        style={[
+          styles.cardProgressFill,
+          state.kind === "ended" ? styles.cardProgressFillEnded : null,
+          percentageWidth(state.ratio),
+        ]}
+      />
+    );
+  }
+  return state.kind === "indeterminate" && hasObservation ? (
+    <View style={styles.cardProgressIndeterminate} />
+  ) : null;
 }
 
 function GridLines({
@@ -575,17 +637,6 @@ function percentageWidth(ratio: number): ViewStyle {
   return inlineUnistylesStyle({ width: `${ratio * 100}%` });
 }
 
-function latestProgressAttempt(detail: ExperimentDetail) {
-  return detail.attempts
-    .toReversed()
-    .find(
-      (attempt) =>
-        attempt.progress !== null ||
-        attempt.progressSource !== null ||
-        Boolean(attempt.progressPlans),
-    );
-}
-
 interface Point {
   x: number;
   y: number;
@@ -603,10 +654,6 @@ function arrowPoints(end: Point, direction: "left" | "right" | "up" | "down"): s
     return `${end.x},${end.y} ${end.x - size / 2},${end.y - size} ${end.x + size / 2},${end.y - size}`;
   }
   return `${end.x},${end.y} ${end.x - size / 2},${end.y + size} ${end.x + size / 2},${end.y + size}`;
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(maximum, value));
 }
 
 function formatNumber(value: number): string {
@@ -669,7 +716,8 @@ const styles = StyleSheet.create((theme) => ({
   cardBody: { flex: 1, padding: theme.spacing[3], gap: theme.spacing[2] },
   cardDescription: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   badges: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[1] },
-  cardProgressBlock: { marginTop: "auto", gap: theme.spacing[1] },
+  cardProgressList: { marginTop: "auto", gap: theme.spacing[2] },
+  cardProgressRow: { gap: theme.spacing[1] },
   cardProgressTrack: {
     height: 6,
     overflow: "hidden",
@@ -682,7 +730,19 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.accent,
   },
   cardProgressFillEnded: { backgroundColor: theme.colors.statusSuccess },
+  cardProgressIndeterminate: {
+    width: "24%",
+    height: "100%",
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+    opacity: theme.opacity[50],
+  },
   cardProgressText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  cardProgressTextError: { color: theme.colors.statusDanger },
+  cardProgressOverflowText: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+  },
   resizeHandle: {
     position: "absolute",
     right: 0,
