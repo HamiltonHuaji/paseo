@@ -270,80 +270,91 @@ export function ExperimentsScreen({
     ),
     [changeViewMode, handleRefresh, refreshing, viewMode, viewOptions],
   );
+  const content = (
+    <>
+      <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} />
+      {!connected ? <Message text="Host is offline." /> : null}
+      {listQuery.isLoading ? <ThemedLoadingSpinner /> : null}
+      {listQuery.error ? <Message text={errorMessage(listQuery.error)} error /> : null}
+      {groups.length === 0 && !listQuery.isLoading && !listQuery.error ? (
+        <Message text="No experiments in this project." />
+      ) : null}
+      <View style={[styles.board, optionalStyle(independentCanvasScroll, styles.boardFill)]}>
+        {viewMode === "list" ? (
+          <View style={styles.listColumn}>
+            {groups.map(([goal, goalExperiments]) => (
+              <View key={goal} style={styles.goalGroup}>
+                <Text style={styles.goalTitle}>{goal}</Text>
+                <View style={styles.card}>
+                  {goalExperiments.map((experiment, index) => (
+                    <ExperimentRow
+                      key={experiment.id}
+                      experiment={experiment}
+                      detail={detailByExperiment.get(experiment.id) ?? null}
+                      basedOn={
+                        experiment.basedOn ? (experimentById.get(experiment.basedOn) ?? null) : null
+                      }
+                      selected={experiment.id === selectedExperiment}
+                      bordered={index > 0}
+                      onSelect={setSelectedExperiment}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.canvasColumn,
+              optionalStyle(independentCanvasScroll, styles.canvasColumnFill),
+            ]}
+          >
+            {boardLayoutQuery.error ? (
+              <Message text={errorMessage(boardLayoutQuery.error)} error />
+            ) : null}
+            <ExperimentCanvas
+              experiments={experiments}
+              detailByExperiment={detailByExperiment}
+              storedPlacements={boardLayoutQuery.data ?? []}
+              selectedExperiment={selectedExperiment}
+              onSelectExperiment={setSelectedExperiment}
+              onClearSelection={clearSelection}
+              onPersistPlacement={persistPlacement}
+            />
+          </View>
+        )}
+        {selectedExperiment && client ? (
+          <ExperimentDetailPanel
+            serverId={serverId}
+            projectId={projectId}
+            experiment={selectedExperiment}
+            experimentById={experimentById}
+            onSelectExperiment={setSelectedExperiment}
+            attemptExpansionById={attemptExpansionById}
+            onAttemptExpandedChange={setAttemptExpanded}
+            active={active}
+            independentScroll={independentCanvasScroll}
+          />
+        ) : null}
+      </View>
+    </>
+  );
 
   return (
     <View style={styles.container}>
       <ExperimentsHeader embedded={embedded} actions={headerAction} />
-      <ScrollView
-        style={styles.outerScroll}
-        scrollEnabled={!independentCanvasScroll}
-        contentContainerStyle={[styles.content, optionalStyle(canvasMode, styles.contentFill)]}
-      >
-        <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} />
-        {!connected ? <Message text="Host is offline." /> : null}
-        {listQuery.isLoading ? <ThemedLoadingSpinner /> : null}
-        {listQuery.error ? <Message text={errorMessage(listQuery.error)} error /> : null}
-        {groups.length === 0 && !listQuery.isLoading && !listQuery.error ? (
-          <Message text="No experiments in this project." />
-        ) : null}
-        <View style={[styles.board, optionalStyle(canvasMode, styles.boardFill)]}>
-          {viewMode === "list" ? (
-            <View style={styles.listColumn}>
-              {groups.map(([goal, goalExperiments]) => (
-                <View key={goal} style={styles.goalGroup}>
-                  <Text style={styles.goalTitle}>{goal}</Text>
-                  <View style={styles.card}>
-                    {goalExperiments.map((experiment, index) => (
-                      <ExperimentRow
-                        key={experiment.id}
-                        experiment={experiment}
-                        detail={detailByExperiment.get(experiment.id) ?? null}
-                        basedOn={
-                          experiment.basedOn
-                            ? (experimentById.get(experiment.basedOn) ?? null)
-                            : null
-                        }
-                        selected={experiment.id === selectedExperiment}
-                        bordered={index > 0}
-                        onSelect={setSelectedExperiment}
-                      />
-                    ))}
-                  </View>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={[styles.canvasColumn, optionalStyle(canvasMode, styles.canvasColumnFill)]}>
-              {boardLayoutQuery.error ? (
-                <Message text={errorMessage(boardLayoutQuery.error)} error />
-              ) : null}
-              <ExperimentCanvas
-                experiments={experiments}
-                detailByExperiment={detailByExperiment}
-                storedPlacements={boardLayoutQuery.data ?? []}
-                selectedExperiment={selectedExperiment}
-                onSelectExperiment={setSelectedExperiment}
-                onClearSelection={clearSelection}
-                onPersistPlacement={persistPlacement}
-              />
-            </View>
-          )}
-          {selectedExperiment && client ? (
-            <ExperimentDetailPanel
-              serverId={serverId}
-              projectId={projectId}
-              experiment={selectedExperiment}
-              experimentById={experimentById}
-              onSelectExperiment={setSelectedExperiment}
-              attemptExpansionById={attemptExpansionById}
-              onAttemptExpandedChange={setAttemptExpanded}
-              active={active}
-              independentScroll={independentCanvasScroll}
-            />
-          ) : null}
-        </View>
-      </ScrollView>
+      <ExperimentsContentFrame fixed={independentCanvasScroll} content={content} />
     </View>
+  );
+}
+
+function ExperimentsContentFrame({ fixed, content }: { fixed: boolean; content: ReactNode }) {
+  if (fixed) return <View style={[styles.content, styles.fixedContent]}>{content}</View>;
+  return (
+    <ScrollView style={styles.outerScroll} contentContainerStyle={styles.content}>
+      {content}
+    </ScrollView>
   );
 }
 
@@ -1163,7 +1174,7 @@ const styles = StyleSheet.create((theme) => ({
     padding: { xs: theme.spacing[3], md: theme.spacing[6] },
     gap: theme.spacing[4],
   },
-  contentFill: { flexGrow: 1 },
+  fixedContent: { flex: 1, minHeight: 0, overflow: "hidden" },
   headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   embeddedActions: {
     flexDirection: "row",
