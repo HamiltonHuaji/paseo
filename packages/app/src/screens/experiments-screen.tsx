@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import {
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
@@ -86,6 +87,7 @@ export function ExperimentsScreen({
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const queryClient = useQueryClient();
+  const isCompactLayout = useIsCompactFormFactor();
   const fetchEnabled = canFetchExperiments(active, Boolean(client), connected, Boolean(projectId));
   const listQuery = useFetchQuery({
     queryKey: ["experiments", serverId, projectId],
@@ -103,6 +105,7 @@ export function ExperimentsScreen({
   const [viewMode, setViewMode] = useState<ExperimentViewMode>("list");
   const [attemptExpansionById, setAttemptExpansionById] = useState<Record<string, boolean>>({});
   const canvasMode = viewMode === "canvas";
+  const independentCanvasScroll = canvasMode && !isCompactLayout;
   const experiments = listQuery.data ?? EMPTY_EXPERIMENTS;
   const detailQueries = useFetchQueries<ExperimentDetail>(
     experiments.map((experiment) => ({
@@ -249,6 +252,8 @@ export function ExperimentsScreen({
     <View style={styles.container}>
       <ExperimentsHeader embedded={embedded} actions={headerAction} />
       <ScrollView
+        style={styles.outerScroll}
+        scrollEnabled={!independentCanvasScroll}
         contentContainerStyle={[styles.content, optionalStyle(canvasMode, styles.contentFill)]}
       >
         <EmbeddedExperimentsActions embedded={embedded} actions={headerAction} />
@@ -310,6 +315,7 @@ export function ExperimentsScreen({
               attemptExpansionById={attemptExpansionById}
               onAttemptExpandedChange={setAttemptExpanded}
               active={active}
+              independentScroll={independentCanvasScroll}
             />
           ) : null}
         </View>
@@ -398,6 +404,7 @@ function ExperimentDetailPanel({
   attemptExpansionById,
   onAttemptExpandedChange,
   active,
+  independentScroll,
 }: {
   serverId: string;
   projectId: string;
@@ -407,6 +414,7 @@ function ExperimentDetailPanel({
   attemptExpansionById: Record<string, boolean>;
   onAttemptExpandedChange: (attemptId: string, expanded: boolean) => void;
   active: boolean;
+  independentScroll: boolean;
 }) {
   const client = useHostRuntimeClient(serverId);
   const detailQuery = useFetchQuery({
@@ -455,8 +463,8 @@ function ExperimentDetailPanel({
     ? (experimentById.get(experimentRecord.basedOn) ?? null)
     : null;
 
-  return (
-    <View style={styles.detailColumn}>
+  const content = (
+    <>
       <View style={styles.detailHeader}>
         <Text style={styles.detailTitle}>{experimentRecord.shortDescription}</Text>
         <View style={styles.metaRow}>
@@ -520,7 +528,32 @@ function ExperimentDetailPanel({
           </View>
         </View>
       ) : null}
-    </View>
+    </>
+  );
+  return (
+    <ExperimentDetailContainer independentScroll={independentScroll}>
+      {content}
+    </ExperimentDetailContainer>
+  );
+}
+
+function ExperimentDetailContainer({
+  independentScroll,
+  children,
+}: {
+  independentScroll: boolean;
+  children: ReactNode;
+}) {
+  if (!independentScroll) {
+    return <View style={[styles.detailColumn, styles.detailColumnContent]}>{children}</View>;
+  }
+  return (
+    <ScrollView
+      style={[styles.detailColumn, styles.detailColumnScroll]}
+      contentContainerStyle={styles.detailColumnContent}
+    >
+      {children}
+    </ScrollView>
   );
 }
 
@@ -1078,6 +1111,7 @@ function mergePlacement(
 
 const styles = StyleSheet.create((theme) => ({
   container: { flex: 1, backgroundColor: theme.colors.background },
+  outerScroll: { flex: 1 },
   content: {
     padding: { xs: theme.spacing[3], md: theme.spacing[6] },
     gap: theme.spacing[4],
@@ -1098,14 +1132,14 @@ const styles = StyleSheet.create((theme) => ({
   detailColumn: {
     flex: 2,
     minWidth: 0,
-    gap: theme.spacing[3],
     backgroundColor: theme.colors.surface1,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[4],
     alignSelf: "flex-start",
   },
+  detailColumnScroll: { minHeight: 0, alignSelf: "stretch" },
+  detailColumnContent: { gap: theme.spacing[3], padding: theme.spacing[4] },
   detailHeader: { gap: theme.spacing[2] },
   goalGroup: { gap: theme.spacing[2] },
   goalTitle: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
