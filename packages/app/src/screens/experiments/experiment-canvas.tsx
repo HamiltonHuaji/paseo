@@ -312,70 +312,86 @@ function CanvasCard({
       commitRef.current(resizePlacement(gestureOriginRef.current, gesture, true));
     },
   });
-  const cardStyle = useMemo(
+  const [isHovered, setIsHovered] = useState(false);
+  const containerStyle = useMemo(
     () => [
-      styles.card,
-      selected && styles.cardSelected,
+      styles.cardContainer,
       placementStyle(placement),
-      inlineUnistylesStyle({ zIndex: selected ? 3 : 2 }),
+      inlineUnistylesStyle({ zIndex: cardZIndex(isHovered, selected) }),
     ],
-    [placement, selected],
+    [isHovered, placement, selected],
   );
+  const cardStyle = useMemo(() => [styles.card, selected && styles.cardSelected], [selected]);
   const progressAttempts = detail ? selectCardProgressAttempts(detail) : [];
-  const progressRowCapacity = Math.max(1, Math.floor((placement.height * GRID_SIZE - 118) / 28));
-  const visibleProgressCount =
-    progressAttempts.length > progressRowCapacity
-      ? Math.max(1, progressRowCapacity - 1)
-      : progressRowCapacity;
-  const visibleProgressAttempts = progressAttempts.slice(-visibleProgressCount);
-  const hiddenProgressCount = progressAttempts.length - visibleProgressAttempts.length;
+  const primaryProgressAttempt = progressAttempts.at(-1) ?? null;
   const handleSelect = useCallback(() => onSelect(experiment.id), [experiment.id, onSelect]);
+  const handlePointerEnter = useCallback(() => setIsHovered(true), []);
+  const handlePointerLeave = useCallback(() => setIsHovered(false), []);
 
   return (
-    <View style={cardStyle}>
-      <View
-        style={styles.cardHeader}
-        onPointerDown={handleDragPointerDown}
-        {...(!isWeb ? dragResponder.panHandlers : {})}
-      >
-        <ThemedGrip size={14} uniProps={mutedIconMapping} />
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {experiment.shortDescription}
-        </Text>
-      </View>
-      <Pressable style={styles.cardBody} onPress={handleSelect}>
-        <Text style={styles.cardDescription} numberOfLines={3}>
-          {experiment.description}
-        </Text>
-        <View style={styles.badges}>
-          {experiment.goal ? <StatusBadge label={experiment.goal} /> : null}
-          {detail ? (
-            <StatusBadge label={`${detail.attempts.length} attempts`} variant="muted" />
-          ) : null}
-          {experiment.conclusion ? <StatusBadge label="concluded" variant="success" /> : null}
+    <View
+      style={containerStyle}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+    >
+      <View style={cardStyle}>
+        <View
+          style={styles.cardHeader}
+          onPointerDown={handleDragPointerDown}
+          {...(!isWeb ? dragResponder.panHandlers : {})}
+        >
+          <ThemedGrip size={14} uniProps={mutedIconMapping} />
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {experiment.shortDescription}
+          </Text>
         </View>
-        {progressAttempts.length > 0 ? (
-          <View style={styles.cardProgressList}>
-            {visibleProgressAttempts.map((attempt) => (
-              <CardAttemptProgress key={attempt.id} attempt={attempt} />
-            ))}
-            {hiddenProgressCount > 0 ? (
-              <Text style={styles.cardProgressOverflowText} numberOfLines={1}>
-                +{hiddenProgressCount} more unfinished
-              </Text>
+        <Pressable style={styles.cardBody} onPress={handleSelect}>
+          <Text style={styles.cardDescription} numberOfLines={3}>
+            {experiment.description}
+          </Text>
+          <View style={styles.badges}>
+            {experiment.goal ? <StatusBadge label={experiment.goal} /> : null}
+            {detail ? (
+              <StatusBadge label={`${detail.attempts.length} attempts`} variant="muted" />
             ) : null}
+            {experiment.conclusion ? <StatusBadge label="concluded" variant="success" /> : null}
           </View>
-        ) : null}
-      </Pressable>
-      <View
-        style={styles.resizeHandle}
-        onPointerDown={handleResizePointerDown}
-        {...(!isWeb ? resizeResponder.panHandlers : {})}
-      >
-        <ThemedMaximize2 size={13} uniProps={mutedIconMapping} />
+          {primaryProgressAttempt ? (
+            <View style={styles.cardProgressList}>
+              <CardAttemptProgress attempt={primaryProgressAttempt} />
+            </View>
+          ) : null}
+        </Pressable>
+        <View
+          style={styles.resizeHandle}
+          onPointerDown={handleResizePointerDown}
+          {...(!isWeb ? resizeResponder.panHandlers : {})}
+        >
+          <ThemedMaximize2 size={13} uniProps={mutedIconMapping} />
+        </View>
       </View>
+      {progressAttempts.length > 1 ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.cardProgressHoverPanel,
+            isHovered ? styles.cardProgressHoverPanelVisible : null,
+          ]}
+        >
+          <Text style={styles.cardProgressHoverTitle}>Unfinished attempts</Text>
+          {progressAttempts.map((attempt) => (
+            <CardAttemptProgress key={attempt.id} attempt={attempt} />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
+}
+
+function cardZIndex(isHovered: boolean, selected: boolean): number {
+  if (isHovered) return 4;
+  if (selected) return 3;
+  return 2;
 }
 
 function CardAttemptProgress({ attempt }: { attempt: ExperimentAttempt }) {
@@ -688,8 +704,14 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.borderAccent,
   },
   lineageOverlay: { position: "absolute", left: 0, top: 0 },
+  cardContainer: { position: "absolute", overflow: "visible" },
   card: {
+    flex: 1,
     position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     overflow: "hidden",
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -739,9 +761,25 @@ const styles = StyleSheet.create((theme) => ({
   },
   cardProgressText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   cardProgressTextError: { color: theme.colors.statusDanger },
-  cardProgressOverflowText: {
-    color: theme.colors.foregroundMuted,
+  cardProgressHoverPanel: {
+    position: "absolute",
+    left: "100%",
+    top: 0,
+    width: 280,
+    marginLeft: theme.spacing[2],
+    padding: theme.spacing[3],
+    gap: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+    opacity: theme.opacity[0],
+  },
+  cardProgressHoverPanelVisible: { opacity: theme.opacity[100] },
+  cardProgressHoverTitle: {
+    color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
   },
   resizeHandle: {
     position: "absolute",

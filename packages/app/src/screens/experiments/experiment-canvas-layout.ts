@@ -150,9 +150,8 @@ function automaticCardSize(
   detail: ExperimentDetail | null,
 ): Pick<ResolvedPlacement, "width" | "height"> {
   const width = experiment.shortDescription.length > 48 ? 14 : DEFAULT_WIDTH;
-  const progressCount = detail ? selectCardProgressAttempts(detail).length : 0;
-  const height = progressCount > 0 ? 8 + Math.max(0, progressCount - 1) : DEFAULT_HEIGHT;
-  return { width, height };
+  const hasProgress = detail ? selectCardProgressAttempts(detail).length > 0 : false;
+  return { width, height: hasProgress ? 8 : DEFAULT_HEIGHT };
 }
 
 function compareExperiments(left: ExperimentRecord, right: ExperimentRecord): number {
