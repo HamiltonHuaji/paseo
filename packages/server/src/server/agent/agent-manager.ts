@@ -3040,6 +3040,9 @@ export class AgentManager {
     const providerMessageId = submittedRow?.providerMessageId ?? messageId;
 
     if (this.hasInFlightRun(agentId)) {
+      if (submittedRow?.turnId && submittedRow.turnId === agent.activeTurnId) {
+        throw new Error("Wait for the current turn to finish before rewinding this conversation");
+      }
       await this.cancelAgentRunBefore(agentId, "rewind");
     }
 

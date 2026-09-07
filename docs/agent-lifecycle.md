@@ -31,6 +31,12 @@ configuration before reporting the reload failure. Never overlap the two runtime
 providers: the provider rejects the second writer, and the configuration refresh becomes
 deterministically unusable.
 
+Rewind also keeps the Paseo agent identity while changing its provider persistence handle. Codex
+rewind forks the native thread immediately before the selected user-message turn, then binds the
+existing Paseo agent to the returned thread. The source Codex thread remains stored as a recovery
+copy. File edits are not reverted. Paginated Codex threads resolve message boundaries through the
+item-list API; do not use the deprecated native rollback API or request full reconstructed turns.
+
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
 workflows all live in the CLI process, and the completion notification that would have woken the

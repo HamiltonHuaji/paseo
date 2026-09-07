@@ -1594,15 +1594,22 @@ describe("Codex app-server provider", () => {
     );
 
     await session.startTurn("remember first");
+    appServer.startsTurn({ threadId: "thread-1", turnId: "turn-first" });
     emitCodexUserMessage(appServer, { id: "codex-first", text: "remember first" });
     appServer.completeTurn();
     await session.startTurn("remember second");
+    appServer.startsTurn({ threadId: "thread-1", turnId: "turn-second" });
     emitCodexUserMessage(appServer, { id: "codex-second", text: "remember second" });
     appServer.completeTurn();
 
     await session.revertConversation({ messageId: "codex-first" });
 
-    expect(appServer.recordedRollbacks).toEqual([{ threadId: "forked-thread", numTurns: 2 }]);
+    expect(appServer.requests()).toContainEqual(
+      expect.objectContaining({
+        method: "thread/fork",
+        params: expect.objectContaining({ beforeTurnId: "turn-first", excludeTurns: true }),
+      }),
+    );
     await expect(session.getRuntimeInfo()).resolves.toMatchObject({
       sessionId: "forked-thread",
     });

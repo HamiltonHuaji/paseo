@@ -78,14 +78,11 @@ import {
   CodexAppServerClient,
   CodexAppServerRpcError,
   parseCodexThreadForkResponse,
-  parseCodexThreadRollbackResponse,
   type CodexThreadForkParams,
   type CodexThreadForkResponse,
-  type CodexThreadRollbackParams,
-  type CodexThreadRollbackResponse,
   type CodexAppServerTraceContext,
 } from "./codex/app-server-transport.js";
-import { type CodexUserMessageTurnIndex, revertCodexConversation } from "./codex/rewind.js";
+import { revertCodexConversation } from "./codex/rewind.js";
 import {
   materializeProviderImage,
   renderProviderImageOutputAsAssistantMarkdown,
@@ -248,7 +245,6 @@ const DEFAULT_CODEX_MODE_ID = "auto";
 interface CodexAppServerClientLike {
   request(method: string, params?: unknown): Promise<unknown>;
   forkThread?(params: CodexThreadForkParams): Promise<CodexThreadForkResponse>;
-  rollbackThread?(params: CodexThreadRollbackParams): Promise<CodexThreadRollbackResponse>;
   notify(method: string, params?: unknown): void;
   dispose(): Promise<void>;
 }
@@ -441,6 +437,7 @@ interface PersistedSubAgentRoute {
 interface CodexThreadHistoryProjection {
   timeline: PersistedTimelineEntry[];
   subAgentRoutes: PersistedSubAgentRoute[];
+  userMessageTurnIds: Map<string, string>;
 }
 
 function mergeCodexConfiguredDefaults(
@@ -1917,6 +1914,7 @@ const CodexThreadReadResponseSchema = z
   .object({
     thread: z
       .object({
+        historyMode: z.string().optional(),
         turns: z
           .array(
             z
@@ -1935,14 +1933,81 @@ const CodexThreadReadResponseSchema = z
   .passthrough();
 
 type CodexThreadReadResponse = z.infer<typeof CodexThreadReadResponseSchema>;
-type CodexThreadReadRequest = (threadId: string) => Promise<unknown>;
+type CodexAppServerRequest = (method: string, params?: unknown) => Promise<unknown>;
 
-async function requestCodexThreadHistory(
-  requestThread: CodexThreadReadRequest,
+const CodexThreadItemsListResponseSchema = z
+  .object({
+    data: z
+      .array(
+        z
+          .object({
+            turnId: z.string(),
+            item: z.unknown(),
+          })
+          .passthrough(),
+      )
+      .default([]),
+    nextCursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+function isPaginatedThreadHistoryError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /paginated|includeTurns|full.history|list_turns is not supported/iu.test(message);
+}
+
+async function requestPaginatedCodexThreadHistory(
+  request: CodexAppServerRequest,
   threadId: string,
 ): Promise<CodexThreadReadResponse> {
-  const response = await requestThread(threadId);
-  return CodexThreadReadResponseSchema.parse(response);
+  const turnsById = new Map<string, CodexThreadReadResponse["thread"]["turns"][number]>();
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  while (true) {
+    const response = CodexThreadItemsListResponseSchema.parse(
+      await request("thread/items/list", {
+        threadId,
+        limit: 100,
+        sortDirection: "asc",
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    for (const entry of response.data) {
+      const turn = turnsById.get(entry.turnId);
+      if (turn) {
+        turn.items.push(entry.item);
+      } else {
+        turnsById.set(entry.turnId, { id: entry.turnId, items: [entry.item] });
+      }
+    }
+    const nextCursor = response.nextCursor ?? null;
+    if (!nextCursor) break;
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("Codex returned a repeated thread history cursor");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  return CodexThreadReadResponseSchema.parse({
+    thread: { historyMode: "paginated", turns: Array.from(turnsById.values()) },
+  });
+}
+
+async function requestCodexThreadHistory(
+  request: CodexAppServerRequest,
+  threadId: string,
+): Promise<CodexThreadReadResponse> {
+  try {
+    const response = CodexThreadReadResponseSchema.parse(
+      await request("thread/read", { threadId, includeTurns: true }),
+    );
+    if (response.thread.historyMode !== "paginated") {
+      return response;
+    }
+  } catch (error) {
+    if (!isPaginatedThreadHistoryError(error)) throw error;
+  }
+  return requestPaginatedCodexThreadHistory(request, threadId);
 }
 
 function readCodexThreadItemId(item: unknown): string | null {
@@ -1966,11 +2031,11 @@ export async function resolveCodexForkLastTurnId(input: {
   threadId: string;
   boundaryMessageId: string;
   isLatestCompletedTurn: boolean;
-  requestThread: CodexThreadReadRequest;
+  request: CodexAppServerRequest;
   activeTurnId?: string | null;
 }): Promise<string | undefined> {
   if (input.isLatestCompletedTurn) return undefined;
-  const history = await requestCodexThreadHistory(input.requestThread, input.threadId);
+  const history = await requestCodexThreadHistory(input.request, input.threadId);
   const turnId = findCodexTurnIdContainingItem(history.thread.turns, input.boundaryMessageId);
   if (!turnId) {
     throw new Error(`Could not map Codex message '${input.boundaryMessageId}' to a completed turn`);
@@ -1985,10 +2050,11 @@ export async function resolveCodexForkLastTurnId(input: {
 async function loadCodexThreadHistoryTimeline(params: {
   threadId: string;
   cwd: string | null;
-  requestThread: CodexThreadReadRequest;
+  request: CodexAppServerRequest;
 }): Promise<CodexThreadHistoryProjection> {
-  const response = await requestCodexThreadHistory(params.requestThread, params.threadId);
+  const response = await requestCodexThreadHistory(params.request, params.threadId);
   const timeline: PersistedTimelineEntry[] = [];
+  const userMessageTurnIds = new Map<string, string>();
   const subAgentTimelineIndexByThreadId = new Map<string, number>();
   for (const turn of response.thread.turns) {
     for (const item of turn.items) {
@@ -2012,6 +2078,9 @@ async function loadCodexThreadHistoryTimeline(params: {
         }
       }
       for (const timelineItem of threadItemToTimelineEntries(item, { cwd: params.cwd })) {
+        if (timelineItem.type === "user_message" && timelineItem.messageId && turn.id) {
+          userMessageTurnIds.set(timelineItem.messageId, turn.id);
+        }
         const timestamp =
           readCodexHistoryTimestamp(item) ?? readCodexTurnHistoryTimestamp(turn, timelineItem);
         const settledTimelineItem =
@@ -2036,14 +2105,7 @@ async function loadCodexThreadHistoryTimeline(params: {
         : [];
     },
   );
-  return { timeline, subAgentRoutes };
-}
-
-function readCodexThread(client: CodexAppServerClientLike, threadId: string): Promise<unknown> {
-  return client.request("thread/read", {
-    threadId,
-    includeTurns: true,
-  });
+  return { timeline, subAgentRoutes, userMessageTurnIds };
 }
 
 export async function forkCodexThread(
@@ -2054,16 +2116,6 @@ export async function forkCodexThread(
     return client.forkThread(params);
   }
   return parseCodexThreadForkResponse(await client.request("thread/fork", params));
-}
-
-export async function rollbackCodexThread(
-  client: CodexAppServerClientLike,
-  params: CodexThreadRollbackParams,
-): Promise<CodexThreadRollbackResponse> {
-  if (client.rollbackThread) {
-    return client.rollbackThread(params);
-  }
-  return parseCodexThreadRollbackResponse(await client.request("thread/rollback", params));
 }
 
 function toSandboxPolicy(
@@ -3325,6 +3377,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   private latestPlanResult: { callId: string; text: string; turnId: string | null } | null = null;
   private readonly userMessageTurnIndexes = new Map<string, number>();
   private readonly userMessageTurnIds: string[] = [];
+  private readonly userMessageNativeTurnIds = new Map<string, string>();
   private pendingManualCompactionStarts = 0;
   private compactionTriggerByItemId = new Map<string, "auto" | "manual">();
   private pendingRootCompactionItemIds = new Set<string>();
@@ -3766,11 +3819,9 @@ export class CodexAppServerAgentSession implements AgentSession {
     const history = await loadCodexThreadHistoryTimeline({
       threadId,
       cwd: this.config.cwd ?? null,
-      requestThread: (threadIdToRead) => {
-        return readCodexThread(client, threadIdToRead);
-      },
+      request: (method, params) => client.request(method, params),
     });
-    const { timeline, subAgentRoutes } = history;
+    const { timeline, subAgentRoutes, userMessageTurnIds } = history;
     this.subAgentCallsByCallId.clear();
     this.subAgentCallIdByChildThreadId.clear();
     this.pendingSubAgentNotificationsByThreadId.clear();
@@ -3784,7 +3835,10 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.resetCodexUserMessageTurns();
     for (const entry of timeline) {
       if (entry.item.type === "user_message") {
-        this.rememberCodexUserMessageTurn(entry.item.messageId);
+        const nativeTurnId = entry.item.messageId
+          ? userMessageTurnIds.get(entry.item.messageId)
+          : undefined;
+        this.rememberCodexUserMessageTurn(entry.item.messageId, nativeTurnId);
       }
     }
     this.persistedHistory = timeline;
@@ -3812,7 +3866,7 @@ export class CodexAppServerAgentSession implements AgentSession {
         const childHistory = await loadCodexThreadHistoryTimeline({
           threadId: next.route.childThreadId,
           cwd: this.config.cwd ?? null,
-          requestThread: (childThreadId) => readCodexThread(client, childThreadId),
+          request: (method, params) => client.request(method, params),
         });
         for (const entry of childHistory.timeline) {
           this.emitProviderSubagentTimeline(next.route.childThreadId, entry.item, entry.timestamp);
@@ -3834,6 +3888,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   ): Promise<void> {
     if (!this.client || !this.currentThreadId) return;
     const params: Record<string, unknown> = { threadId: this.currentThreadId };
+    params.excludeTurns = true;
     const developerInstructions = composeSystemPromptParts(
       this.config.systemPrompt,
       this.config.daemonAppendSystemPrompt,
@@ -4284,9 +4339,15 @@ export class CodexAppServerAgentSession implements AgentSession {
     );
   }
 
-  private rememberCodexUserMessageTurn(messageId: string | null | undefined): boolean {
+  private rememberCodexUserMessageTurn(
+    messageId: string | null | undefined,
+    nativeTurnId?: string | null,
+  ): boolean {
     if (typeof messageId !== "string" || messageId.length === 0) {
       return false;
+    }
+    if (nativeTurnId) {
+      this.userMessageNativeTurnIds.set(messageId, nativeTurnId);
     }
     if (this.userMessageTurnIndexes.has(messageId)) {
       return false;
@@ -4299,6 +4360,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   private resetCodexUserMessageTurns(): void {
     this.userMessageTurnIndexes.clear();
     this.userMessageTurnIds.length = 0;
+    this.userMessageNativeTurnIds.clear();
   }
 
   private truncateCodexUserMessageTurns(numTurns: number): void {
@@ -4307,16 +4369,15 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
     this.userMessageTurnIds.length = Math.max(0, this.userMessageTurnIds.length - numTurns);
     this.userMessageTurnIndexes.clear();
+    const retainedMessageIds = new Set(this.userMessageTurnIds);
+    for (const messageId of this.userMessageNativeTurnIds.keys()) {
+      if (!retainedMessageIds.has(messageId)) {
+        this.userMessageNativeTurnIds.delete(messageId);
+      }
+    }
     this.userMessageTurnIds.forEach((messageId, index) => {
       this.userMessageTurnIndexes.set(messageId, index);
     });
-  }
-
-  private codexUserMessageTurns(): CodexUserMessageTurnIndex {
-    return {
-      resolve: (messageId) => this.userMessageTurnIndexes.get(messageId) ?? null,
-      count: () => this.userMessageTurnIds.length,
-    };
   }
 
   subscribe(callback: (event: AgentStreamEvent) => void): () => void {
@@ -4705,7 +4766,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       threadId: source.currentThreadId,
       boundaryMessageId: input.boundaryMessageId,
       isLatestCompletedTurn: input.isLatestCompletedTurn,
-      requestThread: (threadId) => readCodexThread(source.client!, threadId),
+      request: (method, params) => source.client!.request(method, params),
       activeTurnId: source.currentTurnId,
     });
     const forked = await forkCodexThread(this.client, {
@@ -4716,7 +4777,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       serviceTier,
       ...(codexConfig ? { config: codexConfig } : {}),
       ...(developerInstructions ? { developerInstructions } : {}),
-      excludeTurns: false,
+      excludeTurns: true,
     });
     this.currentThreadId = forked.thread.id;
     this.rememberResolvedSandboxPolicy(forked);
@@ -4734,10 +4795,28 @@ export class CodexAppServerAgentSession implements AgentSession {
       await this.ensureThread();
     }
 
+    if (!this.currentThreadId) {
+      throw new Error("Codex thread is not ready for rewind");
+    }
+    let beforeTurnId = this.userMessageNativeTurnIds.get(input.messageId) ?? null;
+    if (!beforeTurnId) {
+      const history = await requestCodexThreadHistory(
+        (method, params) => this.client!.request(method, params),
+        this.currentThreadId,
+      );
+      beforeTurnId = findCodexTurnIdContainingItem(history.thread.turns, input.messageId);
+    }
+    if (!beforeTurnId) {
+      throw new Error(`Codex could not find user message ${input.messageId} in the current thread`);
+    }
+    if (beforeTurnId === this.currentTurnId) {
+      throw new Error("Wait for the current turn to finish before rewinding this conversation");
+    }
+
     await revertCodexConversation({
       client: this.client,
       threadId: this.currentThreadId,
-      messageId: input.messageId,
+      beforeTurnId,
       cwd: this.config.cwd ?? null,
       model: this.config.model ?? null,
       serviceTier: this.serviceTier,
@@ -4746,7 +4825,6 @@ export class CodexAppServerAgentSession implements AgentSession {
         this.config.systemPrompt,
         this.config.daemonAppendSystemPrompt,
       ),
-      userMessageTurns: this.codexUserMessageTurns(),
       setThreadId: async (threadId) => {
         this.currentThreadId = threadId;
         this.cachedRuntimeInfo = null;
@@ -6566,7 +6644,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.emitSubAgentActivityUpdate(childSubAgentCallId, "running");
       return;
     }
-    if (!this.rememberCodexUserMessageTurn(timelineItem.messageId)) {
+    if (!this.rememberCodexUserMessageTurn(timelineItem.messageId, this.currentTurnId)) {
       return;
     }
     const clientMessageId = timelineItem.clientMessageId ?? this.activeClientMessageId;

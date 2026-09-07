@@ -1,20 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import type {
-  CodexThreadForkParams,
-  CodexThreadForkResponse,
-  CodexThreadRollbackParams,
-  CodexThreadRollbackResponse,
-} from "./app-server-transport.js";
-import {
-  type CodexUserMessageTurnIndex,
-  type CodexRewindClient,
-  revertCodexConversation,
-} from "./rewind.js";
+import type { CodexThreadForkParams, CodexThreadForkResponse } from "./app-server-transport.js";
+import { type CodexRewindClient, revertCodexConversation } from "./rewind.js";
 
 class FakeCodex implements CodexRewindClient {
   readonly recordedForks: CodexThreadForkParams[] = [];
-  readonly recordedRollbacks: CodexThreadRollbackParams[] = [];
 
   async forkThread(params: CodexThreadForkParams): Promise<CodexThreadForkResponse> {
     this.recordedForks.push(params);
@@ -39,54 +29,23 @@ class FakeCodex implements CodexRewindClient {
     };
   }
 
-  async rollbackThread(params: CodexThreadRollbackParams): Promise<CodexThreadRollbackResponse> {
-    this.recordedRollbacks.push(params);
-    return {
-      thread: {
-        id: params.threadId,
-        sessionId: "forked-session",
-        forkedFromId: "source-thread",
-        turns: [],
-      },
-    };
-  }
-
   request(): Promise<unknown> {
     throw new Error("FakeCodex uses typed thread methods");
   }
 }
 
-class CodexMessageTurns implements CodexUserMessageTurnIndex {
-  constructor(private readonly indexesByMessageId: Map<string, number>) {}
-
-  resolve(messageId: string): number | null {
-    return this.indexesByMessageId.get(messageId) ?? null;
-  }
-
-  count(): number {
-    return this.indexesByMessageId.size;
-  }
-}
-
 describe("Codex Rewind", () => {
-  test("rewinds the conversation by forking the thread and rolling back past the native user message", async () => {
+  test("rewinds the conversation by forking before the native user message turn", async () => {
     const codex = new FakeCodex();
-    const userMessageTurns = new CodexMessageTurns(
-      new Map([
-        ["codex-first", 0],
-        ["codex-second", 1],
-      ]),
-    );
     let reboundThreadId: string | null = null;
 
     await revertCodexConversation({
       client: codex,
       threadId: "source-thread",
-      messageId: "codex-first",
+      beforeTurnId: "turn-first",
       cwd: "/workspace/project",
       model: "gpt-5.4-mini",
       serviceTier: null,
-      userMessageTurns,
       setThreadId: (threadId) => {
         reboundThreadId = threadId;
       },
@@ -95,56 +54,44 @@ describe("Codex Rewind", () => {
     expect(codex.recordedForks).toEqual([
       {
         threadId: "source-thread",
+        beforeTurnId: "turn-first",
         cwd: "/workspace/project",
         model: "gpt-5.4-mini",
         serviceTier: null,
-        excludeTurns: false,
-        persistExtendedHistory: true,
+        excludeTurns: true,
       },
     ]);
-    expect(codex.recordedRollbacks).toEqual([{ threadId: "forked-thread", numTurns: 2 }]);
     expect(reboundThreadId).toBe("forked-thread");
   });
 
-  test("rewinds the conversation using native user message ids hydrated from app-server history", async () => {
+  test("rebinds the Paseo session to the returned fork thread", async () => {
     const codex = new FakeCodex();
-    const userMessageTurns = new CodexMessageTurns(
-      new Map([
-        ["codex-first", 0],
-        ["codex-second", 1],
-        ["codex-third", 2],
-      ]),
-    );
     let reboundThreadId: string | null = null;
 
     await revertCodexConversation({
       client: codex,
       threadId: "source-thread",
-      messageId: "codex-second",
-      userMessageTurns,
+      beforeTurnId: "turn-second",
       setThreadId: (threadId) => {
         reboundThreadId = threadId;
       },
     });
 
-    expect(codex.recordedRollbacks).toEqual([{ threadId: "forked-thread", numTurns: 2 }]);
+    expect(codex.recordedForks[0]?.beforeTurnId).toBe("turn-second");
     expect(reboundThreadId).toBe("forked-thread");
   });
 
-  test("declines to rewind when the user message is not in the Codex thread", async () => {
+  test("declines to rewind when the Codex thread is unavailable", async () => {
     const codex = new FakeCodex();
-    const userMessageTurns = new CodexMessageTurns(new Map([["codex-first", 0]]));
 
     await expect(
       revertCodexConversation({
         client: codex,
-        threadId: "source-thread",
-        messageId: "missing-message",
-        userMessageTurns,
+        threadId: null,
+        beforeTurnId: "turn-first",
         setThreadId: () => undefined,
       }),
-    ).rejects.toThrow("Codex could not find user message missing-message");
+    ).rejects.toThrow("Codex thread is not ready for rewind");
     expect(codex.recordedForks).toEqual([]);
-    expect(codex.recordedRollbacks).toEqual([]);
   });
 });

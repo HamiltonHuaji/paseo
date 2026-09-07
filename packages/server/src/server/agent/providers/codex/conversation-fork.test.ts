@@ -99,7 +99,7 @@ describe("Codex conversation fork", () => {
         threadId: "thread-source",
         boundaryMessageId: "assistant-latest",
         isLatestCompletedTurn: true,
-        requestThread,
+        request: requestThread,
       }),
     ).resolves.toBeUndefined();
     expect(requestThread).not.toHaveBeenCalled();
