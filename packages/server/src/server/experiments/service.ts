@@ -17,6 +17,7 @@ import type {
 } from "@getpaseo/protocol/experiments";
 import type { ProjectRegistry } from "../workspace-registry.js";
 import { ExperimentStoreError, ProjectExperimentStore } from "./store.js";
+import { type ViewerDirectoryPage, ViewerDirectoryPager } from "./viewer-directory.js";
 
 const execFileAsync = promisify(execFile);
 const INITIAL_LOG_TAIL_BYTES = 4 * 1024 * 1024;
@@ -33,6 +34,7 @@ export interface ResolvedViewerEntry {
 export class ExperimentService {
   private readonly stores = new Map<string, Promise<ProjectExperimentStore>>();
   private readonly refreshes = new Map<string, Promise<ReturnTypeValue>>();
+  private readonly viewerDirectories = new ViewerDirectoryPager();
 
   constructor(private readonly projectRegistry: Pick<ProjectRegistry, "get">) {}
 
@@ -40,6 +42,7 @@ export class ExperimentService {
     const stores = await Promise.all(this.stores.values());
     for (const store of stores) store.close();
     this.stores.clear();
+    this.viewerDirectories.clear();
   }
 
   async list(
@@ -169,6 +172,35 @@ export class ExperimentService {
     attemptId: string | null,
     requestPath: string,
   ): Promise<string | null> {
+    let candidate = await this.resolveViewerPath(projectId, experimentId, attemptId, requestPath);
+    if (!candidate) return null;
+    const info = await stat(candidate).catch(() => null);
+    if (info?.isDirectory()) candidate = path.join(candidate, "index.html");
+    return (await stat(candidate).catch(() => null))?.isFile() ? candidate : null;
+  }
+
+  async listViewerDirectory(
+    projectId: string,
+    experimentId: string,
+    attemptId: string | null,
+    requestPath: string,
+    options: { cursor: string | null; limit: number | null },
+  ): Promise<ViewerDirectoryPage | null> {
+    assertRelativeViewerPath(requestPath, "request");
+    const normalized = trimSlashes(requestPath);
+    const binding = JSON.stringify({ projectId, experimentId, attemptId, path: normalized });
+    if (options.cursor) return this.viewerDirectories.nextPage(options.cursor, binding);
+    const candidate = await this.resolveViewerPath(projectId, experimentId, attemptId, normalized);
+    if (!candidate || !(await stat(candidate).catch(() => null))?.isDirectory()) return null;
+    return this.viewerDirectories.firstPage(candidate, binding, options.limit);
+  }
+
+  private async resolveViewerPath(
+    projectId: string,
+    experimentId: string,
+    attemptId: string | null,
+    requestPath: string,
+  ): Promise<string | null> {
     const store = await this.store(projectId);
     const experiment = store.getExperiment(experimentId).experiment;
     const attempt = attemptId ? store.getAttempt(attemptId) : null;
@@ -192,11 +224,9 @@ export class ExperimentService {
       store.projectRoot,
     );
     const relative = normalized === mount ? "" : normalized.slice(mount.length + 1);
-    let candidate = path.resolve(root, relative);
+    const candidate = path.resolve(root, relative);
     if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) return null;
-    const info = await stat(candidate).catch(() => null);
-    if (info?.isDirectory()) candidate = path.join(candidate, "index.html");
-    return (await stat(candidate).catch(() => null))?.isFile() ? candidate : null;
+    return candidate;
   }
 
   async refreshProgress(projectId: string, attemptId: string): Promise<ReturnTypeValue> {

@@ -2015,16 +2015,71 @@ function readCodexThreadItemId(item: unknown): string | null {
   return typeof record?.id === "string" && record.id.length > 0 ? record.id : null;
 }
 
+function readCodexThreadItemClientId(item: unknown): string | null {
+  const record = toObjectRecord(item);
+  return (
+    nonEmptyString(record?.clientId ?? record?.client_id ?? record?.clientUserMessageId) ?? null
+  );
+}
+
+function isCodexUserMessageItem(item: unknown): boolean {
+  const record = toObjectRecord(item);
+  return (
+    normalizeCodexThreadItemType(typeof record?.type === "string" ? record.type : undefined) ===
+    "userMessage"
+  );
+}
+
+function codexThreadItemMatchesMessage(item: unknown, messageId: string): boolean {
+  return (
+    readCodexThreadItemId(item) === messageId || readCodexThreadItemClientId(item) === messageId
+  );
+}
+
 export function findCodexTurnIdContainingItem(
   turns: CodexThreadReadResponse["thread"]["turns"],
   itemId: string,
 ): string | null {
   for (const turn of turns) {
-    if (turn.items.some((item) => readCodexThreadItemId(item) === itemId)) {
+    if (turn.items.some((item) => codexThreadItemMatchesMessage(item, itemId))) {
       return turn.id ?? null;
     }
   }
   return null;
+}
+
+async function resolveCodexRewindTurnId(
+  request: CodexAppServerRequest,
+  threadId: string,
+  messageId: string,
+): Promise<string | null> {
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  while (true) {
+    const response = CodexThreadItemsListResponseSchema.parse(
+      await request("thread/items/list", {
+        threadId,
+        limit: 100,
+        sortDirection: "asc",
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    for (const entry of response.data) {
+      if (
+        isCodexUserMessageItem(entry.item) &&
+        codexThreadItemMatchesMessage(entry.item, messageId)
+      ) {
+        return entry.turnId;
+      }
+    }
+    const nextCursor = response.nextCursor ?? null;
+    if (!nextCursor) return null;
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("Codex returned a repeated thread item cursor while resolving rewind");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
 }
 
 export async function resolveCodexForkLastTurnId(input: {
@@ -4800,14 +4855,16 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
     let beforeTurnId = this.userMessageNativeTurnIds.get(input.messageId) ?? null;
     if (!beforeTurnId) {
-      const history = await requestCodexThreadHistory(
+      beforeTurnId = await resolveCodexRewindTurnId(
         (method, params) => this.client!.request(method, params),
         this.currentThreadId,
+        input.messageId,
       );
-      beforeTurnId = findCodexTurnIdContainingItem(history.thread.turns, input.messageId);
     }
     if (!beforeTurnId) {
-      throw new Error(`Codex could not find user message ${input.messageId} in the current thread`);
+      throw new Error(
+        `Codex has not persisted user message ${input.messageId}; it cannot be used as a rewind boundary`,
+      );
     }
     if (beforeTurnId === this.currentTurnId) {
       throw new Error("Wait for the current turn to finish before rewinding this conversation");

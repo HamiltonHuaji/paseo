@@ -34,8 +34,9 @@ deterministically unusable.
 Rewind also keeps the Paseo agent identity while changing its provider persistence handle. Codex
 rewind forks the native thread immediately before the selected user-message turn, then binds the
 existing Paseo agent to the returned thread. The source Codex thread remains stored as a recovery
-copy. File edits are not reverted. Paginated Codex threads resolve message boundaries through the
-item-list API; do not use the deprecated native rollback API or request full reconstructed turns.
+copy. File edits are not reverted. Resolve a missing boundary directly through the item-list API by
+provider item ID or submitted client ID. Only a prompt persisted in the source thread can be a
+boundary. Do not use the deprecated native rollback API.
 
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and

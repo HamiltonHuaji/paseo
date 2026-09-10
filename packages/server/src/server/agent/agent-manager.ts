@@ -3054,6 +3054,9 @@ export class AgentManager {
       );
       await invokeRewindCapability(agent.session, { messageId: providerMessageId, mode });
       if (mode !== "files") {
+        if (this.syncPersistenceFromSession(agent)) {
+          this.emitState(agent);
+        }
         await this.hydrateTimelineFromProvider(agentId, { force: true, broadcast: true });
       }
       await this.refreshRuntimeInfo(agent);
@@ -4203,15 +4206,21 @@ export class AgentManager {
   }
 
   private onStreamThreadStarted(agent: ActiveManagedAgent): void {
-    const previousSessionId = agent.persistence?.sessionId ?? null;
-    const handle = agent.session.describePersistence();
-    if (handle) {
-      agent.persistence = attachPersistenceCwd(handle, agent.cwd);
-      if (agent.persistence?.sessionId !== previousSessionId) {
-        this.emitState(agent);
-      }
+    if (this.syncPersistenceFromSession(agent)) {
+      this.emitState(agent);
     }
     void this.refreshRuntimeInfo(agent);
+  }
+
+  private syncPersistenceFromSession(agent: ActiveManagedAgent): boolean {
+    const previousProvider = agent.persistence?.provider ?? null;
+    const previousSessionId = agent.persistence?.sessionId ?? null;
+    const handle = agent.session.describePersistence();
+    if (!handle) {
+      return false;
+    }
+    agent.persistence = attachPersistenceCwd(handle, agent.cwd);
+    return handle.provider !== previousProvider || handle.sessionId !== previousSessionId;
   }
 
   private async onStreamTimelineEvent(params: {

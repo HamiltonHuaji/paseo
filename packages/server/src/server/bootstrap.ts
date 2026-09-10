@@ -89,6 +89,24 @@ function formatListenTarget(listenTarget: ListenTarget | null): string | null {
   return listenTarget.path;
 }
 
+function readSingleQueryValue(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readViewerDirectoryLimit(value: unknown): number | null {
+  if (typeof value !== "string" || !/^\d+$/u.test(value)) {
+    return null;
+  }
+  const limit = Number(value);
+  return Number.isSafeInteger(limit) ? limit : null;
+}
+
+function viewerDirectoryHref(originalUrl: string): string {
+  const queryIndex = originalUrl.indexOf("?");
+  const pathname = queryIndex === -1 ? originalUrl : originalUrl.slice(0, queryIndex);
+  return pathname.endsWith("/") ? pathname : `${pathname}/`;
+}
+
 export async function fanOutReconciledWorkspaceUpdates(input: {
   sessions: Iterable<{
     syncWorkspaceGitObserversForExternalWorkspaceIds(workspaceIds: Iterable<string>): Promise<void>;
@@ -120,6 +138,7 @@ import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
 import { ExperimentService } from "./experiments/service.js";
+import { ViewerDirectoryCursorError } from "./experiments/viewer-directory.js";
 import { createGitHubService } from "../services/github-service.js";
 import { createPaseoWorktree as createRegisteredPaseoWorktree } from "./paseo-worktree-service.js";
 import { createWorkspaceProvisioningService } from "./session/workspace-provisioning/workspace-provisioning-service.js";
@@ -867,6 +886,31 @@ export async function createPaseoDaemon(
       return;
     }
     try {
+      if (req.query.paseo === "list") {
+        const cursor = readSingleQueryValue(req.query.cursor);
+        const limit = readViewerDirectoryLimit(req.query.limit);
+        const page = await experimentService.listViewerDirectory(
+          projectId,
+          experiment,
+          req.params.attempt ?? null,
+          viewerPath,
+          { cursor, limit },
+        );
+        if (!page) {
+          res.status(404).json({ error: "Viewer directory not found" });
+          return;
+        }
+        const directoryHref = viewerDirectoryHref(req.originalUrl);
+        res.setHeader("Cache-Control", "no-store");
+        res.json({
+          entries: page.entries.map((entry) => ({
+            ...entry,
+            href: `${directoryHref}${encodeURIComponent(entry.name)}${entry.kind === "directory" ? "/" : ""}`,
+          })),
+          nextCursor: page.nextCursor,
+        });
+        return;
+      }
       const filePath = await experimentService.resolveViewerFile(
         projectId,
         experiment,
@@ -879,6 +923,10 @@ export async function createPaseoDaemon(
       }
       res.sendFile(filePath, { dotfiles: "allow" });
     } catch (error) {
+      if (error instanceof ViewerDirectoryCursorError) {
+        res.status(error.code === "cursor_expired" ? 410 : 400).json({ error: error.code });
+        return;
+      }
       logger.warn({ err: error, projectId, experiment, viewerPath }, "Viewer request failed");
       res.status(404).end();
     }
