@@ -23,11 +23,9 @@ import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { Theme } from "@/styles/theme";
 import {
   EXPERIMENT_CANVAS_GRID_SIZE,
-  buildAutomaticLayout,
   canvasDimensions,
-  fallbackPlacement,
   orthogonalRoute,
-  resolvePlacement,
+  resolveBoardPlacements,
   type ResolvedPlacement,
 } from "./experiment-canvas-layout";
 import {
@@ -67,13 +65,9 @@ export function ExperimentCanvas({
   onClearSelection,
   onPersistPlacement,
 }: ExperimentCanvasProps) {
-  const persisted = useMemo(
-    () => new Map(storedPlacements.map((placement) => [placement.experiment, placement])),
-    [storedPlacements],
-  );
-  const automatic = useMemo(
-    () => buildAutomaticLayout(experiments, detailByExperiment),
-    [detailByExperiment, experiments],
+  const resolved = useMemo(
+    () => resolveBoardPlacements(experiments, detailByExperiment, storedPlacements),
+    [detailByExperiment, experiments, storedPlacements],
   );
   const [localPlacements, setLocalPlacements] = useState<Record<string, ResolvedPlacement>>({});
   const [camera, setCameraState] = useState<CanvasCamera>({ x: 0, y: 0 });
@@ -85,14 +79,12 @@ export function ExperimentCanvas({
   const placements = useMemo(
     () =>
       new Map(
-        experiments.map((experiment, index) => {
-          const fallback = automatic.get(experiment.id) ?? fallbackPlacement(experiment.id, index);
-          const stored = persisted.get(experiment.id);
-          const placement = localPlacements[experiment.id] ?? resolvePlacement(stored, fallback);
-          return [experiment.id, placement] as const;
-        }),
+        [...resolved].map(
+          ([experiment, placement]) =>
+            [experiment, localPlacements[experiment] ?? placement] as const,
+        ),
       ),
-    [automatic, experiments, localPlacements, persisted],
+    [localPlacements, resolved],
   );
   const worldDimensions = useMemo(() => canvasDimensions(placements), [placements]);
   const updateCamera = useCallback((next: CanvasCamera) => {

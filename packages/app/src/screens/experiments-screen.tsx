@@ -20,6 +20,7 @@ import {
   Grid2X2,
   List,
   RefreshCw,
+  Undo2,
 } from "lucide-react-native";
 import Svg, { Circle } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -51,6 +52,10 @@ import { useFetchQueries, useFetchQuery } from "@/data/query";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { DirectTcpHostConnection, RelayHostConnection } from "@/types/host-connection";
 import { ExperimentCanvas } from "@/screens/experiments/experiment-canvas";
+import {
+  arrangeLineageTrees,
+  resolveBoardPlacements,
+} from "@/screens/experiments/experiment-canvas-layout";
 import { ExperimentProgressSchedule } from "@/screens/experiments/experiment-progress-schedule";
 import { resolveAttemptExpanded } from "@/screens/experiments/experiment-attempt-expansion";
 import {
@@ -88,6 +93,11 @@ interface ExperimentsScreenProps {
   active?: boolean;
 }
 
+interface UndoBoardArrangement {
+  boardIdentity: string;
+  placements: ExperimentBoardPlacement[];
+}
+
 export function ExperimentsScreen({
   serverId,
   projectId,
@@ -113,11 +123,22 @@ export function ExperimentsScreen({
   });
   const [selectedExperiment, setSelectedExperiment] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [arranging, setArranging] = useState(false);
+  const [arrangeError, setArrangeError] = useState<string | null>(null);
+  const [undoArrangement, setUndoArrangement] = useState<UndoBoardArrangement | null>(null);
+  const [canvasLayoutVersion, setCanvasLayoutVersion] = useState(0);
   const [viewMode, setViewMode] = useState<ExperimentViewMode>("list");
   const [attemptExpansionById, setAttemptExpansionById] = useState<Record<string, boolean>>({});
   const canvasMode = viewMode === "canvas";
   const independentCanvasScroll = canvasMode && !isCompactLayout;
   const experiments = listQuery.data ?? EMPTY_EXPERIMENTS;
+  const boardIdentity = useMemo(() => {
+    const experimentIds = experiments.map((experiment) => experiment.id).sort();
+    return JSON.stringify([serverId, projectId, experimentIds]);
+  }, [experiments, projectId, serverId]);
+  const undoLayout =
+    undoArrangement?.boardIdentity === boardIdentity ? undoArrangement.placements : null;
+  const arrangementLabel = arrangementActionLabel(Boolean(undoLayout));
   const detailQueries = useFetchQueries<ExperimentDetail>(
     experiments.map((experiment) => ({
       queryKey: ["experiment", serverId, projectId, experiment.id],
@@ -197,18 +218,69 @@ export function ExperimentsScreen({
   const persistPlacement = useCallback(
     (placement: ExperimentBoardPlacement) => {
       if (!client) return;
+      setUndoArrangement(null);
       void client
         .updateExperimentBoardLayout({ projectId, placements: [placement] })
         .then(() =>
           queryClient.setQueryData<ExperimentBoardPlacement[]>(
             ["experiment-board-layout", serverId, projectId],
-            (current) => mergePlacement(current ?? [], placement),
+            (current) => mergePlacements(current ?? [], [placement]),
           ),
         )
         .catch(() => undefined);
     },
     [client, projectId, queryClient, serverId],
   );
+  const arrangeBoard = useCallback(async () => {
+    const stored = boardLayoutQuery.data;
+    if (!client || !stored || arranging) return;
+    setArranging(true);
+    setArrangeError(null);
+    try {
+      const previousByExperiment = new Map(
+        stored.map((placement) => [placement.experiment, placement]),
+      );
+      const previous = experiments.map(
+        (experiment) =>
+          previousByExperiment.get(experiment.id) ?? {
+            experiment: experiment.id,
+            column: null,
+            row: null,
+            width: null,
+            height: null,
+          },
+      );
+      const next =
+        undoLayout ??
+        arrangeLineageTrees(
+          experiments,
+          resolveBoardPlacements(experiments, detailByExperiment, stored),
+        );
+      await client.updateExperimentBoardLayout({ projectId, placements: next });
+      queryClient.setQueryData<ExperimentBoardPlacement[]>(
+        ["experiment-board-layout", serverId, projectId],
+        (current) => mergePlacements(current ?? [], next),
+      );
+      setCanvasLayoutVersion((version) => version + 1);
+      setUndoArrangement(undoLayout ? null : { boardIdentity, placements: previous });
+    } catch (error) {
+      setArrangeError(errorMessage(error));
+    } finally {
+      setArranging(false);
+    }
+  }, [
+    arranging,
+    boardIdentity,
+    boardLayoutQuery.data,
+    client,
+    detailByExperiment,
+    experiments,
+    projectId,
+    queryClient,
+    serverId,
+    undoLayout,
+  ]);
+  const handleArrangeBoard = useCallback(() => void arrangeBoard(), [arrangeBoard]);
   const refetchList = listQuery.refetch;
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
@@ -257,18 +329,47 @@ export function ExperimentsScreen({
           onValueChange={changeViewMode}
           size="sm"
         />
+        {canvasMode ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={undoLayout ? Undo2 : GitBranch}
+            onPress={handleArrangeBoard}
+            loading={arranging}
+            disabled={!connected || boardLayoutQuery.data === undefined || experiments.length === 0}
+            accessibilityLabel={arrangementLabel}
+          >
+            {compactActionLabel(isCompactLayout, arrangementLabel)}
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           size="sm"
           leftIcon={RefreshCw}
           onPress={handleRefresh}
           loading={refreshing}
+          accessibilityLabel="Refresh experiments"
         >
-          Refresh
+          {compactActionLabel(isCompactLayout && canvasMode, "Refresh")}
         </Button>
       </View>
     ),
-    [changeViewMode, handleRefresh, refreshing, viewMode, viewOptions],
+    [
+      arranging,
+      arrangementLabel,
+      boardLayoutQuery.data,
+      canvasMode,
+      changeViewMode,
+      connected,
+      experiments.length,
+      handleArrangeBoard,
+      handleRefresh,
+      isCompactLayout,
+      refreshing,
+      undoLayout,
+      viewMode,
+      viewOptions,
+    ],
   );
   const content = (
     <>
@@ -313,7 +414,9 @@ export function ExperimentsScreen({
             {boardLayoutQuery.error ? (
               <Message text={errorMessage(boardLayoutQuery.error)} error />
             ) : null}
+            {arrangeError ? <Message text={arrangeError} error /> : null}
             <ExperimentCanvas
+              key={`${serverId}:${projectId}:${canvasLayoutVersion}`}
               experiments={experiments}
               detailByExperiment={detailByExperiment}
               storedPlacements={boardLayoutQuery.data ?? []}
@@ -1160,11 +1263,25 @@ function optionalStyle(enabled: boolean, style: ViewStyle): ViewStyle | null {
   return enabled ? style : null;
 }
 
-function mergePlacement(
+function compactActionLabel(compact: boolean, label: string): string | null {
+  return compact ? null : label;
+}
+
+function arrangementActionLabel(undoAvailable: boolean): string {
+  return undoAvailable ? "Undo arrange" : "Arrange trees";
+}
+
+function mergePlacements(
   placements: ExperimentBoardPlacement[],
-  next: ExperimentBoardPlacement,
+  updates: ExperimentBoardPlacement[],
 ): ExperimentBoardPlacement[] {
-  return [...placements.filter((placement) => placement.experiment !== next.experiment), next];
+  const updatedByExperiment = new Map(
+    updates.map((placement) => [placement.experiment, placement]),
+  );
+  return [
+    ...placements.filter((placement) => !updatedByExperiment.has(placement.experiment)),
+    ...updates,
+  ];
 }
 
 const styles = StyleSheet.create((theme) => ({
