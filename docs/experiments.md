@@ -625,9 +625,18 @@ the Attempt and do not come from a global catalog.
 The Canvas view places Experiment cards on an integer grid. Nullable stored `column`, `row`,
 `width`, and `height` values are user overrides. The client supplies missing values with a
 deterministic default layout: Goals form vertical blocks, cards within a Goal run oldest-to-newest
-from top to bottom, and lineage depth adds a small horizontal indent. Dragging and resizing move
+from top to bottom, and lineage depth adds a small horizontal indent. New cards use the actual
+positions and sizes of existing cards, including manual overrides, instead of accumulating space
+for those cards' old automatic positions. Dragging and resizing move
 continuously during the gesture, then snap to the grid and write concrete values when the gesture
 ends. Moving a card does not change the Experiment's `updated_at`.
+
+The Canvas toolbar can arrange the whole board in one batch. It groups Experiments by `basedOn`
+trees, orders roots and siblings by creation time, walks each tree depth-first, and wraps its cards
+into alternating left-to-right and right-to-left rows. Roots start at the left; trees stack from top
+to bottom with space between them. Arrangement changes positions while preserving card sizes and
+offers Undo until the next manual card move. This action overwrites manual positions; the ordinary
+default layout still leaves them alone.
 
 The Canvas is a fixed clipped viewport over an unbounded world coordinate plane. Keep a local camera
 translation separate from persisted card positions. The wheel translates the camera and dragging
