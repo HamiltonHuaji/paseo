@@ -49,6 +49,7 @@ export interface ComposerSendClient {
     text: string,
     options: {
       messageId: string;
+      replyToMessageId?: string;
       activeTurnBehavior?: ActiveTurnBehavior;
       images: Array<{ data: string; mimeType: string }>;
       attachments: ReturnType<typeof splitComposerAttachmentsForSubmit>["attachments"];
@@ -180,6 +181,7 @@ export interface DispatchComposerAgentMessageInput {
   submission: MessageSubmissionWriter;
   activeTurnBehavior?: ActiveTurnBehavior;
   activeTurnId?: string;
+  replyToMessageId?: string;
 }
 
 export async function dispatchComposerAgentMessage(
@@ -192,6 +194,7 @@ export async function dispatchComposerAgentMessage(
   const userMessage = createUserMessage({
     clientMessageId,
     text: input.text,
+    ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
     timestamp: new Date(),
     images: wirePayload.images,
     attachments: wirePayload.attachments,
@@ -204,6 +207,7 @@ export async function dispatchComposerAgentMessage(
     const imagesData = await input.encodeImages(wirePayload.images);
     await input.client.sendAgentMessage(input.agentId, input.text, {
       messageId: clientMessageId,
+      ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
       ...(input.activeTurnBehavior ? { activeTurnBehavior: input.activeTurnBehavior } : {}),
       images: imagesData ?? [],
       attachments: wirePayload.attachments,

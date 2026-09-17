@@ -179,7 +179,7 @@ export class InMemoryAgentTimelineStore {
   enrichSubmittedUserMessage(
     agentId: string,
     clientMessageId: string,
-    providerMessageId: string,
+    updates: { providerMessageId?: string; replyToMessageId?: string },
   ): AgentTimelineRow | null {
     const state = this.requireState(agentId);
     const index = state.rows.findIndex(
@@ -191,7 +191,14 @@ export class InMemoryAgentTimelineStore {
     if (!row || row.item.type !== "user_message") {
       return null;
     }
-    const enriched: AgentTimelineRow = { ...row, providerMessageId };
+    const enriched: AgentTimelineRow = {
+      ...row,
+      ...(updates.providerMessageId ? { providerMessageId: updates.providerMessageId } : {}),
+      item: {
+        ...row.item,
+        ...(updates.replyToMessageId ? { replyToMessageId: updates.replyToMessageId } : {}),
+      },
+    };
     state.rows[index] = enriched;
     return cloneRow(enriched);
   }

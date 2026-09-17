@@ -344,6 +344,7 @@ export interface DaemonClientTrace {
 
 export interface SendMessageOptions {
   messageId?: string;
+  replyToMessageId?: string;
   activeTurnBehavior?: ActiveTurnBehavior;
   images?: Array<{ data: string; mimeType: string }>;
   attachments?: SendAgentMessageRequest["attachments"];
@@ -3316,6 +3317,7 @@ export class DaemonClient {
       agentId,
       text,
       ...(messageId ? { messageId } : {}),
+      ...(options?.replyToMessageId ? { replyToMessageId: options.replyToMessageId } : {}),
       ...(options?.activeTurnBehavior ? { activeTurnBehavior: options.activeTurnBehavior } : {}),
       ...(options?.images ? { images: options.images } : {}),
       ...(options?.attachments ? { attachments: options.attachments } : {}),

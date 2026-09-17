@@ -1829,6 +1829,21 @@ function mapCodexThreadImageItem(
   );
 }
 
+function mapCodexAgentMessage(item: Record<string, unknown>): AgentTimelineItem {
+  const messageId = nonEmptyString(item.id);
+  const questions = z
+    .array(z.object({ title: z.string(), options: z.array(z.string()).nullable() }))
+    .safeParse(item.questions);
+  return {
+    type: "assistant_message",
+    text: typeof item.text === "string" ? item.text : "",
+    ...(messageId ? { messageId } : {}),
+    ...(item.delivery === "async" && questions.success && questions.data.length > 0
+      ? { questions: questions.data }
+      : {}),
+  };
+}
+
 export function threadItemToTimeline(
   item: unknown,
   options?: { includeUserMessage?: boolean; cwd?: string | null },
@@ -1855,14 +1870,8 @@ export function threadItemToTimeline(
   switch (normalizedType) {
     case "userMessage":
       return mapCodexThreadUserMessageItem(normalizedItem, includeUserMessage);
-    case "agentMessage": {
-      const messageId = nonEmptyString(normalizedItem.id);
-      return {
-        type: "assistant_message",
-        text: typeof normalizedItem.text === "string" ? normalizedItem.text : "",
-        ...(messageId ? { messageId } : {}),
-      };
-    }
+    case "agentMessage":
+      return mapCodexAgentMessage(normalizedItem);
     case "plan":
       return mapCodexThreadPlanItem(normalizedItem);
     case "reasoning":

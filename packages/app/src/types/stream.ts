@@ -1,4 +1,8 @@
-import type { AgentProvider, ToolCallDetail } from "@getpaseo/protocol/agent-types";
+import type {
+  AgentAsyncQuestion,
+  AgentProvider,
+  ToolCallDetail,
+} from "@getpaseo/protocol/agent-types";
 import type { AgentAttachment, AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import type { AttachmentMetadata } from "@/attachments/types";
 import { extractTaskEntriesFromToolCall } from "../utils/tool-call-parsers";
@@ -88,6 +92,7 @@ export interface UserMessageItem {
   id: string;
   clientMessageId?: string;
   messageId?: string;
+  replyToMessageId?: string;
   turnId?: string;
   timelineCursor?: TimelinePosition;
   text: string;
@@ -100,6 +105,7 @@ export interface UserMessageInput {
   id?: string;
   clientMessageId?: string;
   messageId?: string;
+  replyToMessageId?: string;
   turnId?: string;
   timelineCursor?: TimelinePosition;
   text: string;
@@ -118,6 +124,7 @@ export function createUserMessage(input: UserMessageInput): UserMessageItem {
     id,
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.messageId ? { messageId: input.messageId } : {}),
+    ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
     ...(input.turnId ? { turnId: input.turnId } : {}),
     ...(input.timelineCursor ? { timelineCursor: input.timelineCursor } : {}),
     text: input.text,
@@ -253,12 +260,14 @@ function produceUserMessage(
     ...presentation,
     clientMessageId: incoming.clientMessageId ?? existing.clientMessageId,
     messageId: incoming.messageId ?? existing.messageId,
+    replyToMessageId: incoming.replyToMessageId ?? existing.replyToMessageId,
     timelineCursor: incoming.timelineCursor ?? existing.timelineCursor,
   });
   if (
     existing.id === merged.id &&
     existing.clientMessageId === merged.clientMessageId &&
     existing.messageId === merged.messageId &&
+    existing.replyToMessageId === merged.replyToMessageId &&
     existing.timelineCursor === merged.timelineCursor &&
     existing.text === merged.text &&
     existing.timestamp === merged.timestamp &&
@@ -682,6 +691,7 @@ export interface AssistantMessageItem {
   turnId?: string;
   timelineCursor?: TimelinePosition;
   text: string;
+  questions?: AgentAsyncQuestion[];
   timestamp: Date;
   blockGroupId?: string;
   blockIndex?: number;
@@ -849,6 +859,7 @@ function appendUserMessage(
   clientMessageId?: string,
   timelineCursor?: TimelinePosition,
   turnId?: string,
+  replyToMessageId?: string,
 ): StreamItem[] {
   const { chunk, hasContent } = normalizeChunk(text);
   if (!hasContent) {
@@ -862,10 +873,24 @@ function appendUserMessage(
     messageId,
     timelineCursor,
     turnId,
+    replyToMessageId,
     text: chunk,
     timestamp,
   });
   return upsertUserMessage(state, nextItem);
+}
+
+function canAppendAssistantMessage(
+  item: StreamItem | undefined,
+  messageId: string | undefined,
+  questions: AgentAsyncQuestion[] | undefined,
+): item is AssistantMessageItem {
+  return (
+    item?.kind === "assistant_message" &&
+    !item.questions &&
+    !questions &&
+    (messageId === undefined || item.messageId === messageId)
+  );
 }
 
 function appendAssistantMessage(
@@ -876,6 +901,7 @@ function appendAssistantMessage(
   messageId?: string,
   reservedItemIds?: ReadonlySet<string>,
   timelineCursor?: TimelinePosition,
+  questions?: AgentAsyncQuestion[],
 ): StreamItem[] {
   const { chunk, hasContent } = normalizeChunk(text);
   if (!chunk) {
@@ -883,10 +909,7 @@ function appendAssistantMessage(
   }
 
   const last = state[state.length - 1];
-  const shouldAppendToLast =
-    last &&
-    last.kind === "assistant_message" &&
-    (messageId === undefined || last.messageId === messageId);
+  const shouldAppendToLast = canAppendAssistantMessage(last, messageId, questions);
   if (shouldAppendToLast) {
     const updated: AssistantMessageItem = {
       ...last,
@@ -903,8 +926,7 @@ function appendAssistantMessage(
   if (
     source === "live" &&
     last?.kind === "user_message" &&
-    secondLast?.kind === "assistant_message" &&
-    (messageId === undefined || secondLast.messageId === messageId)
+    canAppendAssistantMessage(secondLast, messageId, questions)
   ) {
     const updated: AssistantMessageItem = {
       ...secondLast,
@@ -927,6 +949,7 @@ function appendAssistantMessage(
     ...(messageId ? { messageId } : {}),
     ...(timelineCursor ? { timelineCursor } : {}),
     text: chunk,
+    ...(questions ? { questions } : {}),
     timestamp,
   };
   return [...state, item];
@@ -1426,6 +1449,7 @@ function reduceTimelineEvent(
           item.clientMessageId,
           timelineCursor,
           event.turnId,
+          item.replyToMessageId,
         ),
       );
     case "assistant_message":
@@ -1438,6 +1462,7 @@ function reduceTimelineEvent(
           item.messageId,
           reservedItemIds,
           timelineCursor,
+          item.questions,
         ),
       );
     case "reasoning":
@@ -1705,6 +1730,14 @@ function promoteCompletedAssistantBlocks(params: { tail: StreamItem[]; head: Str
   }
 
   const blocks = splitMarkdownBlocks(activeItem.text);
+  if (activeItem.questions) {
+    return {
+      tail: params.tail,
+      head: params.head,
+      changedTail: false,
+      changedHead: false,
+    };
+  }
   if (blocks.length < 2) {
     return {
       tail: params.tail,
@@ -1850,6 +1883,7 @@ function applyCanonicalUserMessageEvent(params: {
       createUniqueTimelineId([...tail, ...head], "user", normalized.chunk.trim(), timestamp),
     messageId: event.item.messageId,
     clientMessageId: event.item.clientMessageId,
+    replyToMessageId: event.item.replyToMessageId,
     turnId: event.turnId,
     timelineCursor,
     text: normalized.chunk,

@@ -348,9 +348,25 @@ export interface AgentTaskItem {
   activeForm?: string;
 }
 
+export interface AgentAsyncQuestion {
+  title: string;
+  options: string[] | null;
+}
+
 export type AgentTimelineItem =
-  | { type: "user_message"; text: string; messageId?: string; clientMessageId?: string }
-  | { type: "assistant_message"; text: string; messageId?: string }
+  | {
+      type: "user_message";
+      text: string;
+      messageId?: string;
+      clientMessageId?: string;
+      replyToMessageId?: string;
+    }
+  | {
+      type: "assistant_message";
+      text: string;
+      messageId?: string;
+      questions?: AgentAsyncQuestion[];
+    }
   | { type: "reasoning"; text: string }
   | ToolCallTimelineItem
   | { type: "todo"; items: AgentTaskItem[] }

@@ -7444,6 +7444,7 @@ export class Session {
         {
           agentId,
           messageId: msg.messageId,
+          replyToMessageId: msg.replyToMessageId,
           activeTurnBehavior: msg.activeTurnBehavior,
           textPrefix: msg.text.slice(0, 80),
         },
@@ -7458,7 +7459,8 @@ export class Session {
           prompt,
           messageId: msg.messageId,
           activeTurnBehavior: msg.activeTurnBehavior ?? "interrupt",
-          clearPendingPermissions: true,
+          replyToMessageId: msg.replyToMessageId,
+          clearPendingPermissions: !msg.replyToMessageId,
           logger: this.sessionLogger,
         });
       } catch (error) {

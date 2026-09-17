@@ -188,6 +188,7 @@ export interface SendPromptToAgentParams {
   /** Prompt to dispatch to the provider (may include image blocks or wrapped text). */
   prompt: AgentPromptInput;
   messageId?: string;
+  replyToMessageId?: string;
   activeTurnBehavior?: ActiveTurnBehavior;
   runOptions?: AgentRunOptions;
   /** Optional mode to set on the agent before the run starts. */
@@ -284,7 +285,11 @@ export async function sendPromptToAgent(
   }
 
   const runOptions = params.messageId
-    ? { ...params.runOptions, clientMessageId: params.messageId }
+    ? {
+        ...params.runOptions,
+        clientMessageId: params.messageId,
+        replyToMessageId: params.replyToMessageId,
+      }
     : params.runOptions;
 
   return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {

@@ -716,11 +716,15 @@ export const AgentTimelineItemPayloadSchema: z.ZodType<AgentTimelineItem, unknow
     text: z.string(),
     messageId: z.string().optional(),
     clientMessageId: z.string().optional(),
+    replyToMessageId: z.string().optional(),
   }),
   z.object({
     type: z.literal("assistant_message"),
     text: z.string(),
     messageId: z.string().optional(),
+    questions: z
+      .array(z.object({ title: z.string(), options: z.array(z.string()).nullable() }))
+      .optional(),
   }),
   z.object({
     type: z.literal("reasoning"),
@@ -1386,6 +1390,7 @@ export const SendAgentMessageRequestSchema = z.object({
   agentId: z.string(),
   text: z.string(),
   messageId: z.string().optional(), // Client-provided ID for deduplication
+  replyToMessageId: z.string().optional(),
   activeTurnBehavior: ActiveTurnBehaviorSchema.optional(),
   images: z.array(ImageAttachmentSchema).optional(),
   attachments: AgentAttachmentsSchema,

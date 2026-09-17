@@ -45,6 +45,7 @@ import type { PendingMessageSubmission } from "@/composer/submission/model";
 import type { TurnPresentation } from "@/timeline/turn-liveness";
 import type { PendingPermission } from "@/types/shared";
 import type {
+  AgentAsyncQuestion,
   AgentCapabilityFlags,
   AgentPermissionAction,
   AgentPermissionResponse,
@@ -58,7 +59,9 @@ import type { ToastApi } from "@/components/toast-host";
 import { returnToTimelineTail } from "./timeline-tail-navigation";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { ToolCallDetailsContent } from "@/components/tool-call-details";
-import { QuestionFormCard } from "@/components/question-form-card";
+import { AsyncQuestionCard, PermissionQuestionCard } from "@/components/question-form-card";
+import { dispatchComposerAgentMessage } from "@/composer/actions";
+import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { ToolCallSheetProvider } from "@/components/tool-call-sheet";
 import {
   prepareToolCallHistory,
@@ -313,6 +316,39 @@ function useRetainedValue<T>(value: T, active: boolean): T {
 const EMPTY_PENDING_MESSAGE_SUBMISSIONS: readonly PendingMessageSubmission[] = [];
 const GROUPED_TOOL_CALL_DETAIL_MAX_HEIGHT = 200;
 
+function AsyncQuestionMessage({
+  questions,
+  questionMessageId,
+  agentId,
+  serverId,
+  client,
+}: {
+  questions: AgentAsyncQuestion[];
+  questionMessageId: string;
+  agentId: string;
+  serverId: string;
+  client: DaemonClient;
+}) {
+  const onAnswer = useCallback(
+    (text: string) =>
+      dispatchComposerAgentMessage({
+        client,
+        agentId,
+        text,
+        replyToMessageId: questionMessageId,
+        attachments: [],
+        encodeImages: async () => undefined,
+        submission: createMessageSubmissionWriter(serverId),
+        activeTurnBehavior: "steer",
+        activeTurnId:
+          useSessionStore.getState().sessions[serverId]?.agents.get(agentId)?.activeTurn?.turnId ??
+          undefined,
+      }),
+    [agentId, client, questionMessageId, serverId],
+  );
+  return <AsyncQuestionCard questions={questions} onAnswer={onAnswer} />;
+}
+
 function resolveBottomOverlayControlOffset(clearance: number | undefined): number {
   return Math.max(16, clearance ?? 0);
 }
@@ -543,6 +579,15 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     const isActive = useRetainedPanelActive();
     const effectiveStreamItems = useRetainedValue(streamItems, isActive);
     const effectiveStreamHead = useRetainedValue(streamHead, isActive);
+    const answeredAsyncQuestions = useMemo(() => {
+      const answered = new Set<string>();
+      const items = [...effectiveStreamItems, ...(effectiveStreamHead ?? [])];
+      for (const item of items) {
+        if (item.kind === "user_message" && item.replyToMessageId)
+          answered.add(item.replyToMessageId);
+      }
+      return answered;
+    }, [effectiveStreamItems, effectiveStreamHead]);
     const effectiveTurnPresentation = useRetainedValue(turnPresentation, isActive);
     const isTurnActive = effectiveTurnPresentation.isActive;
     // Keep retained history outside the 48ms live-head flush path.
@@ -724,6 +769,23 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 
     const renderAssistantMessageItem = useCallback(
       (layoutItem: StreamLayoutItem, item: Extract<StreamItem, { kind: "assistant_message" }>) => {
+        if (
+          item.questions &&
+          item.messageId &&
+          !answeredAsyncQuestions.has(item.messageId) &&
+          !readOnly &&
+          client
+        ) {
+          return (
+            <AsyncQuestionMessage
+              questions={item.questions}
+              questionMessageId={item.messageId}
+              agentId={agentId}
+              serverId={resolvedServerId}
+              client={client}
+            />
+          );
+        }
         return (
           <AssistantFileLinkResolverProvider
             client={client}
@@ -745,7 +807,16 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           </AssistantFileLinkResolverProvider>
         );
       },
-      [agentId, client, handleInlinePathPress, resolvedServerId, toast, workspaceRoot],
+      [
+        agentId,
+        answeredAsyncQuestions,
+        client,
+        handleInlinePathPress,
+        readOnly,
+        resolvedServerId,
+        toast,
+        workspaceRoot,
+      ],
     );
 
     const renderThoughtItem = useCallback(
@@ -1494,7 +1565,7 @@ function PermissionRequestCard({
 
   if (request.kind === "question") {
     return (
-      <QuestionFormCard
+      <PermissionQuestionCard
         permission={permission}
         onRespond={handleResponse}
         isResponding={isResponding}

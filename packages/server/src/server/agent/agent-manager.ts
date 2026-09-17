@@ -2270,7 +2270,9 @@ export class AgentManager {
       return false;
     }
     if (options?.clientMessageId) {
-      this.recordSubmittedPrompt(agent, prompt, options.clientMessageId);
+      this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, {
+        replyToMessageId: options.replyToMessageId,
+      });
       this.emitState(agent);
     }
     const dispatch = (event: AgentStreamEvent): void => {
@@ -2447,6 +2449,7 @@ export class AgentManager {
         this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, {
           messageId: options.clientMessageId,
           turnId,
+          replyToMessageId: options.replyToMessageId,
           providerMessageId:
             stagedSubmittedPromptEcho?.item.type === "user_message"
               ? stagedSubmittedPromptEcho.item.messageId
@@ -2611,7 +2614,13 @@ export class AgentManager {
         expectedTurnId,
       });
       if (admission.status === "accepted") {
-        await this.recordAcceptedSteer(agent, prompt, options?.clientMessageId, expectedTurnId);
+        await this.recordAcceptedSteer(
+          agent,
+          prompt,
+          options?.clientMessageId,
+          expectedTurnId,
+          options?.replyToMessageId,
+        );
       }
       return admission;
     });
@@ -2641,7 +2650,13 @@ export class AgentManager {
             expectedTurnId,
           });
           if (admission.status === "accepted") {
-            await this.recordAcceptedSteer(agent, prompt, options?.clientMessageId, expectedTurnId);
+            await this.recordAcceptedSteer(
+              agent,
+              prompt,
+              options?.clientMessageId,
+              expectedTurnId,
+              options?.replyToMessageId,
+            );
           }
           return admission;
         })
@@ -2746,6 +2761,7 @@ export class AgentManager {
     prompt: AgentPromptInput,
     clientMessageId: string | undefined,
     expectedTurnId: string,
+    replyToMessageId?: string,
   ): Promise<void> {
     if (!clientMessageId) {
       return;
@@ -2753,6 +2769,7 @@ export class AgentManager {
     this.recordSubmittedPrompt(agent, prompt, clientMessageId, {
       messageId: clientMessageId,
       turnId: expectedTurnId,
+      replyToMessageId,
     });
     this.emitState(agent);
   }
@@ -4505,9 +4522,36 @@ export class AgentManager {
     agent: ActiveManagedAgent,
     prompt: AgentPromptInput,
     clientMessageId: string,
-    options?: { messageId?: string; providerMessageId?: string; turnId?: string },
+    options?: {
+      messageId?: string;
+      providerMessageId?: string;
+      turnId?: string;
+      replyToMessageId?: string;
+    },
   ): void {
-    if (this.timelineStore.getSubmittedUserMessage(agent.id, clientMessageId)) {
+    const existing = this.timelineStore.getSubmittedUserMessage(agent.id, clientMessageId);
+    if (existing) {
+      if (
+        options?.replyToMessageId &&
+        existing.item.type === "user_message" &&
+        !existing.item.replyToMessageId
+      ) {
+        const linked = this.timelineStore.enrichSubmittedUserMessage(agent.id, clientMessageId, {
+          replyToMessageId: options.replyToMessageId,
+        });
+        if (linked) {
+          this.enqueueDurableTimelineUpdate(agent.id, linked);
+          this.dispatchStream(
+            agent.id,
+            { type: "timeline", provider: agent.provider, item: linked.item },
+            {
+              seq: linked.seq,
+              epoch: this.timelineStore.getEpoch(agent.id),
+              timestamp: linked.timestamp,
+            },
+          );
+        }
+      }
       return;
     }
     this.touchUpdatedAt(agent);
@@ -4516,6 +4560,7 @@ export class AgentManager {
       type: "user_message",
       text: submittedPromptText(prompt),
       clientMessageId,
+      ...(options?.replyToMessageId ? { replyToMessageId: options.replyToMessageId } : {}),
       ...(options?.messageId ? { messageId: options.messageId } : {}),
     };
     this.recordAndDispatchTimelineItem(agent.id, item, agent.provider, options?.turnId, options);
@@ -4539,11 +4584,9 @@ export class AgentManager {
     }
     if (!existing || existing.item.type !== "user_message") return null;
     if (messageId) {
-      const enriched = this.timelineStore.enrichSubmittedUserMessage(
-        agent.id,
-        clientMessageId,
-        messageId,
-      );
+      const enriched = this.timelineStore.enrichSubmittedUserMessage(agent.id, clientMessageId, {
+        providerMessageId: messageId,
+      });
       if (enriched) this.enqueueDurableTimelineUpdate(agent.id, enriched);
     }
     return existing;

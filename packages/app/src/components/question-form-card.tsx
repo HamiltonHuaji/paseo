@@ -6,7 +6,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { Check, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import type { PendingPermission } from "@/types/shared";
-import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
+import type { AgentAsyncQuestion, AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
 import { isWeb } from "@/constants/platform";
 import { EditingTextInput as TextInput } from "@/components/ui/text-input";
 import {
@@ -22,9 +22,78 @@ import {
 } from "./question-form-card-core";
 
 interface QuestionFormCardProps {
-  permission: PendingPermission;
-  onRespond: (response: AgentPermissionResponse) => void;
+  questions: QuestionFormQuestion[] | null;
+  onSubmit: (answers: Record<string, string>) => void;
+  onDismiss?: (answers: Record<string, string>) => void;
   isResponding: boolean;
+  preselectFirstOption?: boolean;
+}
+
+function initialQuestionSelections(
+  questions: QuestionFormQuestion[] | null,
+  preselectFirstOption: boolean,
+): Record<number, Set<number>> {
+  if (!preselectFirstOption) return {};
+  return Object.fromEntries(
+    (questions ?? []).flatMap((question, index) =>
+      question.options.length > 0 ? [[index, new Set([0])]] : [],
+    ),
+  );
+}
+
+function isActionResponding(
+  action: "submit" | "dismiss",
+  respondingAction: "submit" | "dismiss" | null,
+  isResponding: boolean,
+): boolean {
+  return respondingAction === action && isResponding;
+}
+
+function isQuestionAnsweredAt(
+  questions: QuestionFormQuestion[] | null,
+  index: number,
+  selections: Record<number, Set<number>>,
+  otherTexts: Record<number, string>,
+): boolean {
+  return questions ? isQuestionAnswered(questions[index], index, selections, otherTexts) : false;
+}
+
+function submitQuestionDismissal(
+  questions: QuestionFormQuestion[] | null,
+  selections: Record<number, Set<number>>,
+  otherTexts: Record<number, string>,
+  onDismiss?: (answers: Record<string, string>) => void,
+): void {
+  if (questions && onDismiss)
+    onDismiss(buildQuestionFormAnswers(questions, selections, otherTexts));
+}
+
+function nextQuestionSelection(
+  current: ReadonlySet<number>,
+  optionIndex: number,
+  multiSelect: boolean,
+): Set<number> {
+  const next = new Set(current);
+  if (multiSelect) {
+    if (next.has(optionIndex)) next.delete(optionIndex);
+    else next.add(optionIndex);
+    return next;
+  }
+  if (next.has(optionIndex)) return new Set();
+  return new Set([optionIndex]);
+}
+
+function isLastQuestionAt(questions: QuestionFormQuestion[] | null, index: number): boolean {
+  return index === (questions?.length ?? 1) - 1;
+}
+
+function isPrimaryQuestionActionDisabled(
+  isResponding: boolean,
+  isLastQuestion: boolean,
+  allAnswered: boolean,
+  activeQuestionAnswered: boolean,
+): boolean {
+  return isResponding || (isLastQuestion ? !allAnswered : !activeQuestionAnswered);
 }
 
 const IS_WEB = isWeb;
@@ -314,16 +383,20 @@ function QuestionOtherInput({
   );
 }
 
-export function QuestionFormCard({ permission, onRespond, isResponding }: QuestionFormCardProps) {
+function QuestionFormCard({
+  questions,
+  onSubmit,
+  onDismiss,
+  isResponding,
+  preselectFirstOption = false,
+}: QuestionFormCardProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
-  const questions = useMemo(
-    () => parseQuestionFormQuestions(permission.request.input),
-    [permission.request.input],
-  );
 
-  const [selections, setSelections] = useState<Record<number, Set<number>>>({});
+  const [selections, setSelections] = useState<Record<number, Set<number>>>(() =>
+    initialQuestionSelections(questions, preselectFirstOption),
+  );
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
   const [respondingAction, setRespondingAction] = useState<"submit" | "dismiss" | null>(null);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
@@ -331,19 +404,7 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
   const toggleOption = useCallback(
     (qIndex: number, optIndex: number, multiSelect: boolean) => {
       const current = selections[qIndex] ?? new Set<number>();
-      const next = new Set(current);
-      if (multiSelect) {
-        if (next.has(optIndex)) {
-          next.delete(optIndex);
-        } else {
-          next.add(optIndex);
-        }
-      } else if (next.has(optIndex)) {
-        next.clear();
-      } else {
-        next.clear();
-        next.add(optIndex);
-      }
+      const next = nextQuestionSelection(current, optIndex, multiSelect);
 
       setSelections((prev) => ({ ...prev, [qIndex]: next }));
       setOtherTexts((prev) => {
@@ -378,54 +439,25 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
   const activeQuestionAnswered = activeQuestion
     ? isQuestionAnswered(activeQuestion, resolvedActiveQuestionIndex, selections, otherTexts)
     : false;
-  const isLastQuestion = questions ? resolvedActiveQuestionIndex === questions.length - 1 : true;
+  const isLastQuestion = isLastQuestionAt(questions, resolvedActiveQuestionIndex);
 
   const handleSubmit = useCallback(() => {
     if (!questions || !allAnswered || isResponding) return;
     setRespondingAction("submit");
-    onRespond({
-      behavior: "allow",
-      updatedInput: {
-        ...permission.request.input,
-        answers: buildQuestionFormAnswers(questions, selections, otherTexts),
-      },
-    });
-  }, [
-    questions,
-    allAnswered,
-    isResponding,
-    selections,
-    otherTexts,
-    onRespond,
-    permission.request.input,
-  ]);
+    onSubmit(buildQuestionFormAnswers(questions, selections, otherTexts));
+  }, [questions, allAnswered, isResponding, selections, otherTexts, onSubmit]);
 
   const handleDeny = useCallback(() => {
-    if (!questions) return;
     setRespondingAction("dismiss");
-    if (shouldSubmitEmptyOnDismiss(questions)) {
-      onRespond({
-        behavior: "allow",
-        updatedInput: {
-          ...permission.request.input,
-          answers: buildQuestionFormAnswers(questions, selections, otherTexts),
-        },
-      });
-      return;
-    }
-    onRespond({
-      behavior: "deny",
-      message: "Dismissed by user",
-    });
-  }, [questions, onRespond, otherTexts, permission.request.input, selections]);
+    submitQuestionDismissal(questions, selections, otherTexts, onDismiss);
+  }, [questions, onDismiss, otherTexts, selections]);
 
   const handleSelectQuestion = useCallback((index: number) => {
     setActiveQuestionIndex(index);
   }, []);
 
   const navIsAnswered = useCallback(
-    (qIndex: number) =>
-      questions ? isQuestionAnswered(questions[qIndex], qIndex, selections, otherTexts) : false,
+    (qIndex: number) => isQuestionAnsweredAt(questions, qIndex, selections, otherTexts),
     [questions, selections, otherTexts],
   );
 
@@ -450,7 +482,12 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
     [theme.colors.surface2, theme.colors.surface1, theme.colors.borderAccent],
   );
 
-  const primaryDisabled = isResponding || (isLastQuestion ? !allAnswered : !activeQuestionAnswered);
+  const primaryDisabled = isPrimaryQuestionActionDisabled(
+    isResponding,
+    isLastQuestion,
+    allAnswered,
+    activeQuestionAnswered,
+  );
   const primaryActionLabel = isLastQuestion
     ? t("message.question.submit")
     : t("message.question.next");
@@ -567,23 +604,25 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
       ) : null}
 
       <View style={actionsContainerStyle}>
-        <Pressable
-          style={dismissButtonStyle}
-          onPress={handleDeny}
-          disabled={isResponding}
-          accessibilityRole="button"
-          accessibilityLabel={dismissLabel}
-          testID="question-form-dismiss"
-        >
-          {respondingAction === "dismiss" ? (
-            <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
-          ) : (
-            <View style={styles.actionContent}>
-              <X size={14} color={theme.colors.foregroundMuted} />
-              <Text style={dismissActionTextStyle}>{dismissLabel}</Text>
-            </View>
-          )}
-        </Pressable>
+        {onDismiss ? (
+          <Pressable
+            style={dismissButtonStyle}
+            onPress={handleDeny}
+            disabled={isResponding}
+            accessibilityRole="button"
+            accessibilityLabel={dismissLabel}
+            testID="question-form-dismiss"
+          >
+            {isActionResponding("dismiss", respondingAction, isResponding) ? (
+              <LoadingSpinner size="small" color={theme.colors.foregroundMuted} />
+            ) : (
+              <View style={styles.actionContent}>
+                <X size={14} color={theme.colors.foregroundMuted} />
+                <Text style={dismissActionTextStyle}>{dismissLabel}</Text>
+              </View>
+            )}
+          </Pressable>
+        ) : null}
 
         <Pressable
           style={submitButtonStyle}
@@ -593,7 +632,7 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
           accessibilityLabel={primaryActionLabel}
           testID="question-form-primary-action"
         >
-          {respondingAction === "submit" ? (
+          {isActionResponding("submit", respondingAction, isResponding) ? (
             <LoadingSpinner size="small" color={theme.colors.accentForeground} />
           ) : (
             <View style={styles.actionContent}>
@@ -607,7 +646,110 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
   );
 }
 
+export function PermissionQuestionCard({
+  permission,
+  onRespond,
+  isResponding,
+}: {
+  permission: PendingPermission;
+  onRespond: (response: AgentPermissionResponse) => void;
+  isResponding: boolean;
+}) {
+  const questions = useMemo(
+    () => parseQuestionFormQuestions(permission.request.input),
+    [permission.request.input],
+  );
+  const submit = useCallback(
+    (answers: Record<string, string>) => {
+      onRespond({
+        behavior: "allow",
+        updatedInput: { ...permission.request.input, answers },
+      });
+    },
+    [onRespond, permission.request.input],
+  );
+  const dismiss = useCallback(
+    (answers: Record<string, string>) => {
+      if (questions && shouldSubmitEmptyOnDismiss(questions)) {
+        submit(answers);
+        return;
+      }
+      onRespond({ behavior: "deny", message: "Dismissed by user" });
+    },
+    [onRespond, questions, submit],
+  );
+  return (
+    <QuestionFormCard
+      questions={questions}
+      onSubmit={submit}
+      onDismiss={dismiss}
+      isResponding={isResponding}
+    />
+  );
+}
+
+export function AsyncQuestionCard({
+  questions,
+  onAnswer,
+}: {
+  questions: AgentAsyncQuestion[];
+  onAnswer: (text: string) => Promise<void>;
+}) {
+  const [isResponding, setIsResponding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const formQuestions = useMemo<QuestionFormQuestion[]>(
+    () =>
+      questions.map((question, index) => ({
+        header: String(index + 1),
+        question: question.title,
+        options: (question.options ?? []).map((label) => ({ label })),
+        multiSelect: false,
+        allowOther: true,
+        allowEmpty: false,
+      })),
+    [questions],
+  );
+  const submit = useCallback(
+    (answers: Record<string, string>) => {
+      const text =
+        questions.length === 1
+          ? answers["1"]
+          : questions
+              .map((question, index) => `${question.title}: ${answers[String(index + 1)]}`)
+              .join("\n");
+      if (!text) return;
+      setIsResponding(true);
+      setError(null);
+      void onAnswer(text)
+        .catch((cause: unknown) => {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        })
+        .finally(() => setIsResponding(false));
+    },
+    [onAnswer, questions],
+  );
+  return (
+    <>
+      <QuestionFormCard
+        questions={formQuestions}
+        onSubmit={submit}
+        isResponding={isResponding}
+        preselectFirstOption
+      />
+      {error ? (
+        <Text accessibilityRole="alert" style={styles.errorText}>
+          {error}
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
 const styles = StyleSheet.create((theme) => ({
+  errorText: {
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.sm,
+  },
   container: {
     padding: theme.spacing[3],
     borderRadius: theme.spacing[2],
