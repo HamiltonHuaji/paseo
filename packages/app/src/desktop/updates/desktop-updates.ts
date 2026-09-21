@@ -22,6 +22,26 @@ export interface DesktopAppUpdateInstallResult {
 export interface DesktopRuntimeInfo {
   appVersion: string | null;
   runningUnderARM64Translation: boolean;
+  distribution: "fork" | null;
+  upstreamBaseVersion: string | null;
+}
+
+export interface OfficialReleaseCheckResult {
+  upstreamBaseVersion: string | null;
+  latestVersion: string | null;
+  hasNewerUpstream: boolean;
+  releaseUrl: string | null;
+  body: string | null;
+  date: string | null;
+  canSwitch: boolean;
+  assetName: string | null;
+  errorMessage: string | null;
+}
+
+export interface OfficialSwitchResult {
+  started: boolean;
+  version: string | null;
+  message: string;
 }
 
 export type DesktopReleaseChannel = "stable" | "beta";
@@ -86,13 +106,61 @@ export function parseDesktopRuntimeInfo(raw: unknown): DesktopRuntimeInfo {
     return {
       appVersion: null,
       runningUnderARM64Translation: false,
+      distribution: null,
+      upstreamBaseVersion: null,
     };
   }
 
   return {
     appVersion: toStringOrNull(raw.appVersion),
     runningUnderARM64Translation: raw.runningUnderARM64Translation === true,
+    distribution: raw.distribution === "fork" ? "fork" : null,
+    upstreamBaseVersion: toStringOrNull(raw.upstreamBaseVersion),
   };
+}
+
+export function parseOfficialReleaseCheckResult(raw: unknown): OfficialReleaseCheckResult {
+  const result = isRecord(raw) ? raw : {};
+  return {
+    upstreamBaseVersion: toStringOrNull(result.upstreamBaseVersion),
+    latestVersion: toStringOrNull(result.latestVersion),
+    hasNewerUpstream: result.hasNewerUpstream === true,
+    releaseUrl: toStringOrNull(result.releaseUrl),
+    body: toStringOrNull(result.body),
+    date: toStringOrNull(result.date),
+    canSwitch: result.canSwitch === true,
+    assetName: toStringOrNull(result.assetName),
+    errorMessage: toStringOrNull(result.errorMessage),
+  };
+}
+
+export async function checkOfficialRelease({
+  releaseChannel,
+}: {
+  releaseChannel: DesktopReleaseChannel;
+}): Promise<OfficialReleaseCheckResult> {
+  return parseOfficialReleaseCheckResult(
+    await invokeDesktopCommand<unknown>("check_official_app_release", { releaseChannel }),
+  );
+}
+
+export function parseOfficialSwitchResult(raw: unknown): OfficialSwitchResult {
+  const result = isRecord(raw) ? raw : {};
+  return {
+    started: result.started === true,
+    version: toStringOrNull(result.version),
+    message: toStringOrNull(result.message) ?? "The official Paseo installer could not be started.",
+  };
+}
+
+export async function switchToOfficialApp({
+  releaseChannel,
+}: {
+  releaseChannel: DesktopReleaseChannel;
+}): Promise<OfficialSwitchResult> {
+  return parseOfficialSwitchResult(
+    await invokeDesktopCommand<unknown>("switch_to_official_app", { releaseChannel }),
+  );
 }
 
 export async function getDesktopRuntimeInfo(): Promise<DesktopRuntimeInfo> {
