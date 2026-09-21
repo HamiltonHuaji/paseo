@@ -142,7 +142,10 @@ export class DefaultNpmGlobalPaseoCli implements NpmGlobalPaseoCli {
   }
 
   installLatest(): Promise<CommandResult> {
-    return this.runCommand("npm", ["install", "-g", this.distribution.installSpec], {
+    // Official and fork distributions use different package names but both own the global
+    // `paseo` executable. npm requires --force when switching distributions so it can replace
+    // the existing command shim.
+    return this.runCommand("npm", ["install", "-g", "--force", this.distribution.installSpec], {
       timeout: NPM_INSTALL_TIMEOUT_MS,
       maxBuffer: NPM_MAX_BUFFER_BYTES,
     });
