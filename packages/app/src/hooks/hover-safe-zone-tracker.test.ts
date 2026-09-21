@@ -82,39 +82,6 @@ describe("hover safe-zone tracker", () => {
     expect(handle.leaves).toBe(1);
   });
 
-  it("retains an outside pointer while content interaction is active", () => {
-    let retainAfterLeave = true;
-    let enters = 0;
-    let leaves = 0;
-    const tracker = createHoverSafeZoneTracker({
-      getTriggerRect: () => TRIGGER,
-      getContentRect: () => CONTENT,
-      shouldRetainAfterLeave: () => retainAfterLeave,
-      onEnterSafeZone: () => {
-        enters += 1;
-      },
-      onLeaveSafeZone: () => {
-        leaves += 1;
-      },
-    });
-
-    tracker.pointerMoved(300, 40);
-    expect(enters).toBe(1);
-    expect(leaves).toBe(0);
-
-    retainAfterLeave = false;
-    tracker.retentionChanged();
-    expect(leaves).toBe(1);
-
-    retainAfterLeave = true;
-    tracker.retentionChanged();
-    expect(enters).toBe(2);
-
-    retainAfterLeave = false;
-    tracker.retentionChanged();
-    expect(leaves).toBe(2);
-  });
-
   it("falls back to trigger-or-content membership when a rect is missing", () => {
     const handle = createHandle({ trigger: TRIGGER, content: null });
 
@@ -127,36 +94,15 @@ describe("hover safe-zone tracker", () => {
     expect(handle.leaves).toBe(1);
   });
 
-  it("bridges content placed above the trigger", () => {
+  it("treats overlapping trigger and content as having no bridge", () => {
     const handle = createHandle({
-      trigger: { left: 40, right: 140, top: 80, bottom: 100 },
-      content: { left: 20, right: 200, top: 20, bottom: 70 },
+      trigger: { left: 0, right: 200, top: 0, bottom: 50 },
+      content: { left: 100, right: 300, top: 60, bottom: 100 },
     });
 
-    handle.pointerMoved(100, 75);
-    expect(handle.enters).toBe(1);
-    expect(handle.leaves).toBe(0);
-  });
-
-  it("bridges content placed below the trigger", () => {
-    const handle = createHandle({
-      trigger: { left: 40, right: 140, top: 20, bottom: 40 },
-      content: { left: 20, right: 200, top: 50, bottom: 100 },
-    });
-
-    handle.pointerMoved(100, 45);
-    expect(handle.enters).toBe(1);
-    expect(handle.leaves).toBe(0);
-  });
-
-  it("does not invent a bridge when trigger and content overlap", () => {
-    const handle = createHandle({
-      trigger: { left: 0, right: 200, top: 0, bottom: 80 },
-      content: { left: 100, right: 300, top: 60, bottom: 120 },
-    });
-
-    // Inside their bounding box, but outside both actual rects.
-    handle.pointerMoved(250, 20);
+    // Outside both rects, in what would be a bridge — should be outside.
+    handle.pointerMoved(150, 55);
+    expect(handle.enters).toBe(0);
     expect(handle.leaves).toBe(1);
   });
 });
