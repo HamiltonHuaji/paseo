@@ -74,6 +74,21 @@ Ready to review 状态，以及为曾经打开的所有会话恢复 provider run
 | `EXP-01`–`EXP-04`    | Fork 仍需实现 | 在 0.9 project/workspace API 上恢复完整 Experiments 产品面。                                                       |
 | `VIEWER-01`          | Fork 仍需实现 | 恢复 viewer service、目录 discovery 和 direct/relay tunnel。                                                       |
 
+### v0.9 重建结果
+
+当前重建基于官方 `v0.9.0-beta.2`，首个 fork revision 的可安装版本为 `0.9.1`。重建采用新的
+0.9 API 重新落地产品能力，没有重放旧提交序列。
+
+- 已保留文件预览/下载、链接 hover、Web/Android 公式、composer 快捷键、vertical tabs、
+  Experiments、viewer、native Codex fork、skill ownership、fork distribution/self-update 与
+  overlay-only release 流程。
+- Native fork 只使用 0.9 history/timeline 和 provider contract；没有移植 `CODEX-02`、
+  `CODEX-03` 中的一般 session、timeline、tool 或 subagent 修补。
+- 官方 0.9 已提供的全历史消息搜索和 structured question UI 直接使用上游实现。
+- VS Code 客户端源码已保留，但仍是 opt-in、unfinished artifact，不属于默认发布。
+- 上表列出的 0.9 issue 仍归 upstream。只有它们实际阻断 overlay 产品能力时，才增加带清理
+  条件的临时补丁。
+
 ## 需求目录
 
 ### 文件、链接和 Markdown
