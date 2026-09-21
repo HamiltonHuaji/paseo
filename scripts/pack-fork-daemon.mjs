@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { copyFile, cp, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -33,24 +34,36 @@ function sortedObject(entries) {
   return Object.fromEntries([...entries].sort(([left], [right]) => left.localeCompare(right)));
 }
 
-function mergeExternalDependencies(packageManifests, internalPackageNames) {
+function collectExternalDependencies(packageManifests, internalPackageNames) {
   const dependencies = new Map();
+  const nestedDependencies = new Map();
   for (const manifest of packageManifests) {
     for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
       if (internalPackageNames.has(name)) continue;
       const existing = dependencies.get(name);
       if (existing && existing !== version) {
-        throw new Error(`Conflicting dependency ranges for ${name}: ${existing} and ${version}`);
+        const nested = nestedDependencies.get(manifest.name) ?? new Map();
+        nested.set(name, version);
+        nestedDependencies.set(manifest.name, nested);
+        continue;
       }
       dependencies.set(name, version);
     }
   }
-  return dependencies;
+  return { dependencies, nestedDependencies };
 }
 
-export function buildBundledInternalPackageManifest(packageManifest, distributionIdentity) {
+export function buildBundledInternalPackageManifest(
+  packageManifest,
+  distributionIdentity,
+  nestedDependencies = new Map(),
+) {
   const bundledManifest = structuredClone(packageManifest);
-  delete bundledManifest.dependencies;
+  if (nestedDependencies.size > 0) {
+    bundledManifest.dependencies = sortedObject(nestedDependencies.entries());
+  } else {
+    delete bundledManifest.dependencies;
+  }
   // npm attempts to resolve peer dependencies declared by bundled packages and can
   // leave empty shadow directories beside them. The outer distribution owns every
   // runtime dependency, so the private bundled manifests must not participate in
@@ -77,7 +90,7 @@ export function buildForkDaemonPackageManifest({
     }
   }
 
-  const dependencies = mergeExternalDependencies(
+  const { dependencies } = collectExternalDependencies(
     [cliManifest, ...internalManifests],
     internalPackageNames,
   );
@@ -125,7 +138,7 @@ async function listPackedFiles(packageDirectory) {
   return result.files.map((entry) => entry.path);
 }
 
-async function copyPackedPackage(packageDirectory, targetDirectory, distributionIdentity) {
+async function copyRawPackedPackage(packageDirectory, targetDirectory) {
   const files = await listPackedFiles(packageDirectory);
   for (const relativePath of files) {
     const sourcePath = path.join(packageDirectory, relativePath);
@@ -136,13 +149,46 @@ async function copyPackedPackage(packageDirectory, targetDirectory, distribution
     await mkdir(path.dirname(targetPath), { recursive: true });
     await copyFile(sourcePath, targetPath);
   }
+}
+
+async function findPackageDirectory(resolvedEntry, expectedName) {
+  let directory = path.dirname(resolvedEntry);
+  while (directory !== path.dirname(directory)) {
+    try {
+      const manifest = await readJson(path.join(directory, "package.json"));
+      if (manifest.name === expectedName) return directory;
+    } catch {
+      // Keep walking toward the package root.
+    }
+    directory = path.dirname(directory);
+  }
+  throw new Error(`Could not locate ${expectedName} from ${resolvedEntry}`);
+}
+
+async function copyPackedPackage(
+  packageDirectory,
+  targetDirectory,
+  distributionIdentity,
+  nestedDependencies = new Map(),
+) {
+  await copyRawPackedPackage(packageDirectory, targetDirectory);
 
   const packageJsonPath = path.join(targetDirectory, "package.json");
   const bundledManifest = buildBundledInternalPackageManifest(
     await readJson(packageJsonPath),
     distributionIdentity,
+    nestedDependencies,
   );
   await writeFile(packageJsonPath, `${JSON.stringify(bundledManifest, null, 2)}\n`);
+
+  const requireFromPackage = createRequire(path.join(packageDirectory, "package.json"));
+  for (const name of nestedDependencies.keys()) {
+    const dependencyDirectory = await findPackageDirectory(requireFromPackage.resolve(name), name);
+    await copyRawPackedPackage(
+      dependencyDirectory,
+      path.join(targetDirectory, "node_modules", ...name.split("/")),
+    );
+  }
 }
 
 async function copyCliPayload() {
@@ -155,7 +201,7 @@ async function copyCliPayload() {
   }
 }
 
-async function packStage() {
+async function packStage(allowedNestedDependencies) {
   const { stdout } = await execFileAsync(
     "npm",
     ["pack", STAGE_DIRECTORY, "--ignore-scripts", "--json", "--pack-destination", OUTPUT_DIRECTORY],
@@ -166,7 +212,8 @@ async function packStage() {
 
   const bundled = new Set(result.bundled ?? []);
   const missing = INTERNAL_PACKAGE_NAMES.filter((name) => !bundled.has(name));
-  const unexpected = [...bundled].filter((name) => !INTERNAL_PACKAGE_NAMES.includes(name));
+  const allowed = new Set([...INTERNAL_PACKAGE_NAMES, ...allowedNestedDependencies]);
+  const unexpected = [...bundled].filter((name) => !allowed.has(name));
   if (missing.length > 0 || unexpected.length > 0) {
     throw new Error(
       `npm packed the wrong internal packages (missing: ${missing.join(", ") || "none"}; unexpected: ${unexpected.join(", ") || "none"})`,
@@ -187,6 +234,11 @@ export async function packForkDaemon() {
     INTERNAL_PACKAGE_DIRECTORIES.map((directory) =>
       readJson(path.join(REPO_ROOT, directory, "package.json")),
     ),
+  );
+  const internalPackageNames = new Set(internalManifests.map((manifest) => manifest.name));
+  const { nestedDependencies } = collectExternalDependencies(
+    [cliManifest, ...internalManifests],
+    internalPackageNames,
   );
   const packageManifest = buildForkDaemonPackageManifest({
     rootManifest,
@@ -222,7 +274,12 @@ export async function packForkDaemon() {
     );
     if (!manifest) throw new Error(`Missing package manifest for ${directory}`);
     const targetDirectory = path.join(STAGE_DIRECTORY, "node_modules", ...manifest.name.split("/"));
-    await copyPackedPackage(path.join(REPO_ROOT, directory), targetDirectory, distributionIdentity);
+    await copyPackedPackage(
+      path.join(REPO_ROOT, directory),
+      targetDirectory,
+      distributionIdentity,
+      nestedDependencies.get(manifest.name),
+    );
   }
 
   await writeFile(
@@ -234,7 +291,11 @@ export async function packForkDaemon() {
     `${JSON.stringify(distributionManifest, null, 2)}\n`,
   );
 
-  const result = await packStage();
+  const allowedNestedDependencies = new Set();
+  for (const dependencies of nestedDependencies.values()) {
+    for (const name of dependencies.keys()) allowedNestedDependencies.add(name);
+  }
+  const result = await packStage(allowedNestedDependencies);
   await rm(STAGE_DIRECTORY, { recursive: true, force: true });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return result;
