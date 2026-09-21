@@ -182,7 +182,7 @@ jobs:
             echo "::error::No release artifacts found in $release_dir"
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "${{ github.repository }}"
 
       - name: Upload desktop artifacts to workflow
         if: env.SHOULD_PUBLISH != 'true'
@@ -299,7 +299,7 @@ jobs:
             echo "::error::No release artifacts found in $release_dir"
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "${{ github.repository }}"
 
       - name: Upload desktop artifacts to workflow
         if: env.SHOULD_PUBLISH != 'true'
@@ -408,7 +408,7 @@ jobs:
             echo "::error::No release artifacts found in $release_dir"
             exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --repo "${{ github.repository }}"
 
       - name: Upload desktop artifacts to workflow
         if: env.SHOULD_PUBLISH != 'true'

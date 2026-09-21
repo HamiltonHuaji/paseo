@@ -1,6 +1,6 @@
 ---
 name: release-fork
-description: Publish or rebuild the HamiltonHuaji/paseo overlay fork. Use when the user asks to release, publish, rebuild, or ship the fork, its desktop installers, daemon package, VSIX, or optional Android APK.
+description: Publish the HamiltonHuaji/paseo overlay fork. Use when the user asks to release, publish, rebuild, or ship the fork, its desktop installers, daemon package, VSIX, or optional Android APK. A rebuild always increments the fork revision and publishes a new immutable tag.
 user-invocable: true
 ---
 
@@ -11,6 +11,10 @@ Read `docs/release.md` completely and follow it end-to-end.
 Never run the upstream npm release scripts, publish `@getpaseo/*`, release from `main`, or invoke
 the official Android/EAS workflow. The release source is `origin/overlay`; the GitHub release tag
 must equal the canonical version in `fork-build-info.json`.
+
+Published tags and assets are immutable. Never move a published tag or use `--clobber` to rebuild
+an asset under an existing URL. Increment the fork revision and publish a new version instead;
+manifest and installer caches otherwise produce checksum mismatches.
 
 The fork uses one version everywhere. For upstream `A.B.C` or `A.B.C-prerelease` and fork revision
 `R` from 1 through 999, preserve the exact upstream string in metadata, strip the prerelease suffix

@@ -89,7 +89,7 @@ jobs:
         if: env.SHOULD_PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" artifacts/fork-daemon/paseo-fork.tgz --clobber --repo "${{ github.repository }}"
+        run: gh release upload "$RELEASE_TAG" artifacts/fork-daemon/paseo-fork.tgz --repo "${{ github.repository }}"
 
       - name: Publish release with available daemon package
         if: env.SHOULD_PUBLISH == 'true'

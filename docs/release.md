@@ -28,6 +28,11 @@ Workflow dispatch uses `--ref overlay` so GitHub loads the fork workflow definit
 `checkout_ref=<commit SHA>` pins every build job to the same source. Do not push a release tag:
 external GitHub Apps can react to tag events even when the overlay removes upstream workflows.
 
+Published tags and assets are immutable. Never rebuild or overwrite an installer under an existing
+tag: update manifests and installer downloads can be cached independently, producing a checksum
+mismatch. Increment the fork revision and publish a new version even when the only change is to the
+release pipeline.
+
 ## Artifact set
 
 Every fork release builds:
