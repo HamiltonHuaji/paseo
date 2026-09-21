@@ -52,6 +52,28 @@ hydration、分页、tab 初始化或 replica workaround。官方已完整实现
 `v0.9.0-beta.1` 不可作为 base。beta.2 已修复 beta.1 在重启时污染 workspace activity、丢失
 Ready to review 状态，以及为曾经打开的所有会话恢复 provider runtime 的问题。
 
+### v0.9 requirement disposition
+
+| Requirement          | 结论          | 重建规则                                                                                                           |
+| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `FILE-01`            | Fork 仍需实现 | 在 0.9 file service 上恢复 symlink 预览。                                                                          |
+| `FILE-02`            | 上游部分实现  | 保留 upstream direct download，只补 active relay/WebSocket 保存路径。                                              |
+| `LINK-01`            | Fork 仍需实现 | 恢复可检查和复制 target 的交互式 hover card。                                                                      |
+| `MD-01`              | Fork 仍需实现 | 恢复 KaTeX/RaTeX、源码复制和安全 HTML-ish normalization。                                                          |
+| `CODEX-01`           | Fork 仍需实现 | 只实现 provider-native fork 能力及其必要 persistence handle 更新；依赖 0.9 自身 history/timeline。                 |
+| `CODEX-02`           | 明确不重放    | 一般 reload、history hydration 和 writer lifecycle 由 upstream 负责；native fork 所需 handle 更新并入 `CODEX-01`。 |
+| `CODEX-03`           | 明确不重放    | tool/subagent terminal-state bug 交给 upstream，不维持 fork projection 补丁。                                      |
+| `CODEX-04`           | 上游完整实现  | 0.9 已包含官方 structured asynchronous question UI 和协议。                                                        |
+| `AGENT-01`           | 上游部分实现  | 只保留 Experiments 所需的 agent attribution 和 bundled skill 声明。                                                |
+| `COMPOSER-01`        | Fork 仍需实现 | 恢复 Enter newline、modifier+Enter action、Tab queue。                                                             |
+| `TABS-01`、`TABS-02` | Fork 仍需实现 | 在 0.9 workspace layout 上恢复顶部 overflow 与 hierarchical vertical rail。                                        |
+| `DIST-01`–`DIST-04`  | Fork 仍需实现 | 从 0.9 packaging 重建，不能回退到 upstream distribution identity。                                                 |
+| `RELEASE-01`         | Fork 仍需实现 | 以 0.9 workflows 为输入恢复 overlay-only incremental publication。                                                 |
+| `SKILL-01`           | Fork 仍需实现 | 保留用户拥有的同名 skill directory。                                                                               |
+| `VSCODE-01`          | Fork 仍需实现 | 保留源码，但仍是 unfinished、opt-in artifact。                                                                     |
+| `EXP-01`–`EXP-04`    | Fork 仍需实现 | 在 0.9 project/workspace API 上恢复完整 Experiments 产品面。                                                       |
+| `VIEWER-01`          | Fork 仍需实现 | 恢复 viewer service、目录 discovery 和 direct/relay tunnel。                                                       |
+
 ## 需求目录
 
 ### 文件、链接和 Markdown
