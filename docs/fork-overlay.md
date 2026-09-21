@@ -34,6 +34,10 @@ the fork behavior that upstream has not implemented. Reimplement retained behavi
 upstream APIs instead of preserving obsolete conflict resolutions. Keep a backup ref until the
 replacement overlay passes verification.
 
+Use [fork-overlay-inventory.md](fork-overlay-inventory.md) as the loss-prevention checklist. It
+records the product requirement and replay disposition behind every commit in the current overlay.
+Classify every requirement against the new official release before replacing the old branch.
+
 Do not merge the release tag into `overlay`. Merge commits make the overlay boundary harder to
 review and retain historical conflict resolutions in the wrong order.
 
