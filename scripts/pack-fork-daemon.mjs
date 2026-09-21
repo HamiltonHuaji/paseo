@@ -3,6 +3,7 @@ import { copyFile, cp, lstat, mkdir, readFile, rename, rm, writeFile } from "nod
 import path from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
+import { readForkBuildMetadata } from "./fork-version-utils.mjs";
 
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
@@ -66,7 +67,7 @@ export function buildForkDaemonPackageManifest({
   internalManifests,
   forkMetadata,
 }) {
-  const version = `${forkMetadata.upstreamBaseVersion}-fork.${forkMetadata.revision}`;
+  const version = forkMetadata.version;
   const internalPackageNames = new Set(internalManifests.map((manifest) => manifest.name));
   for (const manifest of [cliManifest, ...internalManifests]) {
     if (manifest.version !== forkMetadata.upstreamBaseVersion) {
@@ -181,9 +182,7 @@ async function packStage() {
 export async function packForkDaemon() {
   const rootManifest = await readJson(path.join(REPO_ROOT, "package.json"));
   const cliManifest = await readJson(path.join(REPO_ROOT, "packages", "cli", "package.json"));
-  const forkMetadata = await readJson(
-    path.join(REPO_ROOT, "packages", "desktop", "src", "features", "fork-build-info.json"),
-  );
+  const forkMetadata = readForkBuildMetadata();
   const internalManifests = await Promise.all(
     INTERNAL_PACKAGE_DIRECTORIES.map((directory) =>
       readJson(path.join(REPO_ROOT, directory, "package.json")),

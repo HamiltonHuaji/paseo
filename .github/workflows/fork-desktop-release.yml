@@ -1,0 +1,419 @@
+name: Fork Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Canonical fork tag to build (must match fork-build-info.json)."
+        required: true
+        type: string
+      platform:
+        description: "Fork desktop platform set to build."
+        required: false
+        default: "windows-linux"
+        type: choice
+        options:
+          - windows-linux
+          - linux
+          - windows
+      checkout_ref:
+        description: "Exact fork tag/ref to build."
+        required: false
+        default: "overlay"
+        type: string
+      publish:
+        description: "Publish built artifacts to GitHub Releases."
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      rollout_hours:
+        description: "Linear rollout duration in hours. Use 0 for instant rollout."
+        required: false
+        default: "0"
+        type: string
+
+concurrency:
+  group: fork-desktop-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  SOURCE_TAG: ${{ inputs.tag }}
+  CHECKOUT_REF: ${{ inputs.checkout_ref || 'overlay' }}
+  SHOULD_PUBLISH: ${{ inputs.publish != 'false' }}
+  ROLLOUT_HOURS: ${{ inputs.rollout_hours }}
+  DESKTOP_PACKAGE_PATH: "packages/desktop"
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+jobs:
+  create-release:
+    if: ${{ inputs.publish != 'false' }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts
+            packages/desktop/src/features/fork-build-info.json
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release metadata
+        shell: bash
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release
+        if: env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Paseo Fork v${FORK_VERSION}"
+          notes=$(printf 'Version: `v%s`\n\nBased on official [getpaseo/paseo `v%s`](https://github.com/getpaseo/paseo/releases/tag/v%s). Fork revision: `%s`.' \
+            "$FORK_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_UPSTREAM_BASE_VERSION" "$FORK_REVISION")
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --repo "${{ github.repository }}" --title "$title" --notes "$notes" --draft=false
+          else
+            prerelease_flag=""
+            if [[ "$IS_PRERELEASE" == "true" ]]; then
+              prerelease_flag="--prerelease"
+            fi
+            gh release create "$RELEASE_TAG" \
+              --repo "${{ github.repository }}" \
+              --target "$CHECKOUT_REF" \
+              --title "$title" \
+              --notes "$notes" \
+              $prerelease_flag || gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null
+          fi
+
+  publish-macos:
+    needs: [create-release]
+    if: ${{ false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            electron_arch: arm64
+          - runner: macos-15-intel
+            electron_arch: x64
+    permissions:
+      contents: write
+      packages: read
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release metadata
+        shell: bash
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set desktop package version from tag
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const version = process.env.DESKTOP_VERSION;
+          if (!version) throw new Error('DESKTOP_VERSION env var is missing');
+
+          for (const packageJsonPath of [
+            path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
+            'packages/app/package.json',
+            'packages/server/package.json',
+          ]) {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
+          NODE
+
+      - name: Build desktop release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_GH_IGNORE_TIME: true
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          build_args=(-- --publish never --mac --${{ matrix.electron_arch }})
+          build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
+          build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          npm run build:desktop "${build_args[@]}"
+
+      - name: Upload desktop artifacts to release
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="${DESKTOP_PACKAGE_PATH}/release"
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find "$release_dir" -maxdepth 1 -type f ! -name '*.yml' -print0 | sort -z)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in $release_dir"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+      - name: Upload desktop artifacts to workflow
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos-${{ matrix.electron_arch }}
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/*.dmg
+          retention-days: 7
+
+      - name: Upload manifest artifact
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-manifest-${{ matrix.electron_arch }}
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/${{ env.RELEASE_CHANNEL }}-mac.yml
+          retention-days: 1
+
+  publish-linux:
+    needs: [create-release]
+    if: ${{ !cancelled() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') && (inputs.platform == 'windows-linux' || inputs.platform == 'linux') }}
+    permissions:
+      contents: write
+      packages: read
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release metadata
+        shell: bash
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Restore Metro transform cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/metro-cache
+          key: metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-${{ github.sha }}
+          restore-keys: |
+            metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set desktop and renderer package versions from tag
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const version = process.env.DESKTOP_VERSION;
+          if (!version) throw new Error('DESKTOP_VERSION env var is missing');
+
+          for (const packageJsonPath of [
+            path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
+            'packages/app/package.json',
+            'packages/server/package.json',
+          ]) {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
+          NODE
+
+      - name: Build desktop release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_GH_IGNORE_TIME: true
+        run: |
+          set -euo pipefail
+          build_args=(-- --publish never --linux --x64)
+          build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
+          build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          npm run build:desktop "${build_args[@]}"
+
+      - name: Stamp Linux update manifest
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        shell: bash
+        run: >-
+          node scripts/stamp-rollout.mjs
+          --release-date "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+          --rollout-hours "$ROLLOUT_HOURS"
+          "${DESKTOP_PACKAGE_PATH}/release/${RELEASE_CHANNEL}-linux.yml"
+
+      - name: Upload desktop artifacts to release
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="${DESKTOP_PACKAGE_PATH}/release"
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find "$release_dir" -maxdepth 1 -type f ! -name '*.yml' -print0 | sort -z)
+          files+=("$release_dir/${RELEASE_CHANNEL}-linux.yml")
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in $release_dir"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+      - name: Upload desktop artifacts to workflow
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/*
+          retention-days: 7
+
+  publish-windows:
+    needs: [create-release]
+    if: ${{ !cancelled() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') && (inputs.platform == 'windows-linux' || inputs.platform == 'windows') }}
+    permissions:
+      contents: write
+      packages: read
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CHECKOUT_REF }}
+
+      - name: Resolve release metadata
+        shell: bash
+        run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@boudra"
+
+      - name: Restore Metro transform cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/metro-cache
+          key: metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-${{ github.sha }}
+          restore-keys: |
+            metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-
+
+      - name: Install JS dependencies
+        run: node scripts/npm-retry.mjs ci --prefer-offline --no-audit --no-fund
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set desktop and renderer package versions from tag
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const version = process.env.DESKTOP_VERSION;
+          if (!version) throw new Error('DESKTOP_VERSION env var is missing');
+
+          for (const packageJsonPath of [
+            path.join(process.env.DESKTOP_PACKAGE_PATH, 'package.json'),
+            'packages/app/package.json',
+            'packages/server/package.json',
+          ]) {
+            const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+            packageJson.version = version;
+            fs.writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+          }
+          NODE
+
+      - name: Build desktop release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_GH_IGNORE_TIME: true
+        run: |
+          set -euo pipefail
+          build_args=(-- --publish never --win --x64)
+          build_args+=("-c.publish.releaseType=$RELEASE_TYPE")
+          build_args+=("-c.publish.channel=$RELEASE_CHANNEL")
+          npm run build:desktop "${build_args[@]}"
+
+      - name: Stamp Windows update manifest
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        shell: bash
+        run: >-
+          node scripts/stamp-rollout.mjs
+          --release-date "$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+          --rollout-hours "$ROLLOUT_HOURS"
+          "${DESKTOP_PACKAGE_PATH}/release/${RELEASE_CHANNEL}.yml"
+
+      - name: Upload desktop artifacts to release
+        if: env.SHOULD_PUBLISH == 'true' && env.IS_SMOKE_TAG != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="${DESKTOP_PACKAGE_PATH}/release"
+          files=()
+          while IFS= read -r -d '' f; do
+            files+=("$f")
+          done < <(find "$release_dir" -maxdepth 1 -type f ! -name '*.yml' -print0 | sort -z)
+          files+=("$release_dir/${RELEASE_CHANNEL}.yml")
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found in $release_dir"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+      - name: Upload desktop artifacts to workflow
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: ${{ env.DESKTOP_PACKAGE_PATH }}/release/*
+          retention-days: 7
