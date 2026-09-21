@@ -194,28 +194,14 @@ export const ExperimentProgressRefreshRequestSchema = z.object({
   attempt: AttemptHandleSchema,
 });
 
-export const ExperimentStorageResolveRequestSchema = z.discriminatedUnion("scope", [
-  z.object({
-    type: z.literal("experiment.storage.resolve.request"),
-    requestId: z.string(),
-    projectId: z.string(),
-    scope: z.literal("shared"),
-  }),
-  z.object({
-    type: z.literal("experiment.storage.resolve.request"),
-    requestId: z.string(),
-    projectId: z.string(),
-    scope: z.literal("experiment"),
-    experiment: ExperimentHandleSchema,
-  }),
-  z.object({
-    type: z.literal("experiment.storage.resolve.request"),
-    requestId: z.string(),
-    projectId: z.string(),
-    scope: z.literal("attempt"),
-    attempt: AttemptHandleSchema,
-  }),
-]);
+export const ExperimentStorageResolveRequestSchema = z.object({
+  type: z.literal("experiment.storage.resolve.request"),
+  requestId: z.string(),
+  projectId: z.string(),
+  scope: z.enum(["shared", "experiment", "attempt"]),
+  experiment: ExperimentHandleSchema.optional(),
+  attempt: AttemptHandleSchema.optional(),
+});
 
 const ViewerTargetSchema = z.union([
   z.object({ experiment: ExperimentHandleSchema }),
