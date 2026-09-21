@@ -1,4 +1,5 @@
 {
-  "upstreamBaseVersion": "0.6.1",
-  "revision": 1
+  "version": "0.9.1",
+  "upstreamBaseVersion": "0.9.0-beta.2",
+  "forkRevision": 1
 }

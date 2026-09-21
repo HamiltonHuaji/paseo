@@ -10,8 +10,8 @@ export const UPSTREAM_REPOSITORY = {
   repo: "paseo",
 } as const;
 
-// Reset the revision when the upstream baseline advances. Increment it only
-// for another fork build on the same upstream baseline.
+// Reset the revision when the exact upstream baseline advances. The installable
+// version uses the baseline's numeric core so npm/Electron can compare it.
+export const FORK_VERSION = metadata.version;
 export const FORK_UPSTREAM_BASE_VERSION = metadata.upstreamBaseVersion;
-export const FORK_REVISION = metadata.revision;
-export const FORK_DISPLAY_VERSION = `${FORK_UPSTREAM_BASE_VERSION}-fork.${FORK_REVISION}`;
+export const FORK_REVISION = metadata.forkRevision;

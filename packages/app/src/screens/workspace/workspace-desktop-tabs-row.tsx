@@ -1901,6 +1901,7 @@ function ResolvedWorkspaceDesktopTabsRail({
       return (
         <ResolvedDesktopTabChip
           key={`${item.tab.key}:${item.tab.kind}`}
+          serverId={normalizedServerId}
           item={item}
           isFocused={isFocused}
           isDragging={isActive}
@@ -1940,6 +1941,7 @@ function ResolvedWorkspaceDesktopTabsRail({
       handleToggleGroup,
       activeTabId,
       isFocused,
+      normalizedServerId,
       onCloseOtherTabs,
       onCloseTab,
       onCloseTabsToLeft,

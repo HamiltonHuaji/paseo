@@ -125,6 +125,21 @@ export function runDefaultSendAction(ctx: SendActionContext): void {
   ctx.handleSendMessage();
 }
 
+// Retained for callers that explicitly ask for the inverse of the configured
+// submit behavior. Keyboard shortcuts no longer use this path: Mod+Enter
+// submits/steers and Tab queues.
+export function runAlternateSendAction(ctx: SendActionContext): void {
+  if (ctx.defaultSendBehavior === "queue" && ctx.isAgentRunning) {
+    ctx.handleSendMessage();
+    return;
+  }
+  if (ctx.isAgentRunning && ctx.onQueue) {
+    ctx.handleQueueMessage();
+    return;
+  }
+  ctx.handleSendMessage();
+}
+
 export type ComposerHardwareKeyAction = "submit" | "queue";
 
 export function resolveComposerHardwareKeyAction(input: {

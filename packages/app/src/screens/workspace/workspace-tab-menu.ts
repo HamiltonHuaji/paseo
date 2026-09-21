@@ -101,8 +101,8 @@ interface BuildWorkspaceDesktopTabActionsInput {
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
-  onMoveTabToStart: (tabId: string) => Promise<void> | void;
-  onMoveTabToEnd: (tabId: string) => Promise<void> | void;
+  onMoveTabToStart?: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd?: (tabId: string) => Promise<void> | void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
