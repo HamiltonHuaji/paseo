@@ -72,6 +72,13 @@ function requireProject(options: ExperimentOptions): string {
   return requireText(options.project, "--project");
 }
 
+export function resolveExperimentCallerAgentId(
+  env: { PASEO_AGENT_ID?: string } = process.env,
+): string | undefined {
+  const callerAgentId = env.PASEO_AGENT_ID?.trim();
+  return callerAgentId || undefined;
+}
+
 async function parseJsonOption<T>(
   value: string | undefined,
   schema: { parse(value: unknown): T },
@@ -145,10 +152,12 @@ export function createExperimentCommand(): Command {
       ): Promise<SingleResult<ExperimentRecord>> => {
         const client = await connect(options);
         try {
+          const callerAgentId = resolveExperimentCallerAgentId();
           const result = await client.updateExperiment({
             projectId: requireProject(options),
             experiment: experimentId,
             conclusion: requireText(options.conclusion, "--conclusion"),
+            ...(callerAgentId ? { callerAgentId } : {}),
           });
           return { type: "single", data: result.experiment, schema: experimentSchema };
         } finally {
@@ -208,6 +217,7 @@ export function createExperimentCommand(): Command {
       ): Promise<SingleResult<ExperimentRecord>> => {
         const client = await connect(options);
         try {
+          const callerAgentId = resolveExperimentCallerAgentId();
           const result = await client.createExperiment({
             projectId: requireProject(options),
             shortDescription: requireText(options.summary, "--summary"),
@@ -215,6 +225,7 @@ export function createExperimentCommand(): Command {
             ...(options.goal ? { goal: options.goal } : {}),
             ...(options.basedOn ? { basedOn: options.basedOn } : {}),
             ...(options.viewerSource ? { viewerSource: options.viewerSource } : {}),
+            ...(callerAgentId ? { callerAgentId } : {}),
           });
           return { type: "single", data: result.experiment, schema: experimentSchema };
         } finally {
@@ -259,6 +270,7 @@ export function createExperimentCommand(): Command {
       ): Promise<SingleResult<ExperimentAttempt>> => {
         const client = await connect(options);
         try {
+          const callerAgentId = resolveExperimentCallerAgentId();
           const progressPlan = await parseJsonOption(options.progressPlan, ProgressPlanSchema);
           const progressSource = await parseJsonOption(
             options.progressSource,
@@ -275,6 +287,7 @@ export function createExperimentCommand(): Command {
             ...(options.outputDir ? { outputDir: options.outputDir } : {}),
             ...(progressPlan ? { progressPlan } : {}),
             ...(progressSource ? { progressSource } : {}),
+            ...(callerAgentId ? { callerAgentId } : {}),
           });
           return { type: "single", data: result.attempt, schema: attemptSchema };
         } finally {
@@ -324,10 +337,12 @@ export function createExperimentCommand(): Command {
       ): Promise<SingleResult<ExperimentAttempt>> => {
         const client = await connect(options);
         try {
+          const callerAgentId = resolveExperimentCallerAgentId();
           const result = await client.updateExperimentAttempt({
             projectId: requireProject(options),
             attempt: attemptId,
             resultSummary: requireText(options.result, "--result"),
+            ...(callerAgentId ? { callerAgentId } : {}),
           });
           return { type: "single", data: result.attempt, schema: attemptSchema };
         } finally {

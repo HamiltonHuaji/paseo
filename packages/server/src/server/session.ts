@@ -3026,10 +3026,27 @@ export class Session {
     this.emit({ type: "experiment.get.response", payload: { requestId: msg.requestId, detail } });
   }
 
+  private async touchExperimentForCaller(
+    callerAgentId: string | undefined,
+    experiment: string,
+    attempt: string | null,
+  ): Promise<void> {
+    if (!callerAgentId) return;
+    try {
+      await this.agentStorage.touchExperiment(callerAgentId, experiment, attempt);
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, callerAgentId, experiment, attempt },
+        "Failed to record Experiment caller engagement",
+      );
+    }
+  }
+
   private async handleExperimentCreate(
     msg: Extract<SessionInboundMessage, { type: "experiment.create.request" }>,
   ): Promise<void> {
     const experiment = await this.experimentService.createExperiment(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, experiment.id, null);
     this.emit({
       type: "experiment.create.response",
       payload: { requestId: msg.requestId, experiment },
@@ -3040,6 +3057,7 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "experiment.update.request" }>,
   ): Promise<void> {
     const experiment = await this.experimentService.updateExperiment(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, experiment.id, null);
     this.emit({
       type: "experiment.update.response",
       payload: { requestId: msg.requestId, experiment },
@@ -3050,6 +3068,7 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "experiment.attempt.create.request" }>,
   ): Promise<void> {
     const attempt = await this.experimentService.createAttempt(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, attempt.experiment, attempt.id);
     this.emit({
       type: "experiment.attempt.create.response",
       payload: { requestId: msg.requestId, attempt },
@@ -3060,6 +3079,7 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "experiment.attempt.update.request" }>,
   ): Promise<void> {
     const attempt = await this.experimentService.updateAttempt(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, attempt.experiment, attempt.id);
     this.emit({
       type: "experiment.attempt.update.response",
       payload: { requestId: msg.requestId, attempt },

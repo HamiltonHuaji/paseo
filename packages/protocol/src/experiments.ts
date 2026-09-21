@@ -167,24 +167,28 @@ export const ExperimentCreateRequestSchema = CreateExperimentInputSchema.extend(
   type: z.literal("experiment.create.request"),
   requestId: z.string(),
   projectId: z.string(),
+  callerAgentId: z.string().optional(),
 });
 
 export const ExperimentUpdateRequestSchema = UpdateExperimentInputSchema.extend({
   type: z.literal("experiment.update.request"),
   requestId: z.string(),
   projectId: z.string(),
+  callerAgentId: z.string().optional(),
 });
 
 export const ExperimentAttemptCreateRequestSchema = CreateAttemptInputSchema.extend({
   type: z.literal("experiment.attempt.create.request"),
   requestId: z.string(),
   projectId: z.string(),
+  callerAgentId: z.string().optional(),
 });
 
 export const ExperimentAttemptUpdateRequestSchema = UpdateAttemptInputSchema.extend({
   type: z.literal("experiment.attempt.update.request"),
   requestId: z.string(),
   projectId: z.string(),
+  callerAgentId: z.string().optional(),
 });
 
 export const ExperimentProgressRefreshRequestSchema = z.object({
