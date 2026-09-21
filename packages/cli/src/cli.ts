@@ -15,6 +15,7 @@ import { createWorkspaceCommand } from "./commands/workspace/index.js";
 import { createHeartbeatCommand } from "./commands/heartbeat/index.js";
 import { createHubCommand } from "./commands/hub/index.js";
 import { createHooksCommand } from "./commands/hooks.js";
+import { createExperimentCommand } from "./commands/experiment/index.js";
 import { startCommand as daemonStartCommand } from "./commands/daemon/start.js";
 import { daemonStatusCommand } from "./commands/daemon/status.js";
 import { daemonRestartCommand } from "./commands/daemon/restart.js";
@@ -156,6 +157,7 @@ export function createCli(): Command {
   // Workspace commands
   program.addCommand(createProjectCommand());
   program.addCommand(createWorkspaceCommand());
+  program.addCommand(createExperimentCommand());
   // COMPAT(worktreeCli): legacy command alias added before workspace was the product unit.
   // Added in v0.2.0; remove after 2027-01-17.
   program.addCommand(createWorktreeCommand(), { hidden: true });

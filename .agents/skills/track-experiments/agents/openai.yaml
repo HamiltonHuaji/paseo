@@ -1,0 +1,4 @@
+interface:
+  display_name: "Track experiments"
+  short_description: "Track experiment intent, attempts, progress, and viewers"
+  default_prompt: "Use $track-experiments to record and coordinate this experiment."

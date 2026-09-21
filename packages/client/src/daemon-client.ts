@@ -143,12 +143,14 @@ import { isRelayClientWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
 import {
   asUint8Array,
   decodeFileTransferFrame,
+  decodeTunnelStreamFrame,
   encodeFileTransferFrame,
   decodeTerminalStreamFrame,
   FileTransferOpcode,
   TerminalStreamOpcode,
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
+import type { TunnelTarget } from "@getpaseo/protocol/tunnels";
 import {
   createRelayE2eeTransportFactory,
   createWebSocketTransportFactory,
@@ -167,6 +169,7 @@ import {
   normalizeProvidersSnapshotPayload,
 } from "./compat/normalize-provider-models.js";
 import { TerminalStreamRouter, type TerminalStreamEvent } from "./terminal-stream-router.js";
+import { DaemonTunnel } from "./daemon-tunnel.js";
 import type {
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
@@ -750,6 +753,46 @@ export type WorkspaceLabelDeleteInspectPayload = Extract<
   SessionOutboundMessage,
   { type: "workspace.label.delete.inspect.response" }
 >["payload"];
+export type ExperimentListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.list.response" }
+>["payload"];
+export type ExperimentGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.get.response" }
+>["payload"];
+export type ExperimentCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.create.response" }
+>["payload"];
+export type ExperimentUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.update.response" }
+>["payload"];
+export type ExperimentAttemptCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.attempt.create.response" }
+>["payload"];
+export type ExperimentAttemptUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.attempt.update.response" }
+>["payload"];
+export type ExperimentProgressRefreshPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.attempt.progress.refresh.response" }
+>["payload"];
+export type ExperimentStorageResolvePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.storage.resolve.response" }
+>["payload"];
+export type ExperimentViewerConfigurePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.viewer.configure.response" }
+>["payload"];
+export type ExperimentViewerResolvePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.viewer.resolve.response" }
+>["payload"];
 export type ProjectListPayload = Extract<
   SessionOutboundMessage,
   { type: "project.list.response" }
@@ -1168,6 +1211,7 @@ export class DaemonClient {
   private lastErrorValue: string | null = null;
   private connectionState: ConnectionState = { status: "idle" };
   private readonly terminalStreams = new TerminalStreamRouter();
+  private readonly tunnels = new Map<string, DaemonTunnel>();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
   private completedBinaryFileReads = new Map<string, FileReadResult>();
@@ -1255,6 +1299,35 @@ export class DaemonClient {
     });
 
     return this.connectPromise;
+  }
+
+  /** Resolve a daemon-served HTTP path when this client has a direct connection. */
+  resolveDirectHttpUrl(pathname: string): string | null {
+    if (this.logConnectionPath !== "direct") return null;
+    try {
+      const url = new URL(this.config.url);
+      if (url.protocol !== "ws:" && url.protocol !== "wss:") return null;
+      url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+      url.pathname = pathname.startsWith("/") ? pathname : `/${pathname}`;
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  async openTunnel(target: TunnelTarget): Promise<DaemonTunnel> {
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"tunnel.open.response">({
+      message: { type: "tunnel.open.request", target },
+    });
+    const tunnel = new DaemonTunnel(
+      payload.tunnelId,
+      (frame) => this.sendBinaryFrame(frame),
+      () => this.tunnels.delete(payload.tunnelId),
+    );
+    this.tunnels.set(payload.tunnelId, tunnel);
+    return tunnel;
   }
 
   private attemptConnect(): void {
@@ -1459,6 +1532,7 @@ export class DaemonClient {
     this.rejectPendingSendQueue(new Error("Daemon client closed"));
     this.rejectPingProbe(new Error("Daemon client closed"));
     this.terminalStreams.clearSlots();
+    this.abortTunnels();
     this.lastServerInfoMessage = null;
     if (this.runtimeMetricsInterval) {
       clearInterval(this.runtimeMetricsInterval);
@@ -2479,6 +2553,148 @@ export class DaemonClient {
         type: "workspace.label.delete.inspect.request",
         name: options.name,
       },
+    });
+  }
+
+  listExperiments(options: {
+    projectId: string;
+    goal?: string;
+    includeClosed?: boolean;
+    includeArchived?: boolean;
+    requestId?: string;
+  }): Promise<ExperimentListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.list.request",
+        projectId: options.projectId,
+        ...(options.goal !== undefined ? { goal: options.goal } : {}),
+        ...(options.includeClosed !== undefined ? { includeClosed: options.includeClosed } : {}),
+        ...(options.includeArchived !== undefined
+          ? { includeArchived: options.includeArchived }
+          : {}),
+      },
+    });
+  }
+
+  getExperiment(options: {
+    projectId: string;
+    experiment: string;
+    requestId?: string;
+  }): Promise<ExperimentGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.get.request",
+        projectId: options.projectId,
+        experiment: options.experiment,
+      },
+    });
+  }
+
+  createExperiment(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentCreatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.create.request", ...input },
+    });
+  }
+
+  updateExperiment(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentUpdatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.update.request", ...input },
+    });
+  }
+
+  createExperimentAttempt(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.attempt.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentAttemptCreatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.attempt.create.request", ...input },
+    });
+  }
+
+  updateExperimentAttempt(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.attempt.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentAttemptUpdatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.attempt.update.request", ...input },
+    });
+  }
+
+  refreshExperimentProgress(options: {
+    projectId: string;
+    attempt: string;
+    requestId?: string;
+  }): Promise<ExperimentProgressRefreshPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.attempt.progress.refresh.request",
+        projectId: options.projectId,
+        attempt: options.attempt,
+      },
+    });
+  }
+
+  resolveExperimentStorage(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.storage.resolve.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentStorageResolvePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.storage.resolve.request", ...input },
+    });
+  }
+
+  configureExperimentViewer(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.viewer.configure.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentViewerConfigurePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.viewer.configure.request", ...input },
+    });
+  }
+
+  resolveExperimentViewers(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.viewer.resolve.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentViewerResolvePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.viewer.resolve.request", ...input },
     });
   }
 
@@ -6180,6 +6396,14 @@ export class DaemonClient {
       return true;
     }
 
+    const tunnelFrame = decodeTunnelStreamFrame(rawBytes);
+    if (tunnelFrame) {
+      this.consecutiveLivenessFailures = 0;
+      this.tunnels.get(tunnelFrame.tunnelId)?.handleFrame(tunnelFrame);
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
+
     const frame = decodeTerminalStreamFrame(rawBytes);
     if (!frame) {
       return false;
@@ -6350,6 +6574,7 @@ export class DaemonClient {
     this.rejectPendingSendQueue(new DaemonConnectionError(reason ?? "Connection lost"));
     this.rejectPingProbe(new DaemonConnectionError(reason ?? "Connection lost"));
     this.terminalStreams.clearSlots();
+    this.abortTunnels();
     this.lastServerInfoMessage = null;
 
     if (wasDisposed) {
@@ -6363,6 +6588,12 @@ export class DaemonClient {
     }
 
     this.armReconnectTimer();
+  }
+
+  private abortTunnels(): void {
+    const tunnels = [...this.tunnels.values()];
+    this.tunnels.clear();
+    for (const tunnel of tunnels) tunnel.abort();
   }
 
   private emitDisconnectedStateForReconnect(

@@ -5,7 +5,7 @@ import type { AgentPermissionRequest } from "./agent-sdk-types.js";
 import type { AgentManager, ManagedAgent, WaitForAgentResult } from "./agent-manager.js";
 import { curateAgentActivity } from "./activity-curator.js";
 import { selectItemsByProjectedLimit } from "./timeline-projection.js";
-import type { AgentStorage } from "./agent-storage.js";
+import type { AgentStorage, StoredAgentRecord } from "./agent-storage.js";
 import { serializeAgentSnapshot } from "../messages.js";
 import { StoredScheduleSchema } from "@getpaseo/protocol/schedule/types";
 import type { AgentProvider } from "./agent-sdk-types.js";
@@ -196,17 +196,20 @@ export function sanitizePermissionRequest(
   return sanitized;
 }
 
-export async function resolveAgentTitle(
+async function resolveAgentMetadata(
   agentStorage: AgentStorage,
   agentId: string,
   logger: Logger,
-): Promise<string | null> {
+): Promise<{ title: string | null; experimentTouches?: StoredAgentRecord["experimentTouches"] }> {
   try {
     const record = await agentStorage.get(agentId);
-    return record?.title ?? null;
+    return {
+      title: record?.title ?? null,
+      ...(record?.experimentTouches ? { experimentTouches: record.experimentTouches } : {}),
+    };
   } catch (error) {
-    logger.error({ err: error, agentId }, "Failed to load agent title");
-    return null;
+    logger.error({ err: error, agentId }, "Failed to load agent metadata");
+    return { title: null };
   }
 }
 
@@ -215,8 +218,10 @@ export async function serializeSnapshotWithMetadata(
   snapshot: ManagedAgent,
   logger: Logger,
 ) {
-  const title = await resolveAgentTitle(agentStorage, snapshot.id, logger);
-  return serializeAgentSnapshot(snapshot, { title });
+  const metadata = await resolveAgentMetadata(agentStorage, snapshot.id, logger);
+  const payload = serializeAgentSnapshot(snapshot, { title: metadata.title });
+  payload.experimentTouches = metadata.experimentTouches;
+  return payload;
 }
 
 export function parseDurationString(input: string): number {

@@ -26,6 +26,30 @@ import { ProviderPaseoToolsPolicySchema } from "./provider-config.js";
 import { TOOL_CALL_ICON_NAMES } from "./agent-types.js";
 import { WORKSPACE_LABEL_COLORS } from "./workspace-labels.js";
 import {
+  AgentExperimentTouchSchema,
+  ExperimentAttemptCreateRequestSchema,
+  ExperimentAttemptCreateResponseSchema,
+  ExperimentAttemptUpdateRequestSchema,
+  ExperimentAttemptUpdateResponseSchema,
+  ExperimentCreateRequestSchema,
+  ExperimentCreateResponseSchema,
+  ExperimentGetRequestSchema,
+  ExperimentGetResponseSchema,
+  ExperimentListRequestSchema,
+  ExperimentListResponseSchema,
+  ExperimentProgressRefreshRequestSchema,
+  ExperimentProgressRefreshResponseSchema,
+  ExperimentStorageResolveRequestSchema,
+  ExperimentStorageResolveResponseSchema,
+  ExperimentUpdateRequestSchema,
+  ExperimentUpdateResponseSchema,
+  ExperimentViewerConfigureRequestSchema,
+  ExperimentViewerConfigureResponseSchema,
+  ExperimentViewerResolveRequestSchema,
+  ExperimentViewerResolveResponseSchema,
+} from "./experiments.js";
+import { TunnelOpenRequestSchema, TunnelOpenResponseSchema } from "./tunnels.js";
+import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
   ChatInspectRequestSchema,
@@ -835,6 +859,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   archivedAt: z.string().nullable().optional(),
   providerUnavailable: z.boolean().optional(),
+  experimentTouches: z.array(AgentExperimentTouchSchema).optional(),
 });
 
 export type AgentSnapshotPayload = z.infer<typeof AgentSnapshotPayloadSchema>;
@@ -858,6 +883,7 @@ export const AgentListItemPayloadSchema = z.object({
   attentionTimestamp: z.string().nullable().optional(),
   labels: z.record(z.string(), z.string()).default({}),
   providerUnavailable: z.boolean().optional(),
+  experimentTouches: z.array(AgentExperimentTouchSchema).optional(),
 });
 
 export type AgentListItemPayload = z.infer<typeof AgentListItemPayloadSchema>;
@@ -3181,6 +3207,17 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceLabelUpdateRequestSchema,
   WorkspaceLabelDeleteRequestSchema,
   WorkspaceLabelDeleteInspectRequestSchema,
+  ExperimentListRequestSchema,
+  ExperimentGetRequestSchema,
+  ExperimentCreateRequestSchema,
+  ExperimentUpdateRequestSchema,
+  ExperimentAttemptCreateRequestSchema,
+  ExperimentAttemptUpdateRequestSchema,
+  ExperimentProgressRefreshRequestSchema,
+  ExperimentStorageResolveRequestSchema,
+  ExperimentViewerConfigureRequestSchema,
+  ExperimentViewerResolveRequestSchema,
+  TunnelOpenRequestSchema,
   WorkspaceRecoveryInspectRequestSchema,
   WorkspaceRecoveryRestoreRequestSchema,
   SetVoiceModeMessageSchema,
@@ -3550,6 +3587,8 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceSetupRun: z.boolean().optional(),
         // COMPAT(workspaceTerminals): added in v0.8.0, remove gate after 2027-09-05.
         workspaceTerminals: z.boolean().optional(),
+        // COMPAT(experiments): remove after supported clients all include Experiments.
+        experiments: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
         // feature gate and checkoutGithubSetAutoMerge fallback after 2027-01-17
         // once the supported daemon floor is >= v0.2.0.
@@ -6777,6 +6816,17 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceLabelUpdateResponseSchema,
   WorkspaceLabelDeleteResponseSchema,
   WorkspaceLabelDeleteInspectResponseSchema,
+  ExperimentListResponseSchema,
+  ExperimentGetResponseSchema,
+  ExperimentCreateResponseSchema,
+  ExperimentUpdateResponseSchema,
+  ExperimentAttemptCreateResponseSchema,
+  ExperimentAttemptUpdateResponseSchema,
+  ExperimentProgressRefreshResponseSchema,
+  ExperimentStorageResolveResponseSchema,
+  ExperimentViewerConfigureResponseSchema,
+  ExperimentViewerResolveResponseSchema,
+  TunnelOpenResponseSchema,
   ProjectUpdateMessageSchema,
   ProjectListResponseMessageSchema,
   ScriptStatusUpdateMessageSchema,

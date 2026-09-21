@@ -51,6 +51,7 @@ import {
 } from "./features/notifications.js";
 import { createExternalUrlOpener } from "./features/opener.js";
 import { createBrowserCaptureService } from "./features/browser-capture.js";
+import { closeAllTunnelForwarders, registerTunnelHandlers } from "./features/tunnels/ipc.js";
 import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
 import { resolveAppIconPath } from "./features/stamped-icon.js";
 import { setupApplicationMenu } from "./features/menu.js";
@@ -967,6 +968,7 @@ async function bootstrap(): Promise<void> {
   registerNotificationHandlers();
   const openExternalUrl = createExternalUrlOpener({ open: shell.openExternal });
   ipcMain.handle("paseo:opener:openUrl", (_event, value: unknown) => openExternalUrl(value));
+  registerTunnelHandlers();
   registerEditorTargetHandlers();
   registerBrowserAutomationIpc();
 
@@ -1059,6 +1061,9 @@ electronAutoUpdater.on("before-quit-for-update", () => {
   quitLifecycle.handleBeforeQuitForUpdate();
 });
 app.on("before-quit", quitLifecycle.handleBeforeQuit);
+app.on("before-quit", () => {
+  void closeAllTunnelForwarders();
+});
 registerExternalQuitSignals({ signals: process, quit: () => app.quit() });
 
 app.on("window-all-closed", () => {

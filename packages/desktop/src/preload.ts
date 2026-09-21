@@ -94,6 +94,17 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
   opener: {
     openUrl: (url: string) => ipcRenderer.invoke("paseo:opener:openUrl", url),
   },
+  tunnel: {
+    ensure: (input: {
+      serverId: string;
+      connection: {
+        relayEndpoint: string;
+        useTls?: boolean;
+        daemonPublicKeyB64: string;
+      };
+      target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
+    }) => ipcRenderer.invoke("paseo:tunnel:ensure", input) as Promise<{ origin: string }>,
+  },
   editor: {
     listTargets: () => ipcRenderer.invoke("paseo:editor:listTargets"),
     openTarget: (input: {

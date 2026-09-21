@@ -75,6 +75,15 @@ const STORED_AGENT_SCHEMA = z.object({
   internal: z.boolean().optional(),
   archivedAt: z.string().nullable().optional(),
   owner: AgentOwnerSchema.optional(),
+  experimentTouches: z
+    .array(
+      z.object({
+        experiment: z.string(),
+        attempt: z.string().nullable(),
+        lastTouchedAt: z.string(),
+      }),
+    )
+    .optional(),
 });
 
 export type SerializableAgentConfig = Pick<
@@ -153,6 +162,25 @@ export class AgentStorage {
   async upsert(record: StoredAgentRecord): Promise<void> {
     await this.load();
     await this.queueRecordWrite(record);
+  }
+
+  async touchExperiment(
+    agentId: string,
+    experiment: string,
+    attempt: string | null,
+  ): Promise<void> {
+    await this.load();
+    await this.queueRecordMutation(agentId, (existing) => {
+      if (!existing) throw new Error(`Agent ${agentId} not found`);
+      const touch = { experiment, attempt, lastTouchedAt: new Date().toISOString() };
+      return {
+        ...existing,
+        experimentTouches: [
+          ...(existing.experimentTouches ?? []).filter((item) => item.experiment !== experiment),
+          touch,
+        ],
+      };
+    });
   }
 
   private queueRecordWrite(record: StoredAgentRecord): Promise<void> {
@@ -258,6 +286,9 @@ export class AgentStorage {
       // stale pre-archive record after the archive mutation.
       if (existing && existing.archivedAt !== undefined) {
         record.archivedAt = existing.archivedAt;
+      }
+      if (existing?.experimentTouches !== undefined) {
+        record.experimentTouches = existing.experimentTouches;
       }
       return record;
     });

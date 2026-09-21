@@ -6,6 +6,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { StyleSheet } from "react-native-unistyles";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MoreVertical, Pencil, Plus } from "lucide-react-native";
+import { router } from "expo-router";
 import { ProjectIconView } from "@/components/project-icon-view";
 import type {
   PaseoConfigRaw,
@@ -54,6 +55,7 @@ import {
   type ProjectHostEntry,
   type ProjectSummary,
 } from "@/utils/projects";
+import { buildHostExperimentsRoute } from "@/utils/host-routes";
 
 const SCRIPT_SERVICE_TYPE = "service";
 
@@ -211,6 +213,9 @@ function ProjectSettingsBody({
     setIsEditSheetOpen(true);
   }, []);
   const closeEditSheet = useCallback(() => setIsEditSheetOpen(false), []);
+  const openExperiments = useCallback(() => {
+    router.push(buildHostExperimentsRoute(selectedHost.serverId, selectedHost.projectId));
+  }, [selectedHost.projectId, selectedHost.serverId]);
   const queryKey = useMemo(
     () => ["project-config", selectedHost.serverId, selectedHost.repoRoot] as const,
     [selectedHost.serverId, selectedHost.repoRoot],
@@ -230,6 +235,7 @@ function ProjectSettingsBody({
 
   const data = readQuery.data;
   const supportsCustomIcon = useHostFeature(selectedHost.serverId, "projectCustomIcon");
+  const supportsExperiments = useHostFeature(selectedHost.serverId, "experiments");
   const customIconRevision = selectedHost.customIconRevision ?? null;
   const projectIconTargets = useMemo(() => {
     const target = createProjectIconTarget({
@@ -290,6 +296,18 @@ function ProjectSettingsBody({
           </Pressable>
         </View>
       </View>
+
+      {supportsExperiments ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onPress={openExperiments}
+          style={styles.experimentsButton}
+          testID="project-experiments-button"
+        >
+          Experiments
+        </Button>
+      ) : null}
 
       <ProjectEditSheet
         // A new instance per open seeds the form from the project as it stands now.
@@ -1131,6 +1149,10 @@ const styles = StyleSheet.create((theme) => ({
   backButton: {
     alignSelf: "flex-start",
     paddingHorizontal: 0,
+  },
+  experimentsButton: {
+    alignSelf: "flex-start",
+    marginBottom: theme.spacing[4],
   },
   headerBlock: {
     marginTop: theme.spacing[2],
