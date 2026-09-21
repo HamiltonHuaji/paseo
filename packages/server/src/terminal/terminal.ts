@@ -8,6 +8,10 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { createExternalProcessEnv } from "../server/paseo-env.js";
 import { writePrivateFileAtomicSync } from "../server/private-files.js";
+import {
+  currentDaemonDistribution,
+  type PaseoDaemonDistribution,
+} from "../server/session/daemon/distribution.js";
 import { findExecutable } from "../executable-resolution/executable-resolution.js";
 import type { TerminalCell, TerminalState } from "@getpaseo/protocol/messages";
 import { TerminalInputModeTracker } from "@getpaseo/protocol/terminal-input-mode";
@@ -404,6 +408,11 @@ export function resolvePaseoCliExecutablePath(): string | null {
     return resolvePath(configuredCli);
   }
 
+  const bundledCliEntrypoint = resolveBundledPaseoCliEntrypoint(currentDaemonDistribution);
+  if (currentDaemonDistribution.kind === "bundled") {
+    return bundledCliEntrypoint;
+  }
+
   const cliEntrypoint = resolvePaseoCliBinEntrypoint();
   if (!cliEntrypoint) {
     return null;
@@ -419,6 +428,17 @@ export function resolvePaseoCliExecutablePath(): string | null {
   }
 
   return externalCliEntrypoint;
+}
+
+export function resolveBundledPaseoCliEntrypoint(
+  distribution: PaseoDaemonDistribution,
+): string | null {
+  if (distribution.kind !== "bundled") {
+    return null;
+  }
+
+  const cliEntrypoint = join(distribution.packageRoot, "bin", "paseo");
+  return existsSync(cliEntrypoint) ? resolvePath(cliEntrypoint) : null;
 }
 
 function resolvePaseoCliBinEntrypoint(): string | null {
