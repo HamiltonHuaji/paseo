@@ -517,6 +517,15 @@ The static handler supports `GET`, `HEAD`, MIME types, directory `index.html`, b
 as the internal `viewers` service. All viewers share that internal port and keep their Experiment and
 Attempt path prefixes. Do not start a process or allocate a port per viewer.
 
+A viewer can enumerate a mounted directory by requesting the directory URL with `?paseo=list`.
+The JSON response contains `entries` with `name`, `kind`, and same-origin `href`, plus a nullable
+`nextCursor`. Pass that opaque cursor back on the same directory URL as `?paseo=list&cursor=...`.
+The first request captures a name-sorted snapshot, so later pages neither duplicate nor skip entries
+when the directory changes. A new request without a cursor captures new files. Cursors expire after
+five idle minutes; an expired cursor returns HTTP 410 with `{"error":"cursor_expired"}`. Use
+`limit` to request a page size from 1 through 1000; the default is 200. Listings never expose host
+filesystem paths.
+
 A direct client opens the path on the daemon HTTP origin. A relay-connected desktop client opens a
 loopback listener on an operating-system-assigned port and forwards its TCP traffic through the
 existing encrypted relay connection to the internal viewer service. The system browser uses an
