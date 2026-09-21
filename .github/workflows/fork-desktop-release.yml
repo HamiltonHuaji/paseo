@@ -54,7 +54,7 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           sparse-checkout: |
             scripts
@@ -105,7 +105,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ env.CHECKOUT_REF }}
@@ -115,9 +115,9 @@ jobs:
         run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: package-lock.json
           registry-url: "https://npm.pkg.github.com"
@@ -209,7 +209,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ env.CHECKOUT_REF }}
@@ -219,16 +219,16 @@ jobs:
         run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: package-lock.json
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
 
       - name: Restore Metro transform cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/metro-cache
           key: metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-${{ github.sha }}
@@ -318,7 +318,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ env.CHECKOUT_REF }}
@@ -328,16 +328,16 @@ jobs:
         run: node scripts/emit-release-env.mjs --source-tag "$SOURCE_TAG" >> "$GITHUB_ENV"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: package-lock.json
           registry-url: "https://npm.pkg.github.com"
           scope: "@boudra"
 
       - name: Restore Metro transform cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/metro-cache
           key: metro-${{ runner.os }}-electron-${{ hashFiles('package-lock.json', 'packages/app/metro.config.cjs', 'packages/app/babel.config.js') }}-${{ github.sha }}
