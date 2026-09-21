@@ -33,6 +33,7 @@ Do not synthesize IDs or storage paths. Use handles and paths returned by the to
 - Configure viewers with `configure_experiment_viewers`. Mount the narrow directories the viewer needs; one viewer may have several mounts. Use variables returned by the storage and attempt context rather than hard-coded generated paths.
 - A viewer that discovers generated outputs such as `step_11000/` can fetch its mounted directory URL with `?paseo=list`. Read `entries` (`name`, `kind`, and same-origin `href`), then request the same URL with `paseo=list&cursor=<nextCursor>` until `nextCursor` is null. Start again without a cursor after HTTP 410 or when newly created files should appear. Do not infer host filesystem paths from viewer URLs.
 - Call `get_experiment_storage` before writing coordination artifacts or generated visualizations under `.paseo/v1/blobs`.
+- Keep one-off machine-learning configs and scripts in the Experiment or Attempt storage returned by Paseo. Do not clutter reusable project config or script directories with files that belong to one trial.
 
 Omit fields that should remain unchanged. Pass `null` on update only to clear a nullable field. The daemon owns IDs and timestamps.
 
