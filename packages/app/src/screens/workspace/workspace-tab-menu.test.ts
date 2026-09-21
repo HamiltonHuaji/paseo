@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildWorkspaceDesktopTabActions,
   buildWorkspaceTabMenuEntries,
-  moveWorkspaceTabToEdge,
 } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 
@@ -22,8 +21,6 @@ describe("buildWorkspaceTabMenuEntries", () => {
     const onCopyFilePath = vi.fn();
     const onReloadAgent = vi.fn();
     const onRenameTab = vi.fn();
-    const onMoveTabToStart = vi.fn();
-    const onMoveTabToEnd = vi.fn();
     const onCloseTab = vi.fn();
     const onCloseTabsBefore = vi.fn();
     const onCloseTabsAfter = vi.fn();
@@ -41,55 +38,25 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyFilePath,
       onReloadAgent,
       onRenameTab,
-      onMoveTabToStart,
-      onMoveTabToEnd,
       onCloseTab,
       onCloseTabsBefore,
       onCloseTabsAfter,
       onCloseOtherTabs,
     });
 
-    expect(entries.map((entry) => entry.key)).toEqual([
-      "copy-resume-command",
-      "copy-agent-id",
-      "rename",
-      "actions-separator",
-      "move-to-start",
-      "move-to-end",
-      "ordering-separator",
-      "reload-agent",
-      "close-before",
-      "close-after",
-      "close-others",
-      "close",
-    ]);
     expect(entries.filter((entry) => entry.kind === "item").map((entry) => entry.label)).toEqual([
       "Copy resume command",
       "Copy agent id",
       "Rename",
-      "Move to top",
-      "Move to bottom",
-      "Reload agent",
       "Close to the left",
       "Close to the right",
       "Close other tabs",
+      "Reload agent",
       "Close",
     ]);
-
-    const moveToStart = entries.find((entry) => entry.key === "move-to-start");
-    const moveToEnd = entries.find((entry) => entry.key === "move-to-end");
-    if (moveToStart?.kind !== "item" || moveToEnd?.kind !== "item") {
-      throw new Error("Move entries missing");
-    }
-    moveToStart.onSelect();
-    moveToEnd.onSelect();
-    expect(onMoveTabToStart).toHaveBeenCalledWith("agent_123");
-    expect(onMoveTabToEnd).toHaveBeenCalledWith("agent_123");
   });
 
   it("uses stacked ordering labels for mobile menus", () => {
-    const onMoveTabToStart = vi.fn();
-    const onMoveTabToEnd = vi.fn();
     const entries = buildWorkspaceTabMenuEntries({
       surface: "mobile",
       tab: createAgentTab(),
@@ -102,8 +69,6 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyFilePath: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
-      onMoveTabToStart,
-      onMoveTabToEnd,
       onCloseTab: vi.fn(),
       onCloseTabsBefore: vi.fn(),
       onCloseTabsAfter: vi.fn(),
@@ -114,102 +79,12 @@ describe("buildWorkspaceTabMenuEntries", () => {
       "Copy resume command",
       "Copy agent id",
       "Rename",
-      "Move to top",
-      "Move to bottom",
-      "Reload agent",
       "Close tabs above",
       "Close tabs below",
       "Close other tabs",
+      "Reload agent",
       "Close",
     ]);
-
-    const moveToStart = entries.find((entry) => entry.key === "move-to-start");
-    const moveToEnd = entries.find((entry) => entry.key === "move-to-end");
-    if (moveToStart?.kind !== "item" || moveToEnd?.kind !== "item") {
-      throw new Error("Mobile move entries missing");
-    }
-    moveToStart.onSelect();
-    moveToEnd.onSelect();
-    expect(onMoveTabToStart).toHaveBeenCalledWith("agent_123");
-    expect(onMoveTabToEnd).toHaveBeenCalledWith("agent_123");
-  });
-
-  it("does not render partial mobile ordering actions as no-ops", () => {
-    const entries = buildWorkspaceTabMenuEntries({
-      surface: "mobile",
-      tab: createAgentTab(),
-      index: 1,
-      tabCount: 3,
-      menuTestIDBase: "workspace-tab-menu-agent_123",
-      onCopyResumeCommand: vi.fn(),
-      onCopyAgentId: vi.fn(),
-      onCopyTerminalId: vi.fn(),
-      onCopyFilePath: vi.fn(),
-      onReloadAgent: vi.fn(),
-      onRenameTab: vi.fn(),
-      onMoveTabToStart: vi.fn(),
-      onCloseTab: vi.fn(),
-      onCloseTabsBefore: vi.fn(),
-      onCloseTabsAfter: vi.fn(),
-      onCloseOtherTabs: vi.fn(),
-    });
-
-    expect(entries.map((entry) => entry.key)).not.toContain("move-to-start");
-    expect(entries.map((entry) => entry.key)).not.toContain("move-to-end");
-    expect(entries.map((entry) => entry.key)).not.toContain("ordering-separator");
-  });
-
-  it("moves a tab to either edge without mutating the source order", () => {
-    const first = createAgentTab();
-    const middle: WorkspaceTabDescriptor = {
-      key: "terminal_123",
-      tabId: "terminal_123",
-      kind: "terminal",
-      target: { kind: "terminal", terminalId: "terminal-123" },
-    };
-    const last: WorkspaceTabDescriptor = {
-      key: "draft_123",
-      tabId: "draft_123",
-      kind: "draft",
-      target: { kind: "draft", draftId: "draft_123" },
-    };
-    const tabs = [first, middle, last];
-
-    expect(moveWorkspaceTabToEdge(tabs, middle.tabId, "start")).toEqual([middle, first, last]);
-    expect(moveWorkspaceTabToEdge(tabs, middle.tabId, "end")).toEqual([first, last, middle]);
-    expect(tabs).toEqual([first, middle, last]);
-    expect(moveWorkspaceTabToEdge(tabs, first.tabId, "start")).toBe(tabs);
-    expect(moveWorkspaceTabToEdge(tabs, "missing", "end")).toBe(tabs);
-  });
-
-  it("disables the move action for the edge the tab already occupies", () => {
-    const buildEntries = (index: number) =>
-      buildWorkspaceTabMenuEntries({
-        surface: "desktop",
-        tab: createAgentTab(),
-        index,
-        tabCount: 3,
-        menuTestIDBase: "workspace-tab-context-agent_123",
-        onCopyResumeCommand: vi.fn(),
-        onCopyAgentId: vi.fn(),
-        onCopyTerminalId: vi.fn(),
-        onCopyFilePath: vi.fn(),
-        onReloadAgent: vi.fn(),
-        onRenameTab: vi.fn(),
-        onMoveTabToStart: vi.fn(),
-        onMoveTabToEnd: vi.fn(),
-        onCloseTab: vi.fn(),
-        onCloseTabsBefore: vi.fn(),
-        onCloseTabsAfter: vi.fn(),
-        onCloseOtherTabs: vi.fn(),
-      });
-
-    expect(buildEntries(0)).toContainEqual(
-      expect.objectContaining({ key: "move-to-start", disabled: true }),
-    );
-    expect(buildEntries(2)).toContainEqual(
-      expect.objectContaining({ key: "move-to-end", disabled: true }),
-    );
   });
 
   it("omits agent copy actions and rename for draft tabs", () => {
@@ -230,8 +105,6 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyFilePath: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
-      onMoveTabToStart: vi.fn(),
-      onMoveTabToEnd: vi.fn(),
       onCloseTab: vi.fn(),
       onCloseTabsBefore: vi.fn(),
       onCloseTabsAfter: vi.fn(),
@@ -245,9 +118,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       false,
     );
     expect(entries.some((entry) => entry.kind === "item" && entry.label === "Rename")).toBe(false);
-    expect(entries.filter((entry) => entry.kind === "separator").map((entry) => entry.key)).toEqual(
-      ["ordering-separator"],
-    );
+    expect(entries.some((entry) => entry.kind === "separator")).toBe(false);
   });
 
   it("adds reload tooltip copy for agent tabs", () => {
@@ -423,8 +294,6 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyFilePath: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
-      onMoveTabToStart: vi.fn(),
-      onMoveTabToEnd: vi.fn(),
       onCloseTab: vi.fn(),
       onCloseTabsToLeft: vi.fn(),
       onCloseTabsToRight: vi.fn(),
@@ -493,7 +362,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
     const terminalSeparator = terminalEntries
       .slice(terminalEntries.indexOf(terminalRename) + 1)
       .find((entry) => entry.kind === "separator");
-    expect(agentSeparator?.key).toBe("actions-separator");
-    expect(terminalSeparator?.key).toBe("actions-separator");
+    expect(agentSeparator?.key).toBe("rename-separator");
+    expect(terminalSeparator?.key).toBe("rename-separator");
   });
 });
