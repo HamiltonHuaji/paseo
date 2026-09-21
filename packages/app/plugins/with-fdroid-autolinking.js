@@ -10,6 +10,7 @@ const EXCLUDED_ANDROID_MODULES = [
   "expo-dev-launcher",
   "expo-dev-menu",
   "expo-dev-menu-interface",
+  "ratex-react-native",
 ];
 
 // Generated from the shared suffix table so the Groovy literal can never drift
