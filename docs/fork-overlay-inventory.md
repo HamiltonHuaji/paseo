@@ -25,10 +25,14 @@
 
 ## v0.9.0-beta.2 base bump 取舍
 
-本轮候选 base 是官方 `v0.9.0-beta.2`（`e9d32a17d6b2443948d9be1499ee00a1572cfcae`）。
+本轮版本基线是官方 `v0.9.0-beta.2`（`e9d32a17d6b2443948d9be1499ee00a1572cfcae`）。
 `v0.8.0..v0.9.0-beta.2` 包含 69 个 commit、965 个变更路径；其中 76 个路径也被当前
 overlay 修改。重建时以官方 0.9 的 session、timeline、subscription、replica 和 history
 模型为准，不移植 fork 中用于修补旧模型的一般性 bug fix。
+
+功能 overlay 实际落在上游 `main` 的 `2c8e8a826` 之后；该上游层在 beta.2 之上包含
+lockfile、Pi thinking 配置和 macOS Find 修复。随后以独立 upstream-patch commit 吸收
+[#5085](https://github.com/getpaseo/paseo/pull/5085)，再开始 fork 功能提交。
 
 保留可独立描述和验收的 fork 产品能力，例如 native Codex fork、公式、vertical tabs、
 Experiments、viewer、fork distribution、自助升级和 VS Code surface。对于 native fork 和
@@ -42,11 +46,11 @@ hydration、分页、tab 初始化或 replica workaround。官方已完整实现
 
 | Issue                                                  | 状态与影响                                                                                                                   | Overlay 处理                                                      |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| [#5084](https://github.com/getpaseo/paseo/issues/5084) | 重连后的 sequenced catch-up 可能从侧栏移除未带 placement 的会话；已有 [#5085](https://github.com/getpaseo/paseo/pull/5085)。 | 不重写目录同步；优先等待或吸收上游修复。                          |
+| [#5084](https://github.com/getpaseo/paseo/issues/5084) | 重连后的 sequenced catch-up 可能从侧栏移除未带 placement 的会话；已有 [#5085](https://github.com/getpaseo/paseo/pull/5085)。 | 已在功能 overlay 之前吸收 #5085；上游合并后对齐其 commit。        |
 | [#5100](https://github.com/getpaseo/paseo/issues/5100) | `paseo run`/API 创建的 agent 在 beta.2 客户端可能只有标题而没有 timeline。                                                   | 重建后复现；若阻断 CLI 工作流，只做可删除的 upstream-style 修复。 |
 | [#5049](https://github.com/getpaseo/paseo/issues/5049) | desktop 偶发重复显示最终 assistant reply，而 daemon/provider 只有一份。                                                      | 不增加 fork 去重 heuristic；交给官方 timeline/replica 修复。      |
 | [#5095](https://github.com/getpaseo/paseo/issues/5095) | IndexedDB persist 永久失败时固定间隔重试并占满 CPU；0.8 与 beta.2 都存在。                                                   | 不作为 base bump 条件；仅在本 fork 实际触发时处理。               |
-| [#5097](https://github.com/getpaseo/paseo/issues/5097) | macOS `Ctrl+F` 被新的 chat Find 捕获。                                                                                       | 上游搜索 UI 问题，不纳入 overlay。                                |
+| [#5097](https://github.com/getpaseo/paseo/issues/5097) | macOS `Ctrl+F` 被新的 chat Find 捕获。                                                                                       | 已由上游 #5129 修复，并包含在基底 `2c8e8a826` 中。                |
 | [#5073](https://github.com/getpaseo/paseo/issues/5073) | Codex import 未遍历 `thread/list` cursor；已有 [#5074](https://github.com/getpaseo/paseo/pull/5074)。                        | 属于上游 import 行为，不纳入 overlay requirement。                |
 
 `v0.9.0-beta.1` 不可作为 base。beta.2 已修复 beta.1 在重启时污染 workspace activity、丢失
@@ -76,8 +80,9 @@ Ready to review 状态，以及为曾经打开的所有会话恢复 provider run
 
 ### v0.9 重建结果
 
-当前重建基于官方 `v0.9.0-beta.2`，首个 fork revision 的可安装版本为 `0.9.1`。重建采用新的
-0.9 API 重新落地产品能力，没有重放旧提交序列。
+当前重建的版本身份基于官方 `v0.9.0-beta.2`，源码底座包含截至 `2c8e8a826` 的上游修复和
+#5085 upstream patch；首个 fork revision 的可安装版本为 `0.9.1`。重建采用新的 0.9 API
+重新落地产品能力，没有重放旧提交序列。
 
 - 已保留文件预览/下载、链接 hover、Web/Android 公式、composer 快捷键、vertical tabs、
   Experiments、viewer、native Codex fork、skill ownership、fork distribution/self-update 与
@@ -86,8 +91,8 @@ Ready to review 状态，以及为曾经打开的所有会话恢复 provider run
   `CODEX-03` 中的一般 session、timeline、tool 或 subagent 修补。
 - 官方 0.9 已提供的全历史消息搜索和 structured question UI 直接使用上游实现。
 - VS Code 客户端源码已保留，但仍是 opt-in、unfinished artifact，不属于默认发布。
-- 上表列出的 0.9 issue 仍归 upstream。只有它们实际阻断 overlay 产品能力时，才增加带清理
-  条件的临时补丁。
+- 除已吸收的 #5085 外，上表未解决的 0.9 issue 仍归 upstream。只有它们实际阻断 overlay
+  产品能力时，才增加带清理条件的临时补丁。
 
 ## 需求目录
 

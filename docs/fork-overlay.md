@@ -13,6 +13,11 @@ Releases and fork build tags are cut from `overlay`, not `main`. The overlay fol
 stable tags rather than `upstream/main`, so a fork release never accidentally includes unreleased
 upstream work.
 
+When a release must absorb fixes newer than the selected tag, place reviewed upstream commits in a
+separate layer immediately above the tag and below every fork product commit. Record the exact
+commits in [fork-overlay-inventory.md](fork-overlay-inventory.md). Do not mix pending upstream fixes
+into product commits; remove or align the patch layer after upstream merges them.
+
 A separate branch containing generated patch files is intentionally not maintained. Git commits
 already preserve the overlay's reviewable units, tests, authorship, and conflict context; a patch
 snapshot would duplicate that state while making conflicts harder to resolve.
