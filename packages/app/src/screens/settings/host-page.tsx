@@ -58,7 +58,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { isVersionMismatch } from "@/desktop/updates/desktop-updates";
+import { isVersionOlder } from "@/desktop/updates/desktop-updates";
 import { resolveAppVersion, resolveForkDistributionVersion } from "@/utils/app-version";
 import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons";
 import { formatLatency } from "@/utils/latency";
@@ -673,6 +673,27 @@ type DaemonUpdateState =
   | { status: "updating"; phase: string }
   | { status: "failed"; title: string; message: string };
 
+function daemonUpdatePhaseLabel(t: TFunction, phase: string): string | null {
+  switch (phase) {
+    case "starting":
+      return t("settings.host.daemon.update.phaseStarting");
+    case "downloading":
+      return t("settings.host.daemon.update.phaseDownloading");
+    case "installing":
+      return t("settings.host.daemon.update.phaseInstalling");
+    case "complete":
+      return t("settings.host.daemon.update.phaseComplete");
+    default:
+      return null;
+  }
+}
+
+function daemonUpdateHint(t: TFunction, desktopManaged: boolean): string {
+  return desktopManaged
+    ? t("settings.host.daemon.update.desktopManagedHint")
+    : t("settings.host.daemon.update.hint");
+}
+
 function UpdateDaemonCard({ host }: { host: HostProfile }) {
   const { t } = useTranslation();
   const daemonClient = useHostRuntimeClient(host.serverId);
@@ -688,7 +709,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
   const desktopManaged = serverInfo?.desktopManaged === true;
 
   const appVersion = resolveForkDistributionVersion() ?? resolveAppVersion();
-  const hasVersionMismatch = isVersionMismatch(appVersion, daemonVersion);
+  const hasDaemonUpdate = isVersionOlder(daemonVersion, appVersion);
 
   useEffect(() => {
     return () => {
@@ -737,27 +758,8 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
         const unsubscribe = daemonClient.on("daemon.update.progress", (message) => {
           if (message.payload.requestId !== requestId) return;
           if (!isMountedRef.current) return;
-          const { phase } = message.payload;
-          if (phase === "starting")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseStarting"),
-            });
-          else if (phase === "downloading")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseDownloading"),
-            });
-          else if (phase === "installing")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseInstalling"),
-            });
-          else if (phase === "complete")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseComplete"),
-            });
+          const phase = daemonUpdatePhaseLabel(t, message.payload.phase);
+          if (phase) setUpdateState({ status: "updating", phase });
         });
         unsubscribeRef.current = unsubscribe;
 
@@ -801,7 +803,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
       });
   }, [daemonClient, host.label, host.serverId, isHostConnected, t]);
 
-  const shouldShowUpdate = hasVersionMismatch && (supportsSelfUpdate || desktopManaged);
+  const shouldShowUpdate = hasDaemonUpdate && (supportsSelfUpdate || desktopManaged);
   if (!shouldShowUpdate && updateState.status !== "complete") {
     return null;
   }
@@ -814,11 +816,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
       <View style={settingsStyles.row}>
         <View style={settingsStyles.rowContent}>
           <Text style={settingsStyles.rowTitle}>{t("settings.host.daemon.update.title")}</Text>
-          <Text style={settingsStyles.rowHint}>
-            {desktopManaged
-              ? t("settings.host.daemon.update.desktopManagedHint")
-              : t("settings.host.daemon.update.hint")}
-          </Text>
+          <Text style={settingsStyles.rowHint}>{daemonUpdateHint(t, desktopManaged)}</Text>
         </View>
         <Button
           variant="outline"

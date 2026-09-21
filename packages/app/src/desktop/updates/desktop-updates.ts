@@ -247,6 +247,30 @@ export function isVersionMismatch(
   return app !== daemon;
 }
 
+export function isVersionOlder(
+  currentVersion: string | null | undefined,
+  targetVersion: string | null | undefined,
+): boolean {
+  const current = normalizeVersionForComparison(currentVersion);
+  const target = normalizeVersionForComparison(targetVersion);
+  if (!current || !target) return false;
+
+  const parse = (value: string): [number, number, number] | null => {
+    const match = value.match(/^(\d+)\.(\d+)\.(\d+)$/);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+  };
+  const currentParts = parse(current);
+  const targetParts = parse(target);
+  if (!currentParts || !targetParts) return false;
+
+  for (let index = 0; index < currentParts.length; index += 1) {
+    if (currentParts[index] !== targetParts[index]) {
+      return currentParts[index] < targetParts[index];
+    }
+  }
+  return false;
+}
+
 export function formatVersionWithPrefix(version: string | null | undefined): string {
   const value = version?.trim();
   if (!value) {

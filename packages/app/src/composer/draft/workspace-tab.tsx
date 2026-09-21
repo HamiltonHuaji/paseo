@@ -166,7 +166,6 @@ async function submitDraftCreateRequest(input: {
     client,
     workspaceDirectory,
     workspaceId,
-    serverId,
     autoSubmitConfig,
     composerState,
   } = input;

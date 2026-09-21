@@ -2285,7 +2285,15 @@ export class Session {
 
   private async dispatchInboundMessage(msg: SessionInboundMessage, source?: object): Promise<void> {
     const promise =
-      this.dispatchSubscriptionMessage(msg, source) ??
+      this.dispatchSubscriptionMessage(msg, source) ?? this.dispatchApplicationMessage(msg, source);
+    if (promise) await promise;
+  }
+
+  private dispatchApplicationMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
+    return (
       this.dispatchVoiceAndControlMessage(msg) ??
       this.dispatchAgentRewindMessage(msg, source) ??
       this.dispatchAgentRelationshipMessage(msg) ??
@@ -2304,8 +2312,8 @@ export class Session {
       this.dispatchPluginMessage(msg) ??
       this.dispatchTerminalMessage(msg) ??
       this.dispatchScheduleMessage(msg) ??
-      this.dispatchMiscMessage(msg);
-    if (promise) await promise;
+      this.dispatchMiscMessage(msg)
+    );
   }
 
   private dispatchWorkspaceLifecycleMessage(msg: SessionInboundMessage): Promise<void> | undefined {

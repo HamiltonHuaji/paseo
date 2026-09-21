@@ -16,8 +16,10 @@ import {
 } from "../../output/index.js";
 import { addJsonAndDaemonHostOptions } from "../../utils/command-options.js";
 import { buildDaemonConnectionCommandError, connectToDaemon } from "../../utils/client.js";
+import type { DaemonTarget } from "../../utils/daemon-target.js";
 
 interface ExperimentOptions extends CommandOptions {
+  daemonTarget: DaemonTarget;
   project?: string;
 }
 
@@ -58,8 +60,8 @@ function withProject(command: Command): Command {
 }
 
 async function connect(options: ExperimentOptions) {
-  return connectToDaemon({ host: options.host }).catch((error: unknown) => {
-    throw buildDaemonConnectionCommandError({ host: options.host, error });
+  return connectToDaemon({ target: options.daemonTarget }).catch((error: unknown) => {
+    throw buildDaemonConnectionCommandError({ target: options.daemonTarget, error });
   });
 }
 

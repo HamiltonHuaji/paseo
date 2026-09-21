@@ -1057,6 +1057,7 @@ interface WorkspaceHeaderTitleBarProps {
   normalizedWorkspaceId: string;
   workspaceScripts: WorkspaceDescriptor["scripts"];
   liveTerminalIds: string[];
+  showExperiments: boolean;
   showWorkspaceSetup: boolean;
   showCreateBrowserTab: boolean;
   isMobile: boolean;
@@ -1074,6 +1075,7 @@ interface WorkspaceHeaderTitleBarProps {
   onScriptTerminalStarted: (terminalId: string) => void;
   onViewScriptTerminal: (terminalId: string) => void;
   onOpenUrlInBrowserTab: (url: string) => void;
+  onOpenExperiments: () => void;
 }
 
 function WorkspaceHeaderTitleBar({
@@ -1086,6 +1088,7 @@ function WorkspaceHeaderTitleBar({
   normalizedWorkspaceId,
   workspaceScripts,
   liveTerminalIds,
+  showExperiments,
   showWorkspaceSetup,
   showCreateBrowserTab,
   isMobile,
@@ -1103,6 +1106,7 @@ function WorkspaceHeaderTitleBar({
   onScriptTerminalStarted,
   onViewScriptTerminal,
   onOpenUrlInBrowserTab,
+  onOpenExperiments,
 }: WorkspaceHeaderTitleBarProps) {
   return (
     <View style={styles.headerTitleContainer}>
@@ -1163,6 +1167,9 @@ function WorkspaceHeaderTitleBar({
             hideLabels
             presentation="ghost"
           />
+        ) : null}
+        {isMobile && showExperiments ? (
+          <WorkspaceExperimentsButton onPress={onOpenExperiments} mobile />
         ) : null}
       </View>
     </View>
@@ -3883,6 +3890,11 @@ function WorkspaceScreenContent({
             hideLabels
           />
         ) : null}
+        <WorkspaceExperimentsButton
+          onPress={handleOpenExperiments}
+          visible={showExperiments}
+          hidden={isMobile}
+        />
         {!isMobile && workspaceDirectory ? (
           <WorkspaceOpenInEditorButton
             serverId={normalizedServerId}
@@ -3928,10 +3940,12 @@ function WorkspaceScreenContent({
       handleScriptTerminalStarted,
       handleViewScriptTerminal,
       handleOpenUrlInBrowserTab,
+      handleOpenExperiments,
       handleToggleExplorerSidebar,
       explorerSidebarToggleLabel,
       explorerSidebarToggleAccessibilityState,
       explorerToggleOwner,
+      showExperiments,
       t,
     ],
   );
@@ -4007,6 +4021,7 @@ function WorkspaceScreenContent({
                 normalizedWorkspaceId={normalizedWorkspaceId}
                 workspaceScripts={workspaceScripts}
                 liveTerminalIds={liveTerminalIds}
+                showExperiments={showExperiments}
                 showWorkspaceSetup={showWorkspaceSetup}
                 showCreateBrowserTab={showCreateBrowserTab}
                 isMobile={isMobile}
@@ -4024,6 +4039,7 @@ function WorkspaceScreenContent({
                 onScriptTerminalStarted={handleScriptTerminalStarted}
                 onViewScriptTerminal={handleViewScriptTerminal}
                 onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+                onOpenExperiments={handleOpenExperiments}
               />
             </>
           }
@@ -4042,6 +4058,7 @@ function WorkspaceScreenContent({
       handleCreateTerminalWithProfile,
       handleOpenSetupTab,
       handleOpenUrlInBrowserTab,
+      handleOpenExperiments,
       handleScriptTerminalStarted,
       handleViewScriptTerminal,
       headerRight,
@@ -4052,6 +4069,7 @@ function WorkspaceScreenContent({
       normalizedWorkspaceId,
       openImportSheet,
       showCreateBrowserTab,
+      showExperiments,
       showScreenHeader,
       showWorkspaceSetup,
       workspaceDirectory,
