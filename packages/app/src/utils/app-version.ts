@@ -34,3 +34,10 @@ export function resolveAppVersion(): string | null {
 
   return null;
 }
+
+export function resolveForkDistributionVersion(): string | null {
+  const extra = Constants.expoConfig?.extra as
+    | { forkBuild?: { displayVersion?: unknown } }
+    | undefined;
+  return toVersionOrNull(extra?.forkBuild?.displayVersion);
+}

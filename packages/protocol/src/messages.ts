@@ -3519,6 +3519,13 @@ export const ServerInfoStatusPayloadSchema = z
     version: ServerInfoVersionSchema.optional(),
     // COMPAT(sessionPermissions): optional while clients support older daemons.
     permissions: z.array(DaemonPermissionSchema).optional(),
+    // COMPAT(daemonDistribution): optional for official and older fork daemons.
+    distribution: z
+      .object({
+        packageName: z.string().min(1),
+        version: z.string().min(1),
+      })
+      .optional(),
     // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
     desktopManaged: z.boolean().optional(),
     capabilities: ServerCapabilitiesFromUnknownSchema.optional(),
