@@ -21,7 +21,7 @@ Do not synthesize IDs or storage paths. Use handles and paths returned by the to
 
 - Put the short label in `shortDescription` and the motivation or question in `description`/`purpose`.
 - Set `wandbId`, `jobId`, and `outputDir` directly when they exist.
-- Attach `progressPlan` and `progressSource` to long-running attempts. Prefer a log source when the job already writes a parseable log. Use a command source when progress requires a query. Paseo runs the command without a shell.
+- Attach `progressPlan` and `progressSource` to long-running attempts. `progressPlan.unit` is the coordinate reported by the source and may be any project-defined unit such as a step, sample, frame, or token. Put schedule dimensions that vary in parallel into separate `tracks`; segments may overlap across tracks but not within one track. Prefer a log source when the job already writes the chosen coordinate. Use a command source when progress requires a query or conversion. Paseo runs the command without a shell.
 - Configure viewers with `configure_experiment_viewers`. Mount the narrow directories the viewer needs; one viewer may have several mounts. Use variables returned by the storage and attempt context rather than hard-coded generated paths.
 - Call `get_experiment_storage` before writing coordination artifacts or generated visualizations under `.paseo/v1/blobs`.
 

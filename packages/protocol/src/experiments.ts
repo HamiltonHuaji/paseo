@@ -9,18 +9,30 @@ export const AgentExperimentTouchSchema = z.object({
   lastTouchedAt: z.string(),
 });
 
+export const ProgressSegmentSchema = z.object({
+  label: z.string().min(1),
+  start: z.number().nonnegative(),
+  end: z.number().positive(),
+});
+
+export const ProgressTrackSchema = z.object({
+  label: z.string().min(1),
+  segments: z.array(ProgressSegmentSchema),
+});
+
 export const ProgressPlanSchema = z.object({
   unit: z.string().min(1),
   total: z.number().positive(),
-  segments: z
-    .array(
-      z.object({
-        label: z.string().min(1),
-        start: z.number().nonnegative(),
-        end: z.number().positive(),
-      }),
-    )
-    .optional(),
+  segments: z.array(ProgressSegmentSchema).optional(),
+  tracks: z.array(ProgressTrackSchema).optional(),
+});
+
+export const ExperimentBoardPlacementSchema = z.object({
+  experiment: ExperimentHandleSchema,
+  column: z.number().int().nonnegative().nullable(),
+  row: z.number().int().nonnegative().nullable(),
+  width: z.number().int().positive().nullable(),
+  height: z.number().int().positive().nullable(),
 });
 
 export const LogProgressSourceSchema = z.object({
@@ -198,6 +210,19 @@ export const ExperimentProgressRefreshRequestSchema = z.object({
   attempt: AttemptHandleSchema,
 });
 
+export const ExperimentBoardLayoutGetRequestSchema = z.object({
+  type: z.literal("experiment.board.layout.get.request"),
+  requestId: z.string(),
+  projectId: z.string(),
+});
+
+export const ExperimentBoardLayoutUpdateRequestSchema = z.object({
+  type: z.literal("experiment.board.layout.update.request"),
+  requestId: z.string(),
+  projectId: z.string(),
+  placements: z.array(ExperimentBoardPlacementSchema),
+});
+
 export const ExperimentStorageResolveRequestSchema = z.object({
   type: z.literal("experiment.storage.resolve.request"),
   requestId: z.string(),
@@ -275,6 +300,22 @@ export const ExperimentProgressRefreshResponseSchema = z.object({
   }),
 });
 
+export const ExperimentBoardLayoutGetResponseSchema = z.object({
+  type: z.literal("experiment.board.layout.get.response"),
+  payload: z.object({
+    requestId: z.string(),
+    placements: z.array(ExperimentBoardPlacementSchema),
+  }),
+});
+
+export const ExperimentBoardLayoutUpdateResponseSchema = z.object({
+  type: z.literal("experiment.board.layout.update.response"),
+  payload: z.object({
+    requestId: z.string(),
+    placements: z.array(ExperimentBoardPlacementSchema),
+  }),
+});
+
 export const ExperimentStorageResolveResponseSchema = z.object({
   type: z.literal("experiment.storage.resolve.response"),
   payload: z.object({ requestId: z.string(), path: z.string() }),
@@ -291,6 +332,9 @@ export const ExperimentViewerResolveResponseSchema = z.object({
 });
 
 export type ProgressPlan = z.infer<typeof ProgressPlanSchema>;
+export type ProgressSegment = z.infer<typeof ProgressSegmentSchema>;
+export type ProgressTrack = z.infer<typeof ProgressTrackSchema>;
+export type ExperimentBoardPlacement = z.infer<typeof ExperimentBoardPlacementSchema>;
 export type AgentExperimentTouch = z.infer<typeof AgentExperimentTouchSchema>;
 export type ProgressSource = z.infer<typeof ProgressSourceSchema>;
 export type ProgressObservation = z.infer<typeof ProgressObservationSchema>;

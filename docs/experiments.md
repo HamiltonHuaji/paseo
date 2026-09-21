@@ -128,6 +128,20 @@ attempts
   updated_at            timestamp
 ```
 
+Canvas layout is view state, so it does not live on the Experiment row:
+
+```text
+experiment_board_layout
+  experiment_id  primary key and foreign key to experiments
+  column_value   nullable integer grid override
+  row_value      nullable integer grid override
+  width_value    nullable integer grid override
+  height_value   nullable integer grid override
+```
+
+Null values ask the client to use its deterministic default layout. Board updates do not touch
+Experiment timestamps and are not exposed through agent tools.
+
 The first design stores `wandb_id`, `job_id`, and `output_dir` directly. Do not wrap them in a
 generic Resource, Reference, Artifact, or adapter layer. Non-ML work leaves them null.
 
@@ -173,17 +187,28 @@ The daemon understands a small progress observation contract and no vendor API.
 interface ProgressPlan {
   unit: string;
   total: number;
-  segments?: Array<{
+  segments?: ProgressSegment[];
+  tracks?: Array<{
     label: string;
-    start: number;
-    end: number;
+    segments: ProgressSegment[];
   }>;
+}
+
+interface ProgressSegment {
+  label: string;
+  start: number;
+  end: number;
 }
 ```
 
-Segments use the same unit as the plan, may not overlap, and stay within `0..total`. They describe a
-training schedule such as changes in data source or sequence length. The client derives the current
-segment from the observed position.
+`unit` is any project-defined non-empty string. The daemon does not maintain a unit catalog or
+interpret `step`, `sample`, `frame`, `token`, or a project-specific unit. Source observations and
+every segment boundary use that same coordinate.
+
+Tracks describe schedule dimensions that vary in parallel, such as data source, sequence length,
+and noise distribution. Segments must be ordered and non-overlapping within one track and stay
+within `0..total`; segments in different tracks may overlap. The legacy `segments` field is a
+single unnamed track. Do not set both forms.
 
 Progress comes from either a log or a command:
 
@@ -522,8 +547,9 @@ Agent rather than the short-lived reporting Agent. Ordinary agent tools cannot s
 
 ## Client
 
-The default view groups Experiments by Goal name and includes an Ungrouped section. Goal grouping,
-lineage, and Attempt containment are separate projections.
+The List view groups Experiments by Goal name and includes an Ungrouped section. Goal grouping,
+lineage, and Attempt containment are separate projections. Keep this view available while the
+Canvas view evolves.
 
 An Experiment row shows:
 
@@ -537,7 +563,19 @@ An Experiment row shows:
 
 The Experiment detail shows its description, lineage, conclusion, Attempts, Agent sessions, and
 resolved viewer entries. Attempt detail shows direct W&B, job, output directory, result, blob
-directory, viewer entries, progress plan, latest observation, refresh error, and staleness.
+directory, viewer entries, a schedule drawn on its progress axis, latest observation, refresh
+error, and staleness. Attempt detail draws only that Attempt's observation; comparison is a
+separate future surface.
+
+The Canvas view places Experiment cards on an integer grid. Nullable stored `column`, `row`,
+`width`, and `height` values are user overrides. The client supplies missing values with a
+deterministic default layout: Goals form vertical blocks, lineage depth runs left to right, and
+cards at one depth stack vertically. Dragging or resizing writes concrete grid values after the
+gesture ends. Moving a card does not change the Experiment's `updated_at`.
+
+Render lineage as grid-aligned orthogonal polylines. Routing follows current card edges and uses no
+automatic graph layout or obstacle-avoidance engine. The user can move a card when an edge crosses
+content.
 
 The client requests progress only for visible Attempts that have a source. It stops automatic
 requests after an ended observation and keeps a manual refresh action that sends the same request.
@@ -614,6 +652,8 @@ experiment.goal.update.request              / experiment.goal.update.response
 experiment.attempt.create.request           / experiment.attempt.create.response
 experiment.attempt.update.request           / experiment.attempt.update.response
 experiment.attempt.progress.refresh.request / experiment.attempt.progress.refresh.response
+experiment.board.layout.get.request         / experiment.board.layout.get.response
+experiment.board.layout.update.request      / experiment.board.layout.update.response
 experiment.storage.resolve.request          / experiment.storage.resolve.response
 experiment.viewer.configure.request         / experiment.viewer.configure.response
 experiment.viewer.resolve.request           / experiment.viewer.resolve.response

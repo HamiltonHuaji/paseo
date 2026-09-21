@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused } from "@react-navigation/native";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { ExternalLink, GitBranch, RefreshCw } from "lucide-react-native";
+import { ExternalLink, GitBranch, Grid2X2, List, RefreshCw } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useShallow } from "zustand/shallow";
 import type {
   ExperimentAttempt,
+  ExperimentBoardPlacement,
   ExperimentDetail,
   ExperimentRecord,
   ProgressObservation,
@@ -17,6 +19,7 @@ import { MenuHeader } from "@/components/headers/menu-header";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
@@ -30,9 +33,13 @@ import { buildHostAgentDetailRoute } from "@/utils/host-routes";
 import { useFetchQueries, useFetchQuery } from "@/data/query";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import type { RelayHostConnection } from "@/types/host-connection";
+import { ExperimentCanvas } from "@/screens/experiments/experiment-canvas";
+import { ExperimentProgressSchedule } from "@/screens/experiments/experiment-progress-schedule";
 
 const EMPTY_ATTEMPTS: ExperimentAttempt[] = [];
 const EMPTY_EXPERIMENTS: ExperimentRecord[] = [];
+const EXPERIMENT_VIEW_STORAGE_KEY = "experiment-board-view-mode";
+type ExperimentViewMode = "list" | "canvas";
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
@@ -62,6 +69,7 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   });
   const [selectedExperiment, setSelectedExperiment] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [viewMode, setViewMode] = useState<ExperimentViewMode>("list");
   const experiments = listQuery.data ?? EMPTY_EXPERIMENTS;
   const detailQueries = useFetchQueries<ExperimentDetail>(
     experiments.map((experiment) => ({
@@ -98,6 +106,50 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
   }, [experiments, selectedExperiment]);
 
   const groups = useMemo(() => groupExperiments(experiments), [experiments]);
+  const boardLayoutQuery = useFetchQuery({
+    queryKey: ["experiment-board-layout", serverId, projectId],
+    queryFn: async () => {
+      if (!client) throw new Error("Daemon is unavailable");
+      return (await client.getExperimentBoardLayout({ projectId })).placements;
+    },
+    enabled: Boolean(client && connected && projectId && viewMode === "canvas"),
+    retry: false,
+    dataShape: "list",
+    staleTimeMs: 5_000,
+  });
+  useEffect(() => {
+    void AsyncStorage.getItem(`${EXPERIMENT_VIEW_STORAGE_KEY}:${serverId}:${projectId}`)
+      .then((stored) => {
+        if (stored === "list" || stored === "canvas") setViewMode(stored);
+        return undefined;
+      })
+      .catch(() => undefined);
+  }, [projectId, serverId]);
+  const changeViewMode = useCallback(
+    (next: ExperimentViewMode) => {
+      setViewMode(next);
+      void AsyncStorage.setItem(
+        `${EXPERIMENT_VIEW_STORAGE_KEY}:${serverId}:${projectId}`,
+        next,
+      ).catch(() => undefined);
+    },
+    [projectId, serverId],
+  );
+  const persistPlacement = useCallback(
+    (placement: ExperimentBoardPlacement) => {
+      if (!client) return;
+      void client
+        .updateExperimentBoardLayout({ projectId, placements: [placement] })
+        .then(() =>
+          queryClient.setQueryData<ExperimentBoardPlacement[]>(
+            ["experiment-board-layout", serverId, projectId],
+            (current) => mergePlacement(current ?? [], placement),
+          ),
+        )
+        .catch(() => undefined);
+    },
+    [client, projectId, queryClient, serverId],
+  );
   const refetchList = listQuery.refetch;
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
@@ -106,25 +158,43 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
         refetchList(),
         queryClient.refetchQueries({ queryKey: ["experiment", serverId, projectId] }),
         queryClient.refetchQueries({ queryKey: ["experiment-viewers", serverId, projectId] }),
+        queryClient.refetchQueries({
+          queryKey: ["experiment-board-layout", serverId, projectId],
+        }),
       ]);
     } finally {
       setRefreshing(false);
     }
   }, [projectId, queryClient, refetchList, serverId]);
   const handleRefresh = useCallback(() => void refreshAll(), [refreshAll]);
+  const viewOptions = useMemo(
+    () => [
+      { value: "list" as const, label: "List", icon: List },
+      { value: "canvas" as const, label: "Canvas", icon: Grid2X2 },
+    ],
+    [],
+  );
   const headerAction = useMemo(
     () => (
-      <Button
-        variant="ghost"
-        size="sm"
-        leftIcon={RefreshCw}
-        onPress={handleRefresh}
-        loading={refreshing}
-      >
-        Refresh
-      </Button>
+      <View style={styles.headerActions}>
+        <SegmentedControl
+          options={viewOptions}
+          value={viewMode}
+          onValueChange={changeViewMode}
+          size="sm"
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          leftIcon={RefreshCw}
+          onPress={handleRefresh}
+          loading={refreshing}
+        >
+          Refresh
+        </Button>
+      </View>
     ),
-    [handleRefresh, refreshing],
+    [changeViewMode, handleRefresh, refreshing, viewMode, viewOptions],
   );
 
   return (
@@ -138,28 +208,46 @@ export function ExperimentsScreen({ serverId, projectId }: ExperimentsScreenProp
           <Message text="No experiments in this project." />
         ) : null}
         <View style={styles.board}>
-          <View style={styles.listColumn}>
-            {groups.map(([goal, goalExperiments]) => (
-              <View key={goal} style={styles.goalGroup}>
-                <Text style={styles.goalTitle}>{goal}</Text>
-                <View style={styles.card}>
-                  {goalExperiments.map((experiment, index) => (
-                    <ExperimentRow
-                      key={experiment.id}
-                      experiment={experiment}
-                      detail={detailByExperiment.get(experiment.id) ?? null}
-                      basedOn={
-                        experiment.basedOn ? (experimentById.get(experiment.basedOn) ?? null) : null
-                      }
-                      selected={experiment.id === selectedExperiment}
-                      bordered={index > 0}
-                      onSelect={setSelectedExperiment}
-                    />
-                  ))}
+          {viewMode === "list" ? (
+            <View style={styles.listColumn}>
+              {groups.map(([goal, goalExperiments]) => (
+                <View key={goal} style={styles.goalGroup}>
+                  <Text style={styles.goalTitle}>{goal}</Text>
+                  <View style={styles.card}>
+                    {goalExperiments.map((experiment, index) => (
+                      <ExperimentRow
+                        key={experiment.id}
+                        experiment={experiment}
+                        detail={detailByExperiment.get(experiment.id) ?? null}
+                        basedOn={
+                          experiment.basedOn
+                            ? (experimentById.get(experiment.basedOn) ?? null)
+                            : null
+                        }
+                        selected={experiment.id === selectedExperiment}
+                        bordered={index > 0}
+                        onSelect={setSelectedExperiment}
+                      />
+                    ))}
+                  </View>
                 </View>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.canvasColumn}>
+              {boardLayoutQuery.error ? (
+                <Message text={errorMessage(boardLayoutQuery.error)} error />
+              ) : null}
+              <ExperimentCanvas
+                experiments={experiments}
+                detailByExperiment={detailByExperiment}
+                storedPlacements={boardLayoutQuery.data ?? []}
+                selectedExperiment={selectedExperiment}
+                onSelectExperiment={setSelectedExperiment}
+                onPersistPlacement={persistPlacement}
+              />
+            </View>
+          )}
           {selectedExperiment && client ? (
             <ExperimentDetailPanel
               serverId={serverId}
@@ -461,7 +549,6 @@ function AttemptPanel({
     staleTimeMs: 5_000,
   });
   const ratio = progressRatio(observation);
-  const phase = observation ? resolveProgressPhase(attempt, observation) : null;
   const progressFillStyle = useMemo(
     () => [
       styles.progressFill,
@@ -470,7 +557,11 @@ function AttemptPanel({
     [ratio],
   );
   let progressContent = null;
-  if (observation) {
+  if (attempt.progressPlan) {
+    progressContent = (
+      <ExperimentProgressSchedule plan={attempt.progressPlan} observation={observation} />
+    );
+  } else if (observation) {
     progressContent = (
       <View style={styles.progressBlock}>
         <View style={styles.progressTrack}>
@@ -478,7 +569,6 @@ function AttemptPanel({
         </View>
         <Text style={styles.meta}>
           {formatProgress(observation)}
-          {phase ? ` · ${phase}` : ""}
           {observation.ended ? " · ended" : ""}
           {` · refreshed ${new Date(observation.refreshedAt).toLocaleString()}`}
         </Text>
@@ -504,7 +594,6 @@ function AttemptPanel({
       </View>
       {progressContent}
       {progressError ? <Text style={styles.errorText}>{progressError}</Text> : null}
-      {attempt.progressPlan ? <ProgressPlanSummary attempt={attempt} /> : null}
       {attempt.resultSummary ? (
         <View style={styles.summaryBlock}>
           <Text style={styles.sectionTitle}>Result</Text>
@@ -526,30 +615,6 @@ function AttemptPanel({
               directUrl={client?.resolveDirectHttpUrl(entry.url) ?? null}
               serverId={serverId}
               relayConnection={activeConnection?.type === "relay" ? activeConnection : null}
-            />
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function ProgressPlanSummary({ attempt }: { attempt: ExperimentAttempt }) {
-  const plan = attempt.progressPlan;
-  if (!plan) return null;
-  return (
-    <View style={styles.planBlock}>
-      <Text style={styles.sectionTitle}>Plan</Text>
-      <Text style={styles.description}>
-        {formatNumber(plan.total)} {plan.unit}
-        {plan.segments?.length ? ` · ${plan.segments.length} phases` : ""}
-      </Text>
-      {plan.segments?.length ? (
-        <View style={styles.metaRow}>
-          {plan.segments.map((segment) => (
-            <StatusBadge
-              key={`${segment.start}:${segment.end}:${segment.label}`}
-              label={`${segment.label} · ${formatNumber(segment.start)}–${formatNumber(segment.end)}`}
             />
           ))}
         </View>
@@ -700,22 +765,6 @@ function progressRatio(observation: ProgressObservation | null): number {
   return Math.max(0, Math.min(1, observation.current / observation.total));
 }
 
-function resolveProgressPhase(
-  attempt: ExperimentAttempt,
-  observation: ProgressObservation,
-): string | null {
-  if (observation.phase) return observation.phase;
-  return (
-    attempt.progressPlan?.segments?.find(
-      (segment) =>
-        observation.current >= segment.start &&
-        (observation.current < segment.end ||
-          (observation.current === attempt.progressPlan?.total &&
-            observation.current === segment.end)),
-    )?.label ?? null
-  );
-}
-
 function formatProgress(observation: ProgressObservation): string {
   return observation.total === null
     ? formatNumber(observation.current)
@@ -726,14 +775,23 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function mergePlacement(
+  placements: ExperimentBoardPlacement[],
+  next: ExperimentBoardPlacement,
+): ExperimentBoardPlacement[] {
+  return [...placements.filter((placement) => placement.experiment !== next.experiment), next];
+}
+
 const styles = StyleSheet.create((theme) => ({
   container: { flex: 1, backgroundColor: theme.colors.background },
   content: {
     padding: { xs: theme.spacing[3], md: theme.spacing[6] },
     gap: theme.spacing[4],
   },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   board: { flexDirection: { xs: "column", lg: "row" }, gap: theme.spacing[6] },
   listColumn: { flex: 1, minWidth: 0, gap: theme.spacing[6] },
+  canvasColumn: { flex: 3, minWidth: 0, gap: theme.spacing[2] },
   detailColumn: {
     flex: 2,
     minWidth: 0,
@@ -798,7 +856,6 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   summaryText: { color: theme.colors.foreground, fontSize: theme.fontSize.base },
-  planBlock: { gap: theme.spacing[2] },
   viewerBlock: { gap: theme.spacing[2] },
   sectionTitle: { color: theme.colors.foreground, fontSize: theme.fontSize.sm },
   viewerRow: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },

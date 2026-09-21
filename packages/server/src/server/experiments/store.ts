@@ -8,6 +8,7 @@ import {
   type CreateAttemptInput,
   type CreateExperimentInput,
   type ExperimentAttempt,
+  type ExperimentBoardPlacement,
   type ExperimentDetail,
   type ExperimentRecord,
   type ProgressObservation,
@@ -249,6 +250,38 @@ export class ProjectExperimentStore {
     return this.mapAttempt(row);
   }
 
+  getBoardLayout(): ExperimentBoardPlacement[] {
+    return this.db
+      .prepare(
+        `SELECT experiment_id, column_value, row_value, width_value, height_value
+         FROM experiment_board_layout ORDER BY experiment_id`,
+      )
+      .all()
+      .map((row) => mapBoardPlacement(row as Row));
+  }
+
+  updateBoardLayout(placements: ExperimentBoardPlacement[]): ExperimentBoardPlacement[] {
+    const statement = this.db.prepare(
+      `INSERT INTO experiment_board_layout (
+        experiment_id, column_value, row_value, width_value, height_value
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(experiment_id) DO UPDATE SET
+        column_value=excluded.column_value, row_value=excluded.row_value,
+        width_value=excluded.width_value, height_value=excluded.height_value`,
+    );
+    for (const placement of placements) {
+      this.getExperiment(placement.experiment);
+      statement.run(
+        placement.experiment,
+        placement.column,
+        placement.row,
+        placement.width,
+        placement.height,
+      );
+    }
+    return placements;
+  }
+
   async resolveStorage(
     input:
       | { scope: "shared" }
@@ -425,6 +458,13 @@ export class ProjectExperimentStore {
         log_partial TEXT NOT NULL DEFAULT '',
         log_identity TEXT
       );
+      CREATE TABLE IF NOT EXISTS experiment_board_layout (
+        experiment_id TEXT PRIMARY KEY REFERENCES experiments(id) ON DELETE CASCADE,
+        column_value INTEGER,
+        row_value INTEGER,
+        width_value INTEGER,
+        height_value INTEGER
+      );
     `);
   }
 
@@ -505,13 +545,29 @@ export class ProjectExperimentStore {
   }
 
   private validateProgressPlan(plan: CreateAttemptInput["progressPlan"]): void {
-    if (!plan?.segments) return;
+    if (!plan) return;
+    if (plan.segments && plan.tracks) {
+      throw new ExperimentStoreError(
+        "invalid_input",
+        "Progress plan cannot use both segments and tracks",
+      );
+    }
+    if (plan.segments) this.validateProgressSegments(plan.segments, plan.total);
+    for (const track of plan.tracks ?? []) {
+      this.validateProgressSegments(track.segments, plan.total);
+    }
+  }
+
+  private validateProgressSegments(
+    segments: Array<{ start: number; end: number }>,
+    total: number,
+  ): void {
     let previousEnd = 0;
-    for (const segment of plan.segments) {
-      if (segment.start < previousEnd || segment.end <= segment.start || segment.end > plan.total) {
+    for (const segment of segments) {
+      if (segment.start < previousEnd || segment.end <= segment.start || segment.end > total) {
         throw new ExperimentStoreError(
           "invalid_input",
-          "Progress segments must be ordered, non-overlapping, and within the total",
+          "Progress segments in each track must be ordered, non-overlapping, and within the total",
         );
       }
       previousEnd = segment.end;
@@ -531,6 +587,16 @@ export class ProjectExperimentStore {
     await mkdir(absolute, { recursive: true });
     return absolute;
   }
+}
+
+function mapBoardPlacement(row: Row): ExperimentBoardPlacement {
+  return {
+    experiment: String(row.experiment_id),
+    column: numberOrNull(row.column_value),
+    row: numberOrNull(row.row_value),
+    width: numberOrNull(row.width_value),
+    height: numberOrNull(row.height_value),
+  };
 }
 
 function progressObservationColumns(observation: ProgressObservation | null) {
@@ -557,6 +623,10 @@ function progressCursorColumns(
 
 function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function numberOrNull(value: unknown): number | null {
+  return value === null || value === undefined ? null : Number(value);
 }
 
 function serializeNullable(value: unknown): string | null {

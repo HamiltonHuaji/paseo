@@ -6,6 +6,7 @@ import type {
   CreateAttemptInput,
   CreateExperimentInput,
   ExperimentAttempt,
+  ExperimentBoardPlacement,
   ExperimentDetail,
   ExperimentRecord,
   ProgressObservation,
@@ -72,6 +73,17 @@ export class ExperimentService {
 
   async updateAttempt(projectId: string, input: UpdateAttemptInput): Promise<ExperimentAttempt> {
     return (await this.store(projectId)).updateAttempt(input);
+  }
+
+  async getBoardLayout(projectId: string): Promise<ExperimentBoardPlacement[]> {
+    return (await this.store(projectId)).getBoardLayout();
+  }
+
+  async updateBoardLayout(
+    projectId: string,
+    placements: ExperimentBoardPlacement[],
+  ): Promise<ExperimentBoardPlacement[]> {
+    return (await this.store(projectId)).updateBoardLayout(placements);
   }
 
   async resolveStorage(
