@@ -68,7 +68,7 @@ export class DaemonSelfUpdateSessionController {
       const result = await this.updater.update({
         daemonVersion: previousVersion,
         desktopManaged: this.desktopManaged,
-        onProgress: (phase) => this.emitProgress(msg.requestId, phase),
+        onProgress: (phase, output) => this.emitProgress(msg.requestId, phase, output),
         logger: this.sessionLogger,
       });
 
@@ -113,12 +113,13 @@ export class DaemonSelfUpdateSessionController {
     }
   }
 
-  private emitProgress(requestId: string, phase: DaemonSelfUpdatePhase): void {
+  private emitProgress(requestId: string, phase: DaemonSelfUpdatePhase, output?: string): void {
     this.emit({
       type: "daemon.update.progress",
       payload: {
         requestId,
         phase,
+        ...(output ? { output } : {}),
       },
     });
   }

@@ -38,6 +38,7 @@ export {
 const DEFAULT_PORT = 6767;
 const DEFAULT_RELAY_ENDPOINT = "relay.paseo.sh:443";
 const DEFAULT_APP_BASE_URL = "https://app.paseo.sh";
+const DEFAULT_EXPERIMENT_VIEWER_LISTEN = "127.0.0.1:8765";
 const DEFAULT_TRUSTED_PROXIES = ["loopback"];
 
 interface ResolveBundledWebUiDistDirInput {
@@ -284,6 +285,18 @@ interface ResolvedRelay {
 interface ResolvedServiceProxy {
   publicBaseUrl: string | null;
   standaloneListen: string | null;
+}
+
+function resolveExperimentViewerConfig(
+  env: NodeJS.ProcessEnv,
+  persisted: PersistedConfig,
+): NonNullable<PaseoDaemonConfig["experimentViewer"]> {
+  return {
+    listen:
+      nonEmptyEnv(env.PASEO_EXPERIMENT_VIEWER_LISTEN) ??
+      persisted.daemon?.experimentViewer?.listen ??
+      DEFAULT_EXPERIMENT_VIEWER_LISTEN,
+  };
 }
 
 function resolveTlsFromEnv(
@@ -591,6 +604,7 @@ export function resolveConfigFromPersisted(
     enabledFallback: relayEnabledFallback,
   });
   const serviceProxy = resolveServiceProxyConfig(env, persisted);
+  const experimentViewer = resolveExperimentViewerConfig(env, persisted);
   const webUi = resolveWebUiConfig(paseoHome, env, cli, persisted);
 
   const { openai, speech } = resolveSpeechConfig({
@@ -638,6 +652,7 @@ export function resolveConfigFromPersisted(
     relayUseTls: relay.useTls,
     relayPublicUseTls: relay.publicUseTls,
     serviceProxy,
+    experimentViewer,
     webUi,
     appBaseUrl,
     auth: resolveAuthConfig(env, persisted),

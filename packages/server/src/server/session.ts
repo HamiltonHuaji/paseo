@@ -670,12 +670,12 @@ export class Session {
       if (this.onMessageToSource) this.onMessageToSource(source, message);
       else this.onMessage(message);
     },
-    (source, frame) => {
+    async (source, frame) => {
       if (this.onBinaryMessageToSource) {
-        void this.onBinaryMessageToSource(source, frame).catch((error) =>
-          this.sessionLogger.warn({ err: error }, "Failed to emit binary frame"),
-        );
-      } else this.emitBinary(frame);
+        await this.onBinaryMessageToSource(source, frame);
+      } else {
+        this.emitBinary(frame);
+      }
     },
     (source, message) => this.workspaceSetupMessageForClient(message, source),
     (request, message) =>
@@ -1122,9 +1122,7 @@ export class Session {
     });
     this.providerSnapshotManager = providerSnapshotManager;
     this.serviceProxy = serviceProxy ?? null;
-    this.tunnelController = new TunnelController(this.serviceProxy, (source, frame) =>
-      this.emitBinaryToSource(source, frame),
-    );
+    this.tunnelController = new TunnelController(this.serviceProxy);
     this.scriptRuntimeStore = scriptRuntimeStore ?? null;
     this.workspaceSetupSnapshots = workspaceSetupSnapshots ?? new Map();
     this.workspaceSetupRuntime = resolveWorkspaceSetupRuntime(workspaceSetupRuntime);
@@ -1254,10 +1252,6 @@ export class Session {
       .catch((err) => this.sessionLogger.error({ err }, "Failed to release source subscriptions"));
     this.clientSources.delete(source);
     this.refreshObservationProducers();
-  }
-
-  clearTunnelSource(source: object): void {
-    this.tunnelController.closeSource(source);
   }
 
   private subscribeAgentTimelines(agentIds: string[]): OwnedSubscription {
@@ -2996,7 +2990,22 @@ export class Session {
     source?: object,
   ): Promise<void> {
     if (!source) throw new Error("Tunnel requests require a physical client connection");
-    const tunnelId = await this.tunnelController.open(msg.target, source);
+    if (!this.supportsForSource(CLIENT_CAPS.tunnelStreamV2, source)) {
+      throw new Error("Tunnel streaming requires a newer Paseo client");
+    }
+    let tunnelId: string | null = null;
+    const owner = this.delivery.operation(
+      () => false,
+      () => {
+        if (tunnelId) this.tunnelController.abort(tunnelId);
+      },
+    );
+    try {
+      tunnelId = await this.tunnelController.open(msg.target, owner);
+    } catch (error) {
+      await owner.release();
+      throw error;
+    }
     this.emitForSource(
       {
         type: "tunnel.open.response",
@@ -3004,7 +3013,6 @@ export class Session {
       },
       source,
     );
-    this.tunnelController.activate(tunnelId, source);
   }
 
   private dispatchProjectDomainMessage(
@@ -8661,11 +8669,6 @@ export class Session {
       return;
     }
     this.emitBinary(frame);
-  }
-
-  private async emitBinaryToSource(source: object, frame: Uint8Array): Promise<void> {
-    if (!this.onBinaryMessageToSource) throw new Error("Binary source channel is unavailable");
-    await this.onBinaryMessageToSource(source, frame);
   }
 
   private emitForSource(msg: SessionOutboundMessage, source?: object): void {

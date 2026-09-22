@@ -1,11 +1,13 @@
 import { getErrorMessage } from "@getpaseo/protocol/error-utils";
+import stripAnsi from "strip-ansi";
 import { z } from "zod";
-import { execCommand } from "../../../utils/spawn.js";
+import { execCommand, spawnProcess } from "../../../utils/spawn.js";
 import { currentDaemonDistribution, type PaseoDaemonDistribution } from "./distribution.js";
 
 const NPM_PROBE_TIMEOUT_MS = 10_000;
-const NPM_INSTALL_TIMEOUT_MS = 300_000;
 const NPM_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
+const NPM_OUTPUT_FLUSH_INTERVAL_MS = 250;
+const NPM_OUTPUT_CHUNK_LIMIT = 4096;
 
 const NpmGlobalListSchema = z
   .object({
@@ -33,6 +35,7 @@ const CommandErrorSchema = z
 export interface CommandOptions {
   timeout?: number;
   maxBuffer?: number;
+  onOutput?: (output: string) => void;
 }
 
 export interface CommandResult {
@@ -50,7 +53,7 @@ export interface NpmGlobalPaseoInstall {
 
 export interface NpmGlobalPaseoCli {
   inspect(): Promise<NpmGlobalPaseoInstall>;
-  installLatest(): Promise<CommandResult>;
+  installLatest(onOutput?: (output: string) => void): Promise<CommandResult>;
 }
 
 export type CommandRunner = (
@@ -64,6 +67,42 @@ async function runExternalCommand(
   args: string[],
   options?: CommandOptions,
 ): Promise<CommandResult> {
+  if (options?.onOutput) {
+    return new Promise((resolve) => {
+      const child = spawnProcess(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      const maxBuffer = options.maxBuffer ?? NPM_MAX_BUFFER_BYTES;
+      let settled = false;
+
+      const append = (stream: "stdout" | "stderr", chunk: Buffer): void => {
+        const text = chunk.toString("utf8");
+        options.onOutput?.(text);
+        if (stream === "stdout") {
+          stdout = `${stdout}${text}`.slice(-maxBuffer);
+        } else {
+          stderr = `${stderr}${text}`.slice(-maxBuffer);
+        }
+      };
+      child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
+      child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
+      child.once("error", (error) => {
+        if (settled) return;
+        settled = true;
+        resolve({ exitCode: 1, stdout, stderr: stderr || getErrorMessage(error) });
+      });
+      child.once("close", (code, signal) => {
+        if (settled) return;
+        settled = true;
+        resolve({
+          exitCode: code ?? 1,
+          stdout,
+          stderr: stderr || (signal ? `npm exited after signal ${signal}` : ""),
+        });
+      });
+    });
+  }
+
   try {
     const { stdout, stderr } = await execCommand(command, args, {
       timeout: options?.timeout,
@@ -141,14 +180,44 @@ export class DefaultNpmGlobalPaseoCli implements NpmGlobalPaseoCli {
     return install;
   }
 
-  installLatest(): Promise<CommandResult> {
+  async installLatest(onOutput?: (output: string) => void): Promise<CommandResult> {
     // Official and fork distributions use different package names but both own the global
     // `paseo` executable. npm requires --force when switching distributions so it can replace
     // the existing command shim.
-    return this.runCommand("npm", ["install", "-g", "--force", this.distribution.installSpec], {
-      timeout: NPM_INSTALL_TIMEOUT_MS,
-      maxBuffer: NPM_MAX_BUFFER_BYTES,
-    });
+    let pendingOutput = "";
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushOutput = (): void => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = null;
+      if (!pendingOutput || !onOutput) return;
+      const output = pendingOutput;
+      pendingOutput = "";
+      onOutput(output);
+    };
+    const queueOutput = (output: string): void => {
+      const sanitized = stripAnsi(output);
+      if (!sanitized) return;
+      pendingOutput = `${pendingOutput}${sanitized}`.slice(-NPM_OUTPUT_CHUNK_LIMIT);
+      flushTimer ??= setTimeout(flushOutput, NPM_OUTPUT_FLUSH_INTERVAL_MS);
+    };
+
+    return this.runCommand(
+      "npm",
+      [
+        "install",
+        "-g",
+        "--force",
+        "--no-audit",
+        "--no-fund",
+        "--prefer-offline",
+        "--color=false",
+        this.distribution.installSpec,
+      ],
+      {
+        maxBuffer: NPM_MAX_BUFFER_BYTES,
+        ...(onOutput ? { onOutput: queueOutput } : {}),
+      },
+    ).finally(flushOutput);
   }
 }
 

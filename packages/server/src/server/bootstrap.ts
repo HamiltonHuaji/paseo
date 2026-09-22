@@ -5,6 +5,7 @@ import { constants, existsSync, unlinkSync } from "fs";
 import { open, rm } from "fs/promises";
 import { randomUUID } from "node:crypto";
 import { hostname as getHostname } from "node:os";
+import { isIP } from "node:net";
 import path from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Logger } from "pino";
@@ -88,6 +89,81 @@ export function formatListenTarget(listenTarget: ListenTarget | null): string | 
     return `${formatHostForHttpUrl(listenTarget.host)}:${listenTarget.port}`;
   }
   return listenTarget.path;
+}
+
+const EXPERIMENT_VIEWER_CONFLICT_PORT_ATTEMPTS = 16;
+
+function isAddressInUse(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
+}
+
+function isLoopbackHost(host: string): boolean {
+  if (host === "localhost" || host === "::1") return true;
+  return isIP(host) === 4 && host.startsWith("127.");
+}
+
+async function listenExperimentViewer(
+  server: ReturnType<typeof createHTTPServer>,
+  preferred: ListenTarget,
+): Promise<{ target: Extract<ListenTarget, { type: "tcp" }>; conflictResolved: boolean }> {
+  if (preferred.type !== "tcp") {
+    throw new Error("Experiment viewer listen address must be a TCP host and port");
+  }
+  if (!isLoopbackHost(preferred.host)) {
+    throw new Error(
+      "Experiment viewer currently requires a loopback listen host; network exposure needs browser-compatible access control",
+    );
+  }
+  const ports = Array.from(
+    { length: EXPERIMENT_VIEWER_CONFLICT_PORT_ATTEMPTS },
+    (_, index) => preferred.port + index,
+  ).filter((port) => port <= 65535);
+  ports.push(0);
+
+  for (const port of ports) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+          server.off("listening", onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.off("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(port, preferred.host);
+      });
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Experiment viewer service did not expose a TCP address");
+      }
+      return {
+        target: { type: "tcp", host: preferred.host, port: address.port },
+        conflictResolved: address.port !== preferred.port,
+      };
+    } catch (error) {
+      if (port !== 0 && isAddressInUse(error)) continue;
+      throw error;
+    }
+  }
+  throw new Error("Experiment viewer service did not bind a TCP port");
+}
+
+function resolvePreferredExperimentViewerListenTarget(config: PaseoDaemonConfig): ListenTarget {
+  return parseListenString(config.experimentViewer?.listen ?? "127.0.0.1:8765");
+}
+
+function describeExperimentViewerTarget(
+  target: Extract<ListenTarget, { type: "tcp" }> | null,
+): { host: string; port: number; scope: "loopback" | "network" } | undefined {
+  if (!target) return undefined;
+  return {
+    host: target.host,
+    port: target.port,
+    scope: isLoopbackHost(target.host) ? "loopback" : "network",
+  };
 }
 
 function readSingleQueryValue(value: unknown): string | null {
@@ -443,6 +519,9 @@ export interface PaseoDaemonConfig {
     publicBaseUrl: string | null;
     standaloneListen: string | null;
   };
+  experimentViewer?: {
+    listen: string;
+  };
   webUi?: {
     enabled: boolean;
     distDir: string | null;
@@ -490,6 +569,7 @@ export interface PaseoDaemon {
   start(): Promise<void>;
   stop(): Promise<void>;
   getListenTarget(): ListenTarget | null;
+  getExperimentViewerListenTarget(): Extract<ListenTarget, { type: "tcp" }> | null;
 }
 
 export interface PaseoDaemonDependencies {
@@ -666,6 +746,9 @@ export async function createPaseoDaemon(
     app.set("trust proxy", value ?? ["loopback"]);
   });
   let boundListenTarget: ListenTarget | null = null;
+  const preferredExperimentViewerListenTarget =
+    resolvePreferredExperimentViewerListenTarget(config);
+  let experimentViewerListenTarget: Extract<ListenTarget, { type: "tcp" }> | null = null;
   let workspaceRegistry: FileBackedWorkspaceRegistry | null = null;
   const terminalManager = createConfiguredTerminalManager({
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
@@ -941,8 +1024,6 @@ export async function createPaseoDaemon(
     "/view/:projectId/:experiment/:viewerPath(*)",
     (req, res) => void handleExperimentViewer(req, res),
   );
-  app.use(experimentViewerApp);
-
   const httpServer = createHTTPServer(app);
   const experimentViewerHttpServer = createHTTPServer(experimentViewerApp);
 
@@ -1677,32 +1758,29 @@ export async function createPaseoDaemon(
     if (!experimentViewerHttpServer.listening) return;
     experimentViewerHttpServer.closeAllConnections();
     await new Promise<void>((resolve) => experimentViewerHttpServer.close(() => resolve()));
+    experimentViewerListenTarget = null;
   };
 
   const start = async () => {
     let mainStarted = false;
     try {
-      await new Promise<void>((resolve, reject) => {
-        const onError = (error: Error) => {
-          experimentViewerHttpServer.off("listening", onListening);
-          reject(error);
-        };
-        const onListening = () => {
-          experimentViewerHttpServer.off("error", onError);
-          resolve();
-        };
-        experimentViewerHttpServer.once("error", onError);
-        experimentViewerHttpServer.once("listening", onListening);
-        experimentViewerHttpServer.listen(0, "127.0.0.1");
-      });
-      const viewerAddress = experimentViewerHttpServer.address();
-      if (!viewerAddress || typeof viewerAddress === "string") {
-        throw new Error("Experiment viewer service did not expose a TCP address");
-      }
+      const viewerBinding = await listenExperimentViewer(
+        experimentViewerHttpServer,
+        preferredExperimentViewerListenTarget,
+      );
+      experimentViewerListenTarget = viewerBinding.target;
       serviceProxy.registerInternalService({
         serviceName: experimentViewerService.scriptName,
-        port: viewerAddress.port,
+        port: experimentViewerListenTarget.port,
       });
+      logger.info(
+        {
+          preferredListen: formatListenTarget(preferredExperimentViewerListenTarget),
+          actualListen: formatListenTarget(experimentViewerListenTarget),
+          conflictResolved: viewerBinding.conflictResolved,
+        },
+        "Experiment viewer service listening",
+      );
 
       if (serviceProxyListenTarget) {
         const boundServiceProxyTarget = await serviceProxy.startStandalone({
@@ -1832,6 +1910,7 @@ export async function createPaseoDaemon(
                   return appBaseUrl;
                 },
                 desktopManaged: config.desktopManaged === true,
+                experimentViewer: describeExperimentViewerTarget(experimentViewerListenTarget),
                 getRelayConfig: () =>
                   relayRuntime?.getConfig() ?? {
                     enabled: daemonConfigStore.get().relay?.enabled ?? relayEnabled,
@@ -1960,6 +2039,7 @@ export async function createPaseoDaemon(
     start,
     stop,
     getListenTarget: () => boundListenTarget,
+    getExperimentViewerListenTarget: () => experimentViewerListenTarget,
   };
 }
 

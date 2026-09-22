@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { DaemonConnectionError } from "@getpaseo/client/internal/daemon-client";
+import type { ServerInfoStatusPayload } from "@getpaseo/protocol/messages";
 import {
   readDaemonInstance,
   daemonLogPath,
@@ -16,6 +17,16 @@ export function daemonStatusCommand(): Command {
   return addJsonAndDaemonHostOptions(
     new Command("status").description("Observe the selected daemon and its published endpoint"),
   ).action(withOutput(runStatusCommand));
+}
+
+function serverInfoStatus(info: ServerInfoStatusPayload | null): Record<string, unknown> {
+  if (!info) return {};
+  return {
+    serverId: info.serverId,
+    daemonVersion: info.version,
+    distributionPackage: info.distribution?.packageName,
+    distributionVersion: info.distribution?.version,
+  };
 }
 
 export async function runStatusCommand(options: CommandOptions, _command: Command) {
@@ -82,7 +93,7 @@ async function probeDaemonStatus(
         "Supervisor exited or was replaced during status observation.",
       );
     const info = client.getLastServerInfoMessage();
-    live = { serverId: info?.serverId, daemonVersion: info?.version };
+    live = serverInfoStatus(info);
     connectedDaemon = client.isConnected ? "reachable" : "unreachable";
     if (!status) {
       const failure = toCommandError(requestError);

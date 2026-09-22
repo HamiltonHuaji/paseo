@@ -289,6 +289,12 @@ export const PersistedConfigSchema = z
           })
           .strict()
           .optional(),
+        experimentViewer: z
+          .object({
+            listen: z.string().min(1).optional(),
+          })
+          .strict()
+          .optional(),
         auth: DaemonAuthSchema.optional(),
       })
       .strict()

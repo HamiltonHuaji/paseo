@@ -3929,7 +3929,9 @@ export class DaemonClient {
     return this.sendRequest({
       requestId: resolvedRequestId,
       message,
-      timeout: 300_000, // 5 minutes — npm update can be slow on remote machines
+      // npm can take an unbounded amount of time on network filesystems. The
+      // daemon continues to emit correlated progress while the install runs.
+      timeout: 0,
       options: { skipQueue: true },
       select: (msg) => {
         const parsed = DaemonUpdateResponseSchema.safeParse(msg);

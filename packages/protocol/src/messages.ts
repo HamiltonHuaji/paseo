@@ -3582,6 +3582,14 @@ export const ServerInfoStatusPayloadSchema = z
       .optional(),
     // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
     desktopManaged: z.boolean().optional(),
+    experimentViewer: z
+      .object({
+        host: z.string().min(1),
+        port: z.number().int().min(1).max(65535),
+        scope: z.enum(["loopback", "network"]),
+      })
+      .strict()
+      .optional(),
     capabilities: ServerCapabilitiesFromUnknownSchema.optional(),
     // COMPAT(providersSnapshot): added in v0.1.48, remove gating when all clients use snapshot
     features: z
@@ -3735,6 +3743,7 @@ export const ServerInfoStatusPayloadSchema = z
         selectiveAgentTimeline: z.boolean().optional(),
         explicitEventSubscriptions: z.boolean().optional(),
         ownedSubscriptions: z.boolean().optional(),
+        experimentViewerTransport: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
         // COMPAT(agentTurnIdentity): accept peers that observed pre-release v0.2.6 through 2027-01-31.
@@ -6474,6 +6483,7 @@ export const DaemonUpdateProgressMessageSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     phase: z.enum(["starting", "downloading", "installing", "complete"]),
+    output: z.string().max(4096).optional(),
   }),
 });
 

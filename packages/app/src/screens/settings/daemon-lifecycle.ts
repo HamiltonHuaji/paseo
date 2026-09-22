@@ -43,7 +43,20 @@ export async function updateDaemonFromSettings(
   },
 ): Promise<{ workerVersion: string }> {
   const previous = await readSelectedWorker(hostServerId, deps);
-  const installed = await deps.updateDaemon();
+  let installed: Awaited<ReturnType<typeof deps.updateDaemon>>;
+  try {
+    installed = await deps.updateDaemon();
+  } catch (error) {
+    if (!isReconnectFailure(error)) throw error;
+    const worker = await observeReplacement(previous, deps);
+    if (!worker.version || worker.version === previous.version) {
+      throw new Error(
+        `Update connection closed, but no newer replacement worker was confirmed (still ${worker.version ?? "unknown"}).`,
+        { cause: error },
+      );
+    }
+    return { workerVersion: worker.version };
+  }
   if (!installed.success) throw new Error(installed.error ?? "Package installation failed");
   try {
     const worker = await observeReplacement(previous, deps);

@@ -46,6 +46,7 @@ export const CLIENT_CAPS = {
   workspaceSetupBlocked: "workspace_setup_blocked",
   // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
   agentConversationFork: "agent_conversation_fork",
+  tunnelStreamV2: "tunnel_stream_v2",
   browserHost: "browser_host",
 } as const;
 

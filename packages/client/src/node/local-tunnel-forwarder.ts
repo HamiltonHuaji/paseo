@@ -1,6 +1,7 @@
 import net from "node:net";
 import type { TunnelTarget } from "@getpaseo/protocol/tunnels";
 import type { DaemonClient } from "../daemon-client.js";
+import type { DaemonTunnel } from "../daemon-tunnel.js";
 
 export interface LocalTunnelForwarder {
   readonly host: string;
@@ -10,23 +11,28 @@ export interface LocalTunnelForwarder {
 }
 
 export async function createLocalTunnelForwarder(input: {
-  client: DaemonClient;
+  client?: DaemonClient;
+  openTunnel?: (target: TunnelTarget) => Promise<DaemonTunnel>;
   target: TunnelTarget;
   host?: string;
   port?: number;
 }): Promise<LocalTunnelForwarder> {
   const host = input.host ?? "127.0.0.1";
+  const openTunnel =
+    input.openTunnel ?? ((target: TunnelTarget) => input.client!.openTunnel(target));
+  if (!input.client && !input.openTunnel)
+    throw new Error("Local tunnel requires an upstream client");
   const sockets = new Set<net.Socket>();
-  const server = net.createServer((socket) => {
+  const server = net.createServer({ allowHalfOpen: true }, (socket) => {
     sockets.add(socket);
     socket.pause();
     let finished = false;
+    let localEnded = false;
 
-    void input.client
-      .openTunnel(input.target)
+    void openTunnel(input.target)
       .then((tunnel) => {
         if (finished || socket.destroyed) {
-          tunnel.end();
+          tunnel.reset();
           return undefined;
         }
         tunnel.setHandlers({
@@ -37,12 +43,19 @@ export async function createLocalTunnelForwarder(input: {
             }
           },
           onEnd: () => socket.end(),
+          onReset: () => socket.destroy(),
           onPause: () => socket.pause(),
           onResume: () => socket.resume(),
         });
         socket.on("data", (data) => tunnel.write(data));
-        socket.once("end", () => tunnel.end());
-        socket.once("error", () => tunnel.end());
+        socket.once("end", () => {
+          localEnded = true;
+          tunnel.end();
+        });
+        socket.once("error", () => tunnel.reset());
+        socket.once("close", (hadError) => {
+          if (hadError || !localEnded) tunnel.reset();
+        });
         socket.resume();
         return undefined;
       })

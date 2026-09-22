@@ -9,6 +9,8 @@ import { npmGlobalPaseoCli, type NpmGlobalPaseoCli } from "./npm-global-cli.js";
 
 export type DaemonSelfUpdatePhase = "starting" | "downloading" | "installing" | "complete";
 
+const INSTALL_PROGRESS_INTERVAL_MS = 15_000;
+
 export interface DaemonSelfUpdateResult {
   success: boolean;
   error: string | null;
@@ -18,7 +20,7 @@ export interface DaemonSelfUpdateResult {
 export interface DaemonSelfUpdateInput {
   daemonVersion: string | null;
   desktopManaged: boolean;
-  onProgress: (phase: DaemonSelfUpdatePhase) => void;
+  onProgress: (phase: DaemonSelfUpdatePhase, output?: string) => void;
   logger: DaemonSelfUpdateLogger;
 }
 
@@ -80,7 +82,17 @@ export class DaemonSelfUpdater {
       input.onProgress("downloading");
       input.onProgress("installing");
 
-      const result = await this.runtime.npm.installLatest();
+      const progressInterval = setInterval(
+        () => input.onProgress("installing"),
+        INSTALL_PROGRESS_INTERVAL_MS,
+      );
+      const result = await this.runtime.npm
+        .installLatest((output) => {
+          input.onProgress("installing", output);
+        })
+        .finally(() => {
+          clearInterval(progressInterval);
+        });
       if (result.exitCode !== 0) {
         const error =
           result.stderr.trim() || result.stdout.trim() || `npm exited with code ${result.exitCode}`;

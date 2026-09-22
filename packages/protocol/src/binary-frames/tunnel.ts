@@ -5,6 +5,7 @@ export const TunnelStreamOpcode = {
   End: 0x21,
   Pause: 0x22,
   Resume: 0x23,
+  Reset: 0x24,
 } as const;
 
 export type TunnelStreamOpcode = (typeof TunnelStreamOpcode)[keyof typeof TunnelStreamOpcode];
@@ -51,6 +52,7 @@ function isTunnelStreamOpcode(value: number): value is TunnelStreamOpcode {
     value === TunnelStreamOpcode.Data ||
     value === TunnelStreamOpcode.End ||
     value === TunnelStreamOpcode.Pause ||
-    value === TunnelStreamOpcode.Resume
+    value === TunnelStreamOpcode.Resume ||
+    value === TunnelStreamOpcode.Reset
   );
 }

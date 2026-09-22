@@ -11,32 +11,45 @@ import {
   buildRelayWebSocketUrl,
   shouldUseTlsForDefaultHostedRelay,
 } from "@getpaseo/protocol/daemon-endpoints";
-import { TunnelTargetSchema } from "@getpaseo/protocol/tunnels";
+import { TunnelTargetSchema, type TunnelTarget } from "@getpaseo/protocol/tunnels";
 import { WebSocket } from "ws";
 import { z } from "zod";
 
+const ConnectionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("relay"),
+    relayEndpoint: z.string().min(1),
+    useTls: z.boolean().optional(),
+    daemonPublicKeyB64: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("directTcp"),
+    endpoint: z.string().min(1),
+    useTls: z.boolean().optional(),
+    password: z.string().optional(),
+  }),
+]);
+
 const EnsureTunnelInputSchema = z.object({
   serverId: z.string().min(1),
-  connection: z.discriminatedUnion("type", [
-    z.object({
-      type: z.literal("relay"),
-      relayEndpoint: z.string().min(1),
-      useTls: z.boolean().optional(),
-      daemonPublicKeyB64: z.string().min(1),
-    }),
-    z.object({
-      type: z.literal("directTcp"),
-      endpoint: z.string().min(1),
-      useTls: z.boolean().optional(),
-      password: z.string().optional(),
-    }),
-  ]),
+  connection: ConnectionSchema,
   target: TunnelTargetSchema,
 });
 
-interface ManagedTunnel {
+type TunnelConnection = z.infer<typeof ConnectionSchema>;
+type ManagedDaemonTunnel = Awaited<ReturnType<DaemonClient["openTunnel"]>>;
+
+interface UpstreamGeneration {
   client: DaemonClient;
+  routeKey: string;
+  activeStreams: number;
+  retiring: boolean;
+}
+
+interface ManagedTunnel {
   forwarder: LocalTunnelForwarder;
+  updateRoute(connection: TunnelConnection): Promise<void>;
+  close(): Promise<void>;
 }
 
 const tunnels = new Map<string, Promise<ManagedTunnel>>();
@@ -44,36 +57,98 @@ const tunnels = new Map<string, Promise<ManagedTunnel>>();
 export function registerTunnelHandlers(): void {
   ipcMain.handle("paseo:tunnel:ensure", async (_event, rawInput: unknown) => {
     const input = EnsureTunnelInputSchema.parse(rawInput);
-    const key = JSON.stringify(input);
-    let managed = tunnels.get(key);
-    if (!managed) {
-      managed = createManagedTunnel(input).catch((error) => {
+    const key = JSON.stringify({ serverId: input.serverId, target: input.target });
+    let pending = tunnels.get(key);
+    if (!pending) {
+      pending = createManagedTunnel(input).catch((error) => {
         tunnels.delete(key);
         throw error;
       });
-      tunnels.set(key, managed);
+      tunnels.set(key, pending);
     }
-    const { forwarder } = await managed;
-    return { origin: forwarder.origin };
+    const managed = await pending;
+    await managed.updateRoute(input.connection);
+    return { origin: managed.forwarder.origin };
+  });
+  ipcMain.handle("paseo:tunnel:updateRoute", async (_event, rawInput: unknown) => {
+    const input = EnsureTunnelInputSchema.parse(rawInput);
+    const key = JSON.stringify({ serverId: input.serverId, target: input.target });
+    const pending = tunnels.get(key);
+    if (!pending) return { updated: false };
+    await (await pending).updateRoute(input.connection);
+    return { updated: true };
   });
 }
 
 export async function closeAllTunnelForwarders(): Promise<void> {
   const active = [...tunnels.values()];
   tunnels.clear();
-  await Promise.allSettled(
-    active.map(async (pending) => {
-      const { client, forwarder } = await pending;
-      await forwarder.close();
-      await client.close();
-    }),
-  );
+  await Promise.allSettled(active.map(async (pending) => (await pending).close()));
 }
 
 async function createManagedTunnel(
   input: z.infer<typeof EnsureTunnelInputSchema>,
 ): Promise<ManagedTunnel> {
-  const connection = input.connection;
+  let current = await createUpstream(input.serverId, input.connection);
+  const generations = new Set<UpstreamGeneration>([current]);
+  let routeUpdate = Promise.resolve();
+
+  const retireIfDrained = async (generation: UpstreamGeneration): Promise<void> => {
+    if (!generation.retiring || generation.activeStreams > 0) return;
+    generations.delete(generation);
+    await generation.client.close();
+  };
+
+  const openTunnel = async (target: TunnelTarget): Promise<ManagedDaemonTunnel> => {
+    const generation = current;
+    generation.activeStreams += 1;
+    try {
+      const tunnel = await generation.client.openTunnel(target);
+      void tunnel.whenClosed().finally(() => {
+        generation.activeStreams -= 1;
+        void retireIfDrained(generation);
+      });
+      return tunnel;
+    } catch (error) {
+      generation.activeStreams -= 1;
+      void retireIfDrained(generation);
+      throw error;
+    }
+  };
+
+  const forwarder = await createLocalTunnelForwarder({ openTunnel, target: input.target });
+  const updateRoute = (connection: TunnelConnection): Promise<void> => {
+    routeUpdate = routeUpdate
+      .catch(() => undefined)
+      .then(async () => {
+        const nextRouteKey = JSON.stringify(connection);
+        if (current.routeKey === nextRouteKey) return undefined;
+        const replacement = await createUpstream(input.serverId, connection);
+        generations.add(replacement);
+        const previous = current;
+        current = replacement;
+        previous.retiring = true;
+        await retireIfDrained(previous);
+        return undefined;
+      });
+    return routeUpdate;
+  };
+  return {
+    forwarder,
+    updateRoute,
+    close: async () => {
+      await routeUpdate.catch(() => undefined);
+      await forwarder.close();
+      await Promise.allSettled([...generations].map((generation) => generation.client.close()));
+      generations.clear();
+    },
+  };
+}
+
+async function createUpstream(
+  serverId: string,
+  connection: TunnelConnection,
+): Promise<UpstreamGeneration> {
   const isRelay = connection.type === "relay";
   const useTls = isRelay
     ? (connection.useTls ?? shouldUseTlsForDefaultHostedRelay(connection.relayEndpoint))
@@ -83,7 +158,7 @@ async function createManagedTunnel(
       ? buildRelayWebSocketUrl({
           endpoint: connection.relayEndpoint,
           useTls,
-          serverId: input.serverId,
+          serverId,
           role: "client",
         })
       : buildDaemonWebSocketUrl(connection.endpoint, { useTls }),
@@ -104,8 +179,12 @@ async function createManagedTunnel(
   });
   try {
     await client.connect();
-    const forwarder = await createLocalTunnelForwarder({ client, target: input.target });
-    return { client, forwarder };
+    return {
+      client,
+      routeKey: JSON.stringify(connection),
+      activeStreams: 0,
+      retiring: false,
+    };
   } catch (error) {
     await client.close();
     throw error;

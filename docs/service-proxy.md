@@ -6,6 +6,9 @@ The daemon uses the same route registry for internal named services. [Experiment
 viewers](experiments.md#static-viewers) register there but are not projected to a public service
 hostname.
 
+The proposed stable daemon host, direct-access, local-forwarder, and per-stream lifecycle contract
+is specified in [Experiment Viewer Transport Requirements](refactors/experiment-viewer-transport-spec.md).
+
 ## Client-local port forwarding
 
 The client SDK can bind a loopback listener on port `0` and forward every accepted TCP connection

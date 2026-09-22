@@ -84,6 +84,11 @@ export interface DesktopTunnelBridge {
     connection: DesktopTunnelConnection;
     target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
   }) => Promise<{ origin: string }>;
+  updateRoute?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
+    target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
+  }) => Promise<{ updated: boolean }>;
 }
 
 export interface DesktopEditorTargetDescriptor {

@@ -28,6 +28,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                   | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                  |
 | [docs/data-model.md](docs/data-model.md)                             | File-based JSON persistence, Zod schemas, atomic writes, no migrations                                                         |
 | [docs/experiments.md](docs/experiments.md)                           | Project-local Experiment/Attempt coordination, progress, static viewers, and agent interfaces                                  |
+| [Viewer transport spec][viewer-transport-spec]                       | Target daemon viewer host, stable ports, direct access, client forwarding, and tunnel stream lifecycle                         |
 | [docs/glossary.md](docs/glossary.md)                                 | Authoritative terminology — UI label wins, no synonyms                                                                         |
 | [docs/coding-standards.md](docs/coding-standards.md)                 | Type hygiene, error handling, state design, React patterns, file organization                                                  |
 | [docs/design.md](docs/design.md)                                     | Design system — tokens, buttons, hierarchy, density, alignment rails, states, what's forbidden                                 |
@@ -64,6 +65,11 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/terminal-activity.md](docs/terminal-activity.md)               | Terminal activity indicators — source-agnostic tracker, agent hook reporting, adding a new hook provider                       |
 | [SECURITY.md](SECURITY.md)                                           | Relay threat model, E2E encryption, DNS rebinding, agent auth                                                                  |
 | [public-docs/hub/security.md](public-docs/hub/security.md)           | Public Hub guide — trust boundaries, untrusted triggers, provider controls, and output authority                               |
+
+[viewer-transport-spec]: docs/refactors/experiment-viewer-transport-spec.md
+
+`docs/refactors/experiment-viewer-transport-spec.md` is user-pinned. Do not modify it without the
+user's explicit approval.
 
 ### Writing docs
 

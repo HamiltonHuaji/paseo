@@ -147,6 +147,16 @@
               },
               "additionalProperties": false
             },
+            "experimentViewer": {
+              "type": "object",
+              "properties": {
+                "listen": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
             "auth": {
               "type": "object",
               "properties": {

@@ -1185,7 +1185,12 @@ export class VoiceAssistantWebSocketServer {
     if (!this.sessions.get(ws)?.session.delivery.permitsBinary(ws, frame)) {
       this.incrementRuntimeCounter("applicationBinaryRejected");
       this.logger.warn({ bytes: frame.byteLength }, "ws_application_binary_delivery_denied");
-      return;
+      this.closePhysicalSocket({
+        ws,
+        logMessage: "Closing physical WebSocket after binary delivery ownership denial",
+        logFields: { bytes: frame.byteLength },
+      });
+      throw new Error("Binary delivery ownership denied");
     }
     try {
       const sent = await sendBoundedPhysicalFrameAndWait({
@@ -1689,9 +1694,13 @@ export class VoiceAssistantWebSocketServer {
       distribution,
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
+      ...(this.daemonRuntimeConfig?.experimentViewer
+        ? { experimentViewer: this.daemonRuntimeConfig.experimentViewer }
+        : {}),
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         ownedSubscriptions: true,
+        experimentViewerTransport: true,
         agentRequestReceipts: true,
         workspaceRequestReceipts: true,
         creationLifecycle: true,
@@ -1970,7 +1979,6 @@ export class VoiceAssistantWebSocketServer {
     this.sessions.delete(ws);
     connection.sockets.delete(ws);
     connection.session.clearAgentTimelineSubscription(ws);
-    connection.session.clearTunnelSource(ws);
     this.socketIdentities.delete(ws);
 
     if (connection.sockets.size === 0) {

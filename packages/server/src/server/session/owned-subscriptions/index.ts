@@ -36,6 +36,7 @@ export interface OwnedOperation {
   readonly source: object;
   readonly signal: AbortSignal;
   emit(message: SessionOutboundMessage): void;
+  emitBinary(frame: Uint8Array): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -59,7 +60,10 @@ export class SessionDelivery {
 
   constructor(
     private readonly send: (source: object, message: SessionOutboundMessage) => void,
-    private readonly sendBinary: (source: object, frame: Uint8Array) => void = () => {},
+    private readonly sendBinary: (
+      source: object,
+      frame: Uint8Array,
+    ) => Promise<void> = async () => {},
     private readonly project: (
       source: object,
       message: SessionOutboundMessage,
@@ -284,7 +288,7 @@ export class SessionDelivery {
       emitBinary: (frame) => {
         if (!owner.active || !source.active) return;
         this.proofs.set(frame, owner);
-        this.sendBinary(source.socket, frame);
+        void this.sendBinary(source.socket, frame).catch(() => undefined);
       },
       release: () => this.releaseOwner(owner),
     };
@@ -314,6 +318,11 @@ export class SessionDelivery {
       emit: (message) => {
         if (!owner.active || !source.active || !accepts(message)) return;
         this.sendOwned(owner, message);
+      },
+      emitBinary: async (frame) => {
+        if (!owner.active || !source.active) throw new Error("Operation source is closed");
+        this.proofs.set(frame, owner);
+        await this.sendBinary(source.socket, frame);
       },
       release: () => this.releaseOwner(owner),
     };

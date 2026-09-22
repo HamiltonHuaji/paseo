@@ -38,6 +38,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { getIsElectron } from "@/constants/platform";
 import {
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
@@ -810,8 +811,25 @@ function AttemptPanel({
     [attempt.id, expanded, onExpandedChange],
   );
   const resolveDirectUrl = useCallback(
-    (url: string) => client?.resolveDirectHttpUrl(url) ?? null,
-    [client],
+    (url: string) => {
+      const viewer = client?.getLastServerInfoMessage()?.experimentViewer;
+      if (!viewer) return null;
+      if (viewer.scope === "loopback") {
+        if (!getIsElectron() || client?.getLastServerInfoMessage()?.desktopManaged !== true)
+          return null;
+        return `http://${viewer.host}:${viewer.port}${url}`;
+      }
+      if (activeConnection?.type !== "directTcp") return null;
+      const daemonUrl = client?.resolveDirectHttpUrl("/");
+      if (!daemonUrl) return null;
+      const origin = new URL(daemonUrl);
+      origin.port = String(viewer.port);
+      origin.pathname = url;
+      origin.search = "";
+      origin.hash = "";
+      return origin.toString();
+    },
+    [activeConnection?.type, client],
   );
   let progressContent = null;
   if (attempt.progressPlans) {
@@ -1001,6 +1019,10 @@ function ViewerEntry({
     void (async () => {
       setError(null);
       try {
+        if (directUrl) {
+          await openExternalUrl(directUrl);
+          return;
+        }
         const tunnel = getDesktopHost()?.tunnel?.ensure;
         if (tunnel && tunnelConnection) {
           const { origin } = await tunnel({
@@ -1011,7 +1033,6 @@ function ViewerEntry({
           await openExternalUrl(`${origin}${entry.url}`);
           return;
         }
-        if (directUrl) await openExternalUrl(directUrl);
       } catch (cause) {
         setError(errorMessage(cause));
       }

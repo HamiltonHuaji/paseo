@@ -18,6 +18,11 @@ export interface DaemonRuntimeConfig {
   worktreesRoot?: string;
   appBaseUrl?: string;
   desktopManaged?: boolean;
+  experimentViewer?: {
+    host: string;
+    port: number;
+    scope: "loopback" | "network";
+  };
   getRelayConfig(): {
     enabled: boolean;
     endpoint: string;

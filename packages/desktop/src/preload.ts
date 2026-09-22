@@ -112,6 +112,23 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
           };
       target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
     }) => ipcRenderer.invoke("paseo:tunnel:ensure", input) as Promise<{ origin: string }>,
+    updateRoute: (input: {
+      serverId: string;
+      connection:
+        | {
+            type: "relay";
+            relayEndpoint: string;
+            useTls?: boolean;
+            daemonPublicKeyB64: string;
+          }
+        | {
+            type: "directTcp";
+            endpoint: string;
+            useTls?: boolean;
+            password?: string;
+          };
+      target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
+    }) => ipcRenderer.invoke("paseo:tunnel:updateRoute", input) as Promise<{ updated: boolean }>,
   },
   editor: {
     listTargets: () => ipcRenderer.invoke("paseo:editor:listTargets"),

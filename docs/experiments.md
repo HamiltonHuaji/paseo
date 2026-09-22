@@ -429,6 +429,10 @@ Provide `paseo experiment doctor` to report:
 
 ## Static viewers
 
+The target host, direct-access, port-forwarding, and stream lifecycle requirements live in
+[Experiment Viewer Transport Requirements](refactors/experiment-viewer-transport-spec.md). This
+section describes the current viewer namespace and file-serving behavior.
+
 A viewer is a named entry in an Experiment or Attempt static-file namespace. Viewer files remain
 ordinary files. The daemon serves them directly and starts no helper process.
 

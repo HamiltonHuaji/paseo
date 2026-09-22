@@ -6,6 +6,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useNavigationContainerRef, usePathname, useRouter } from "expo-router";
 import {
   createContext,
+  Fragment,
   type ReactNode,
   useCallback,
   useContext,
@@ -108,6 +109,7 @@ import {
   useHostMutations,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
+  useHostRuntimeSnapshot,
   useHosts,
 } from "@/runtime/host-runtime";
 import { getDaemonStartService } from "@/runtime/daemon-start-service";
@@ -311,10 +313,33 @@ function HostSessionManager() {
   return (
     <>
       {hosts.map((daemon) => (
-        <ManagedDaemonSession key={daemon.serverId} daemon={daemon} />
+        <Fragment key={daemon.serverId}>
+          <ManagedDaemonSession daemon={daemon} />
+          <ViewerTunnelRouteSync host={daemon} />
+        </Fragment>
       ))}
     </>
   );
+}
+
+function ViewerTunnelRouteSync({ host }: { host: HostProfile }) {
+  const snapshot = useHostRuntimeSnapshot(host.serverId);
+  const activeConnection = host.connections.find(
+    (connection) => connection.id === snapshot?.activeConnectionId,
+  );
+
+  useEffect(() => {
+    if (activeConnection?.type !== "relay" && activeConnection?.type !== "directTcp") return;
+    void getDesktopHost()
+      ?.tunnel?.updateRoute?.({
+        serverId: host.serverId,
+        connection: activeConnection,
+        target: { type: "service", name: "viewers" },
+      })
+      .catch(() => undefined);
+  }, [activeConnection, host.serverId]);
+
+  return null;
 }
 
 export function useEarliestOnlineHostServerId(): string | null {
