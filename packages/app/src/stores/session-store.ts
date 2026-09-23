@@ -284,6 +284,7 @@ export interface DaemonServerInfo {
   version: string | null;
   distribution?: ServerInfoStatusPayload["distribution"];
   desktopManaged?: boolean;
+  experimentViewer?: ServerInfoStatusPayload["experimentViewer"];
   capabilities?: ServerCapabilities;
   features?: ServerInfoStatusPayload["features"];
 }

@@ -14,9 +14,17 @@ interface TunnelEntry {
   owner: OwnedOperation;
   sendChain: Promise<void>;
   activated: boolean;
+  downstreamPaused: boolean;
+  outboundQueuedBytes: number;
+  outboundQueuePaused: boolean;
   downstreamEnded: boolean;
   upstreamEnded: boolean;
 }
+
+// Keep enough encrypted WebSocket writes in flight to fill a high-latency relay path without
+// letting one browser connection buffer an unbounded viewer response in the daemon.
+const OUTBOUND_QUEUE_HIGH_WATER_BYTES = 1024 * 1024;
+const OUTBOUND_QUEUE_LOW_WATER_BYTES = 512 * 1024;
 
 export class TunnelController {
   private readonly tunnels = new Map<string, TunnelEntry>();
@@ -34,15 +42,29 @@ export class TunnelController {
       owner,
       sendChain: Promise.resolve(),
       activated: false,
+      downstreamPaused: false,
+      outboundQueuedBytes: 0,
+      outboundQueuePaused: false,
       downstreamEnded: false,
       upstreamEnded: false,
     };
     this.tunnels.set(tunnelId, entry);
 
     socket.on("data", (chunk: Buffer) => {
-      socket.pause();
+      entry.outboundQueuedBytes += chunk.byteLength;
+      if (entry.outboundQueuedBytes >= OUTBOUND_QUEUE_HIGH_WATER_BYTES) {
+        entry.outboundQueuePaused = true;
+        socket.pause();
+      }
       this.enqueueSend(tunnelId, entry, TunnelStreamOpcode.Data, chunk, () => {
-        if (entry.activated && !entry.upstreamEnded) socket.resume();
+        entry.outboundQueuedBytes = Math.max(0, entry.outboundQueuedBytes - chunk.byteLength);
+        if (
+          entry.outboundQueuePaused &&
+          entry.outboundQueuedBytes <= OUTBOUND_QUEUE_LOW_WATER_BYTES
+        ) {
+          entry.outboundQueuePaused = false;
+          this.resumeUpstreamIfReady(entry);
+        }
       });
     });
     socket.on("end", () => {
@@ -102,12 +124,14 @@ export class TunnelController {
       return;
     }
     if (frame.opcode === TunnelStreamOpcode.Pause) {
+      entry.downstreamPaused = true;
       entry.socket.pause();
       return;
     }
     if (frame.opcode === TunnelStreamOpcode.Resume) {
       entry.activated = true;
-      if (!entry.upstreamEnded) entry.socket.resume();
+      entry.downstreamPaused = false;
+      this.resumeUpstreamIfReady(entry);
       return;
     }
     if (frame.opcode === TunnelStreamOpcode.Reset) {
@@ -145,19 +169,31 @@ export class TunnelController {
     payload?: Uint8Array,
     after?: () => void,
   ): void {
-    entry.sendChain = entry.sendChain
-      .then(() => entry.owner.emitBinary(encodeTunnelStreamFrame({ opcode, tunnelId, payload })))
+    const sending = entry.owner
+      .emitBinary(encodeTunnelStreamFrame({ opcode, tunnelId, payload }))
       .then(
         () => after?.(),
         () => {
           void this.reset(tunnelId, entry, false);
         },
       );
+    entry.sendChain = Promise.all([entry.sendChain, sending]).then(() => undefined);
   }
 
   private finishIfClosed(tunnelId: string, entry: TunnelEntry): void {
     if (!entry.downstreamEnded || !entry.upstreamEnded) return;
     void entry.sendChain.finally(() => this.finish(tunnelId, entry));
+  }
+
+  private resumeUpstreamIfReady(entry: TunnelEntry): void {
+    if (
+      entry.activated &&
+      !entry.downstreamPaused &&
+      !entry.outboundQueuePaused &&
+      !entry.upstreamEnded
+    ) {
+      entry.socket.resume();
+    }
   }
 
   private finish(tunnelId: string, entry: TunnelEntry): void {

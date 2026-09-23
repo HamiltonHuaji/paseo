@@ -27,6 +27,7 @@ import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-moda
 import { SettingsTextAreaCard } from "@/components/settings-textarea";
 import { Alert as InlineAlert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field, FormTextInput } from "@/components/ui/form-field";
 import { StatusBadge, type StatusBadgeVariant } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -374,6 +375,8 @@ export function HostSettingsPage({
       </View>
 
       <HostStatusBadges serverId={serverId} />
+
+      <ExperimentViewerHostSection serverId={serverId} />
 
       <HostAppearanceSection host={host} />
 
@@ -974,6 +977,144 @@ function AutoArchiveMergedWorkspacesCard({ serverId }: { serverId: string }) {
         />
       </View>
     </View>
+  );
+}
+
+function isLoopbackViewerListen(listen: string): boolean {
+  const trimmed = listen.trim();
+  if (/^\d+$/u.test(trimmed)) return true;
+  const separator = trimmed.lastIndexOf(":");
+  if (separator < 0) return false;
+  const host = trimmed
+    .slice(0, separator)
+    .replace(/^\[|\]$/gu, "")
+    .toLowerCase();
+  return host === "localhost" || host === "::1" || /^127(?:\.\d{1,3}){3}$/u.test(host);
+}
+
+function experimentViewerControlLabel(supported: boolean, environmentControlled: boolean): string {
+  if (environmentControlled) return "Environment controlled";
+  return supported ? "Configure" : "Update host";
+}
+
+function ExperimentViewerHostSection({ serverId }: { serverId: string }) {
+  const client = useHostRuntimeClient(serverId);
+  const isConnected = useHostRuntimeIsConnected(serverId);
+  const serverInfo = useSessionStore((state) => state.sessions[serverId]?.serverInfo ?? null);
+  const viewer = serverInfo?.experimentViewer ?? null;
+  const supported = serverInfo?.features?.experimentViewerListenControl === true;
+  const environmentControlled = viewer?.configurationSource === "environment";
+  const configuredListen =
+    viewer?.preferredListen ?? (viewer ? `${viewer.host}:${viewer.port}` : "127.0.0.1:8765");
+  const [draft, setDraft] = useState(configuredListen);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const header = useMemo<SheetHeader>(() => ({ title: "Experiment viewer listener" }), []);
+
+  useEffect(() => {
+    if (!isEditing) setDraft(configuredListen);
+  }, [configuredListen, isEditing]);
+
+  const handleOpen = useCallback(() => {
+    setDraft(configuredListen);
+    setIsEditing(true);
+  }, [configuredListen]);
+  const handleClose = useCallback(() => {
+    if (!isSaving) setIsEditing(false);
+  }, [isSaving]);
+  const handleSave = useCallback(() => {
+    const listen = draft.trim();
+    if (!listen || !client) return;
+    void (async () => {
+      if (!isLoopbackViewerListen(listen)) {
+        const confirmed = await confirmDialog({
+          title: "Expose experiment viewers without authentication?",
+          message: `Binding to ${listen} makes the viewer navigation page, experiment names, attempts, and viewer files readable by anyone who can reach that port. No Paseo login or access token will be required.`,
+          confirmLabel: "Expose viewers",
+          destructive: true,
+        });
+        if (!confirmed) return;
+      }
+      setIsSaving(true);
+      try {
+        const result = await client.configureExperimentViewerHost(listen);
+        setDraft(result.listen);
+        setIsEditing(false);
+      } catch (error) {
+        Alert.alert(
+          "Unable to configure experiment viewers",
+          error instanceof Error ? error.message : String(error),
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    })();
+  }, [client, draft]);
+
+  if (!isConnected || !viewer) return null;
+
+  return (
+    <SettingsSection title="Experiment viewers">
+      <View style={settingsStyles.card} testID="host-page-experiment-viewer-listener-card">
+        <View style={settingsStyles.row}>
+          <View style={settingsStyles.rowContent}>
+            <Text style={settingsStyles.rowTitle}>Viewer HTTP host</Text>
+            <Text style={settingsStyles.rowHint}>
+              {viewer.scope === "network"
+                ? `Public without authentication at ${viewer.host}:${viewer.port}`
+                : `Local-only at ${viewer.host}:${viewer.port}`}
+              {environmentControlled ? " · Controlled by launch environment" : ""}
+            </Text>
+          </View>
+          <Button
+            variant="outline"
+            size="sm"
+            onPress={handleOpen}
+            disabled={!supported || environmentControlled}
+          >
+            {experimentViewerControlLabel(supported, environmentControlled)}
+          </Button>
+        </View>
+      </View>
+
+      {isEditing ? (
+        <AdaptiveModalSheet
+          header={header}
+          visible
+          onClose={handleClose}
+          desktopMaxWidth={520}
+          testID="host-page-experiment-viewer-listener-sheet"
+        >
+          <Field
+            label="Listen address"
+            hint="Use 127.0.0.1:8765 for client forwarding, or 0.0.0.0:8765 for unauthenticated network access."
+          >
+            <FormTextInput
+              initialValue={draft}
+              resetKey={`${configuredListen}:${isEditing ? "open" : "closed"}`}
+              onChangeText={setDraft}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="127.0.0.1:8765"
+              accessibilityLabel="Experiment viewer listen address"
+            />
+          </Field>
+          <View style={styles.appendPromptActions}>
+            <Button variant="ghost" size="sm" onPress={handleClose} disabled={isSaving}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onPress={handleSave}
+              disabled={isSaving || draft.trim().length === 0 || draft.trim() === configuredListen}
+            >
+              {isSaving ? "Applying…" : "Apply"}
+            </Button>
+          </View>
+        </AdaptiveModalSheet>
+      ) : null}
+    </SettingsSection>
   );
 }
 

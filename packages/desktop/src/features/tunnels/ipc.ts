@@ -53,6 +53,7 @@ interface ManagedTunnel {
 }
 
 const tunnels = new Map<string, Promise<ManagedTunnel>>();
+const VIEWER_IDLE_TUNNEL_POOL_SIZE = 1;
 
 export function registerTunnelHandlers(): void {
   ipcMain.handle("paseo:tunnel:ensure", async (_event, rawInput: unknown) => {
@@ -116,7 +117,14 @@ async function createManagedTunnel(
     }
   };
 
-  const forwarder = await createLocalTunnelForwarder({ openTunnel, target: input.target });
+  const forwarder = await createLocalTunnelForwarder({
+    openTunnel,
+    target: input.target,
+    idleTunnelPoolSize:
+      input.target.type === "service" && input.target.name === "viewers"
+        ? VIEWER_IDLE_TUNNEL_POOL_SIZE
+        : 0,
+  });
   const updateRoute = (connection: TunnelConnection): Promise<void> => {
     routeUpdate = routeUpdate
       .catch(() => undefined)
@@ -127,6 +135,7 @@ async function createManagedTunnel(
         generations.add(replacement);
         const previous = current;
         current = replacement;
+        forwarder.resetIdleTunnels();
         previous.retiring = true;
         await retireIfDrained(previous);
         return undefined;

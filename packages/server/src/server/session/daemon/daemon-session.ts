@@ -22,7 +22,13 @@ export interface DaemonRuntimeConfig {
     host: string;
     port: number;
     scope: "loopback" | "network";
+    preferredListen?: string;
+    configurationSource?: "persisted" | "environment";
   };
+  configureExperimentViewerHost?(listen: string): Promise<{
+    listen: string;
+    viewer: { host: string; port: number; scope: "loopback" | "network" };
+  }>;
   getRelayConfig(): {
     enabled: boolean;
     endpoint: string;
@@ -265,6 +271,32 @@ export class DaemonSession {
       });
     } catch (error) {
       this.logger.error({ err: error }, "Failed to reload daemon config");
+      this.host.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: msg.requestId,
+          requestType: msg.type,
+          error: error instanceof Error ? error.message : String(error),
+          code: "handler_error",
+        },
+      });
+    }
+  }
+
+  async handleExperimentViewerHostConfigureRequest(
+    msg: Extract<SessionInboundMessage, { type: "experiment.viewer.host.configure.request" }>,
+  ): Promise<void> {
+    try {
+      if (!this.daemonRuntimeConfig?.configureExperimentViewerHost) {
+        throw new Error("Experiment viewer listener control is unavailable");
+      }
+      const result = await this.daemonRuntimeConfig.configureExperimentViewerHost(msg.listen);
+      this.host.emit({
+        type: "experiment.viewer.host.configure.response",
+        payload: { requestId: msg.requestId, ...result },
+      });
+    } catch (error) {
+      this.logger.error({ err: error }, "Failed to configure experiment viewer listener");
       this.host.emit({
         type: "rpc_error",
         payload: {

@@ -5277,6 +5277,18 @@ export class DaemonClient {
     });
   }
 
+  async configureExperimentViewerHost(listen: string, requestId?: string) {
+    if (this.lastServerInfoMessage?.features?.experimentViewerListenControl !== true) {
+      throw new Error("Update the host to configure the experiment viewer listener.");
+    }
+    return this.sendNamespacedCorrelatedSessionRequest<"experiment.viewer.host.configure.response">(
+      {
+        requestId,
+        message: { type: "experiment.viewer.host.configure.request", listen },
+      },
+    );
+  }
+
   async connectHub(
     hubUrl: string,
     token: string,

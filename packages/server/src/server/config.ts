@@ -777,6 +777,9 @@ function resolveServiceAndWebUiOverridePaths(
   if (env.PASEO_SERVICE_PROXY_PUBLIC_BASE_URL !== undefined || serviceProxyEnabled === false) {
     paths.push("daemon.serviceProxy.publicBaseUrl");
   }
+  if (env.PASEO_EXPERIMENT_VIEWER_LISTEN !== undefined) {
+    paths.push("daemon.experimentViewer.listen");
+  }
 
   if (cli?.webUiEnabled !== undefined || parseBooleanEnv(env.PASEO_WEB_UI_ENABLED) !== undefined) {
     paths.push("features.webUi.enabled");

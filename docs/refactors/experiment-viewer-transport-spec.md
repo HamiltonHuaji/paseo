@@ -36,8 +36,9 @@ A tunnel stream is not a viewer, Experiment, HTTP request, or listener.
    separate viewer proxies for that Host.
 5. One client-local listener serves all viewer paths for one `(serverId, target)` pair while the
    desktop process is alive.
-6. One accepted downstream TCP connection creates one tunnel stream and one daemon-side TCP
-   connection.
+6. One accepted downstream TCP connection owns one tunnel stream and one daemon-side TCP
+   connection. A bounded pool may create idle streams before assignment to hide relay latency, but
+   an assigned stream is never shared or moved between downstream connections.
 7. Every daemon-to-client tunnel frame has an active delivery owner bound to the requesting source.
 8. Flow-control, authorization, or delivery failures terminate the affected stream visibly. They
    never become a successful no-op that leaves an HTTP request waiting forever.
@@ -91,14 +92,26 @@ The actual endpoint is authoritative. Publish it through the daemon service desc
 never assume that `8765` succeeded. A daemon restart should normally recover the same endpoint;
 clients must still accept a different published port after a conflict or configuration change.
 
+The Host settings page may update the same `daemon.experimentViewer.listen` setting at runtime. The
+daemon rebinding operation persists the requested endpoint, binds the replacement listener, and
+publishes the new actual endpoint. If binding or persistence fails, restore the previous listener.
+An environment override remains authoritative and disables client-side changes.
+
 ### Direct access
 
 Opening the daemon viewer HTTP host without a client-local forwarder is supported. A built-in local
 daemon should prefer this path when its published endpoint is reachable from the desktop process.
 
-The default listener is loopback-only. A non-loopback viewer listener requires an explicit setting
-and an access-control design suitable for browser navigation. Do not expose configured viewer
-filesystem mounts merely because the main daemon listener is public.
+The default listener is loopback-only. An explicit non-loopback listener is an opt-in,
+unauthenticated publication surface. Anyone who can reach that port may read the generated viewer
+navigation page, experiment and attempt names, and every file reachable through configured viewer
+mounts. Do not add Paseo login, tickets, or cookies to this listener. The client must show this scope
+before applying a non-loopback address, and the daemon must log a warning when it binds one. The
+main daemon listener being public does not implicitly expose viewers.
+
+`GET /` serves a generated navigation page for configured experiment viewers. Viewer links remain
+stable `/view/...` paths and work without a Paseo client, including when a cluster or firewall
+publishes the configured port directly.
 
 Viewer resolution returns a path plus a service description. It does not return a URL that assumes
 the main daemon API origin. The client combines the path with either the reachable direct viewer
@@ -131,6 +144,11 @@ Use one local port per Host viewer target. Do not multiplex several daemons behi
 one local HTTP port. That would make a generic TCP forwarder responsible for HTTP origin and path
 rewriting.
 
+The forwarder may keep a small bounded pool of idle upstream streams. Fill it asynchronously so
+creating the listener does not block on several relay round trips. Assign one idle stream to the
+next accepted downstream socket, then replenish the pool. Idle streams carry no application bytes.
+Reset the entire idle pool when the active route changes or the forwarder closes.
+
 ### Multiple paths to one Host
 
 HostRuntime remains the owner of direct/relay probing and active-path selection. The desktop proxy
@@ -152,13 +170,16 @@ HostRuntime reconnects or selects another path, reloading that URL creates strea
 
 ### Identity
 
-One stream maps exactly:
+One assigned stream maps exactly:
 
 ```text
 one accepted downstream TCP socket
 <-> one tunnel id
 <-> one daemon-side target TCP socket
 ```
+
+Before assignment, a pooled tunnel id may own only the daemon-side target socket. It becomes an
+ordinary assigned stream once a downstream socket claims it.
 
 A stream may carry several HTTP/1.1 keep-alive requests. Do not create streams per HTTP request or
 viewer asset.

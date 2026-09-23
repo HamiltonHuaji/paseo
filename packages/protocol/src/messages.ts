@@ -1413,6 +1413,12 @@ export const DaemonConfigReloadRequestSchema = z.object({
   requestId: z.string(),
 });
 
+export const ExperimentViewerHostConfigureRequestSchema = z.object({
+  type: z.literal("experiment.viewer.host.configure.request"),
+  requestId: z.string(),
+  listen: z.string().trim().min(1),
+});
+
 export const HubManagementDaemonConnectRequestSchema = z.object({
   type: z.literal("hub.management.daemon.connect.request"),
   requestId: z.string(),
@@ -3243,6 +3249,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   DaemonGetStatusRequestSchema,
   DaemonGetPairingOfferRequestSchema,
   DaemonConfigReloadRequestSchema,
+  ExperimentViewerHostConfigureRequestSchema,
   HubManagementDaemonConnectRequestSchema,
   HubManagementDaemonGetStatusRequestSchema,
   HubManagementDaemonDisconnectRequestSchema,
@@ -3587,8 +3594,10 @@ export const ServerInfoStatusPayloadSchema = z
         host: z.string().min(1),
         port: z.number().int().min(1).max(65535),
         scope: z.enum(["loopback", "network"]),
+        preferredListen: z.string().min(1).optional(),
+        configurationSource: z.enum(["persisted", "environment"]).optional(),
       })
-      .strict()
+      .passthrough()
       .optional(),
     capabilities: ServerCapabilitiesFromUnknownSchema.optional(),
     // COMPAT(providersSnapshot): added in v0.1.48, remove gating when all clients use snapshot
@@ -3744,6 +3753,7 @@ export const ServerInfoStatusPayloadSchema = z
         explicitEventSubscriptions: z.boolean().optional(),
         ownedSubscriptions: z.boolean().optional(),
         experimentViewerTransport: z.boolean().optional(),
+        experimentViewerListenControl: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
         // COMPAT(agentTurnIdentity): accept peers that observed pre-release v0.2.6 through 2027-01-31.
@@ -5090,6 +5100,19 @@ export const DaemonConfigReloadResponseSchema = z.object({
       overrideControlledPaths: z.array(z.string()),
     })
     .passthrough(),
+});
+
+export const ExperimentViewerHostConfigureResponseSchema = z.object({
+  type: z.literal("experiment.viewer.host.configure.response"),
+  payload: z.object({
+    requestId: z.string(),
+    listen: z.string().min(1),
+    viewer: z.object({
+      host: z.string().min(1),
+      port: z.number().int().min(1).max(65535),
+      scope: z.enum(["loopback", "network"]),
+    }),
+  }),
 });
 
 export const DiagnosticsResponseSchema = z.object({
@@ -6907,6 +6930,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   DaemonGetStatusResponseSchema,
   DaemonGetPairingOfferResponseSchema,
   DaemonConfigReloadResponseSchema,
+  ExperimentViewerHostConfigureResponseSchema,
   HubManagementDaemonConnectResponseSchema,
   HubManagementDaemonGetStatusResponseSchema,
   HubManagementDaemonDisconnectResponseSchema,
@@ -7160,6 +7184,9 @@ export type ListAvailableProvidersResponse = z.infer<typeof ListAvailableProvide
 export type DaemonGetStatusResponse = z.infer<typeof DaemonGetStatusResponseSchema>;
 export type DaemonGetPairingOfferResponse = z.infer<typeof DaemonGetPairingOfferResponseSchema>;
 export type DaemonConfigReloadResponse = z.infer<typeof DaemonConfigReloadResponseSchema>;
+export type ExperimentViewerHostConfigureResponse = z.infer<
+  typeof ExperimentViewerHostConfigureResponseSchema
+>;
 export type DiagnosticsResponse = z.infer<typeof DiagnosticsResponseSchema>;
 export type GetProvidersSnapshotResponseMessage = z.infer<
   typeof GetProvidersSnapshotResponseMessageSchema

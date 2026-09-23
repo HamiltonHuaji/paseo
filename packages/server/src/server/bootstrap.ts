@@ -109,11 +109,6 @@ async function listenExperimentViewer(
   if (preferred.type !== "tcp") {
     throw new Error("Experiment viewer listen address must be a TCP host and port");
   }
-  if (!isLoopbackHost(preferred.host)) {
-    throw new Error(
-      "Experiment viewer currently requires a loopback listen host; network exposure needs browser-compatible access control",
-    );
-  }
   const ports = Array.from(
     { length: EXPERIMENT_VIEWER_CONFLICT_PORT_ATTEMPTS },
     (_, index) => preferred.port + index,
@@ -151,18 +146,36 @@ async function listenExperimentViewer(
   throw new Error("Experiment viewer service did not bind a TCP port");
 }
 
-function resolvePreferredExperimentViewerListenTarget(config: PaseoDaemonConfig): ListenTarget {
-  return parseListenString(config.experimentViewer?.listen ?? "127.0.0.1:8765");
+function resolvePreferredExperimentViewerListenTarget(
+  config: PaseoDaemonConfig,
+): Extract<ListenTarget, { type: "tcp" }> {
+  const target = parseListenString(config.experimentViewer?.listen ?? "127.0.0.1:8765");
+  if (target.type !== "tcp") {
+    throw new Error("Experiment viewer listen address must be a TCP host and port");
+  }
+  return target;
 }
 
 function describeExperimentViewerTarget(
   target: Extract<ListenTarget, { type: "tcp" }> | null,
-): { host: string; port: number; scope: "loopback" | "network" } | undefined {
+  preferredListen?: string,
+  configurationSource?: "persisted" | "environment",
+):
+  | {
+      host: string;
+      port: number;
+      scope: "loopback" | "network";
+      preferredListen?: string;
+      configurationSource?: "persisted" | "environment";
+    }
+  | undefined {
   if (!target) return undefined;
   return {
     host: target.host,
     port: target.port,
     scope: isLoopbackHost(target.host) ? "loopback" : "network",
+    ...(preferredListen ? { preferredListen } : {}),
+    ...(configurationSource ? { configurationSource } : {}),
   };
 }
 
@@ -280,8 +293,14 @@ import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
 } from "./agent/provider-launch-config.js";
-import { loadPersistedConfig, type PersistedConfig } from "./persisted-config.js";
+import {
+  editPersistedConfig,
+  loadPersistedConfig,
+  savePersistedConfig,
+  type PersistedConfig,
+} from "./persisted-config.js";
 import { createServiceProxySubsystem, type ServiceProxySubsystem } from "./service-proxy.js";
+import { renderExperimentViewerIndex } from "./experiments/viewer-index.js";
 import { releaseWorkspaceServicePortPlan } from "./workspace-service-port-registry.js";
 import { ScriptHealthMonitor } from "./script-health-monitor.js";
 import { createScriptStatusEmitter } from "./script-status-projection.js";
@@ -746,9 +765,10 @@ export async function createPaseoDaemon(
     app.set("trust proxy", value ?? ["loopback"]);
   });
   let boundListenTarget: ListenTarget | null = null;
-  const preferredExperimentViewerListenTarget =
-    resolvePreferredExperimentViewerListenTarget(config);
+  let preferredExperimentViewerListenTarget = resolvePreferredExperimentViewerListenTarget(config);
+  let preferredExperimentViewerListen = formatListenTarget(preferredExperimentViewerListenTarget)!;
   let experimentViewerListenTarget: Extract<ListenTarget, { type: "tcp" }> | null = null;
+  let projectRegistry: FileBackedProjectRegistry;
   let workspaceRegistry: FileBackedWorkspaceRegistry | null = null;
   const terminalManager = createConfiguredTerminalManager({
     getTerminalActivityUrl: () => createTerminalActivityUrl(boundListenTarget),
@@ -1016,6 +1036,22 @@ export async function createPaseoDaemon(
   };
 
   const experimentViewerApp = express();
+  experimentViewerApp.get("/", (_req, res) => {
+    void (async () => {
+      if (!experimentService) {
+        res.status(503).send("Experiment viewer service is still starting");
+        return;
+      }
+      try {
+        const html = await renderExperimentViewerIndex(projectRegistry, experimentService);
+        res.setHeader("Cache-Control", "no-store");
+        res.type("html").send(html);
+      } catch (error) {
+        logger.warn({ err: error }, "Failed to render experiment viewer index");
+        res.status(500).send("Unable to load experiment viewers");
+      }
+    })();
+  });
   experimentViewerApp.get(
     "/view/:projectId/:experiment/:attempt(att_[a-z0-9]+)/:viewerPath(*)",
     (req, res) => void handleExperimentViewer(req, res),
@@ -1038,7 +1074,7 @@ export async function createPaseoDaemon(
   }
 
   const agentStorage = new AgentStorage(config.agentStoragePath, logger);
-  const projectRegistry = new FileBackedProjectRegistry(
+  projectRegistry = new FileBackedProjectRegistry(
     path.join(config.paseoHome, "projects", "projects.json"),
     logger,
   );
@@ -1753,34 +1789,125 @@ export async function createPaseoDaemon(
 
   logger.info({ elapsed: elapsed() }, "Bootstrap complete, ready to start listening");
 
-  const stopExperimentViewerService = async (): Promise<void> => {
+  const closeExperimentViewerListener = async (): Promise<void> => {
     serviceProxy.removeInternalService(experimentViewerService.scriptName);
-    if (!experimentViewerHttpServer.listening) return;
-    experimentViewerHttpServer.closeAllConnections();
-    await new Promise<void>((resolve) => experimentViewerHttpServer.close(() => resolve()));
+    if (experimentViewerHttpServer.listening) {
+      experimentViewerHttpServer.closeAllConnections();
+      await new Promise<void>((resolve) => experimentViewerHttpServer.close(() => resolve()));
+    }
     experimentViewerListenTarget = null;
+  };
+
+  const bindExperimentViewerListener = async (
+    preferred: Extract<ListenTarget, { type: "tcp" }>,
+  ) => {
+    const binding = await listenExperimentViewer(experimentViewerHttpServer, preferred);
+    experimentViewerListenTarget = binding.target;
+    serviceProxy.registerInternalService({
+      serviceName: experimentViewerService.scriptName,
+      port: binding.target.port,
+    });
+    const logFields = {
+      preferredListen: formatListenTarget(preferred),
+      actualListen: formatListenTarget(binding.target),
+      conflictResolved: binding.conflictResolved,
+    };
+    if (isLoopbackHost(binding.target.host)) {
+      logger.info(logFields, "Experiment viewer service listening");
+    } else {
+      logger.warn(
+        logFields,
+        "Experiment viewer service is exposed without authentication; anyone who can reach this port can read viewer content",
+      );
+    }
+    return binding;
+  };
+
+  let experimentViewerRebindQueue: Promise<void> = Promise.resolve();
+  const configureExperimentViewerHost = (listen: string) => {
+    const operation = experimentViewerRebindQueue.then(async () => {
+      if (config.configReload?.overrideControlledPaths.includes("daemon.experimentViewer.listen")) {
+        throw new Error(
+          "Experiment viewer listener is controlled by PASEO_EXPERIMENT_VIEWER_LISTEN. Remove that launch override before changing it from a client.",
+        );
+      }
+      const parsed = parseListenString(listen.trim());
+      if (parsed.type !== "tcp") {
+        throw new Error("Experiment viewer listen address must be a TCP host and port");
+      }
+      const normalizedListen = formatListenTarget(parsed)!;
+      if (
+        normalizedListen === preferredExperimentViewerListen &&
+        experimentViewerListenTarget !== null
+      ) {
+        return {
+          listen: preferredExperimentViewerListen,
+          viewer: describeExperimentViewerTarget(experimentViewerListenTarget)!,
+        };
+      }
+
+      const previousPreferred = preferredExperimentViewerListenTarget;
+      const previousPreferredListen = preferredExperimentViewerListen;
+      const previousActual = experimentViewerListenTarget;
+      const previousPersisted = loadPersistedConfig(config.paseoHome, logger);
+
+      await closeExperimentViewerListener();
+      try {
+        await bindExperimentViewerListener(parsed);
+        try {
+          editPersistedConfig(config.paseoHome, "daemon.experimentViewer.listen", {
+            value: normalizedListen,
+          });
+          daemonConfigStore.acknowledgePersistedPathApplied("daemon.experimentViewer.listen");
+        } catch (error) {
+          await closeExperimentViewerListener();
+          await bindExperimentViewerListener(previousActual ?? previousPreferred);
+          savePersistedConfig(config.paseoHome, previousPersisted, logger);
+          throw error;
+        }
+      } catch (error) {
+        if (!experimentViewerListenTarget) {
+          try {
+            await bindExperimentViewerListener(previousActual ?? previousPreferred);
+          } catch (rollbackError) {
+            logger.error(
+              { err: error },
+              "Experiment viewer rebind failed before the previous listener could be restored",
+            );
+            throw new Error("Experiment viewer rebind failed and the previous listener was lost", {
+              cause: rollbackError,
+            });
+          }
+        }
+        preferredExperimentViewerListenTarget = previousPreferred;
+        preferredExperimentViewerListen = previousPreferredListen;
+        throw error;
+      }
+
+      preferredExperimentViewerListenTarget = parsed;
+      preferredExperimentViewerListen = normalizedListen;
+      wsServer?.broadcastServerInfo();
+      return {
+        listen: preferredExperimentViewerListen,
+        viewer: describeExperimentViewerTarget(experimentViewerListenTarget)!,
+      };
+    });
+    experimentViewerRebindQueue = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  };
+
+  const stopExperimentViewerService = async (): Promise<void> => {
+    await experimentViewerRebindQueue;
+    await closeExperimentViewerListener();
   };
 
   const start = async () => {
     let mainStarted = false;
     try {
-      const viewerBinding = await listenExperimentViewer(
-        experimentViewerHttpServer,
-        preferredExperimentViewerListenTarget,
-      );
-      experimentViewerListenTarget = viewerBinding.target;
-      serviceProxy.registerInternalService({
-        serviceName: experimentViewerService.scriptName,
-        port: experimentViewerListenTarget.port,
-      });
-      logger.info(
-        {
-          preferredListen: formatListenTarget(preferredExperimentViewerListenTarget),
-          actualListen: formatListenTarget(experimentViewerListenTarget),
-          conflictResolved: viewerBinding.conflictResolved,
-        },
-        "Experiment viewer service listening",
-      );
+      await bindExperimentViewerListener(preferredExperimentViewerListenTarget);
 
       if (serviceProxyListenTarget) {
         const boundServiceProxyTarget = await serviceProxy.startStandalone({
@@ -1910,7 +2037,18 @@ export async function createPaseoDaemon(
                   return appBaseUrl;
                 },
                 desktopManaged: config.desktopManaged === true,
-                experimentViewer: describeExperimentViewerTarget(experimentViewerListenTarget),
+                get experimentViewer() {
+                  return describeExperimentViewerTarget(
+                    experimentViewerListenTarget,
+                    preferredExperimentViewerListen,
+                    config.configReload?.overrideControlledPaths.includes(
+                      "daemon.experimentViewer.listen",
+                    )
+                      ? "environment"
+                      : "persisted",
+                  );
+                },
+                configureExperimentViewerHost,
                 getRelayConfig: () =>
                   relayRuntime?.getConfig() ?? {
                     enabled: daemonConfigStore.get().relay?.enabled ?? relayEnabled,

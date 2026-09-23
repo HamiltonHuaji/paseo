@@ -2783,6 +2783,8 @@ export class Session {
       case "daemon.config.reload.request":
         this.daemonSession.handleConfigReloadRequest(msg);
         return undefined;
+      case "experiment.viewer.host.configure.request":
+        return this.daemonSession.handleExperimentViewerHostConfigureRequest(msg);
       case "hub.management.daemon.connect.request":
       case "hub.management.daemon.get_status.request":
       case "hub.management.daemon.disconnect.request":

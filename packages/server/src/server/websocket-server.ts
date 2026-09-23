@@ -1701,6 +1701,8 @@ export class VoiceAssistantWebSocketServer {
       features: {
         ownedSubscriptions: true,
         experimentViewerTransport: true,
+        experimentViewerListenControl:
+          this.daemonRuntimeConfig?.configureExperimentViewerHost !== undefined,
         agentRequestReceipts: true,
         workspaceRequestReceipts: true,
         creationLifecycle: true,
@@ -1879,7 +1881,7 @@ export class VoiceAssistantWebSocketServer {
     });
   }
 
-  private broadcastCapabilitiesUpdate(): void {
+  public broadcastServerInfo(): void {
     for (const connection of new Set(this.sessions.values())) {
       if (
         ![...connection.sockets].some((socket) =>
@@ -1892,6 +1894,10 @@ export class VoiceAssistantWebSocketServer {
         payload: this.buildServerInfoStatusPayload(connection.session),
       });
     }
+  }
+
+  private broadcastCapabilitiesUpdate(): void {
+    this.broadcastServerInfo();
   }
 
   private broadcastDaemonConfigChanged(config: MutableDaemonConfig): void {
