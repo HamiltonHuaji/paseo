@@ -429,9 +429,10 @@ Provide `paseo experiment doctor` to report:
 
 ## Static viewers
 
-The target host, direct-access, port-forwarding, and stream lifecycle requirements live in
-[Experiment Viewer Transport Requirements](refactors/experiment-viewer-transport-spec.md). This
-section describes the current viewer namespace and file-serving behavior.
+The viewer host and direct-access requirements live in
+[Experiment Viewer Transport Requirements](refactors/experiment-viewer-transport-spec.md). Its
+generic TCP forwarding section predates the dedicated HTTP proxy and remains pinned; this section
+describes the current client forwarding behavior.
 
 A viewer is a named entry in an Experiment or Attempt static-file namespace. Viewer files remain
 ordinary files. The daemon serves them directly and starts no helper process.
@@ -530,11 +531,14 @@ five idle minutes; an expired cursor returns HTTP 410 with `{"error":"cursor_exp
 `limit` to request a page size from 1 through 1000; the default is 200. Listings never expose host
 filesystem paths.
 
-A direct client opens the path on the daemon HTTP origin. A relay-connected desktop client opens a
-loopback listener on an operating-system-assigned port and forwards its TCP traffic through the
-existing encrypted relay connection to the internal viewer service. The system browser uses an
-ordinary `http://127.0.0.1:<port>/view/...` URL. One listener is reused for the Host and viewer
-target; each browser connection gets its own tunnel stream.
+A direct client opens the path on the daemon viewer HTTP origin. A relay-connected desktop client
+opens one loopback HTTP proxy per Host, backed by one dedicated daemon connection for viewer
+traffic. GET and HEAD requests share that connection as independent streams; viewer bytes do not
+ride on the control connection, and the viewer does not pre-open generic TCP tunnels. The system
+browser uses an ordinary `http://127.0.0.1:<port>/view/...` URL. The loopback listener and URL
+remain stable while the desktop process lives, including across browser tab closes and route
+changes. An upstream HTTP status is preserved; a failure before response headers returns 502 or
+504, while a failure after headers ends only that browser resource.
 
 ### Viewer inheritance
 

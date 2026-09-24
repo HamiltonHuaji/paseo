@@ -9,13 +9,17 @@ import {
   type TerminalStreamFrame,
 } from "./terminal.js";
 import { decodeTunnelStreamFrame, TunnelStreamOpcode, type TunnelStreamFrame } from "./tunnel.js";
+import { decodeViewerHttpFrame, type ViewerHttpFrame } from "./viewer-http.js";
 
 export type BinaryFrame =
   | { kind: "terminal"; frame: TerminalStreamFrame }
   | { kind: "file_transfer"; frame: FileTransferFrame }
-  | { kind: "tunnel"; frame: TunnelStreamFrame };
+  | { kind: "tunnel"; frame: TunnelStreamFrame }
+  | { kind: "viewer_http"; frame: ViewerHttpFrame };
 
 export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
+  const viewerFrame = decodeViewerHttpFrame(bytes);
+  if (viewerFrame) return { kind: "viewer_http", frame: viewerFrame };
   switch (bytes[0]) {
     case TerminalStreamOpcode.Output:
     case TerminalStreamOpcode.Input:

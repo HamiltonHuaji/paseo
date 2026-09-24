@@ -20,6 +20,7 @@ export async function createLocalTunnelForwarder(input: {
   host?: string;
   port?: number;
   idleTunnelPoolSize?: number;
+  onConnectionError?: (error: unknown) => void;
 }): Promise<LocalTunnelForwarder> {
   const host = input.host ?? "127.0.0.1";
   const openTunnel =
@@ -68,25 +69,80 @@ export async function createLocalTunnelForwarder(input: {
     socket.pause();
     let finished = false;
     let localEnded = false;
+    let tunnel: DaemonTunnel | null = null;
+    let reportedFailure = false;
+    const resetTunnel = () => {
+      if (!tunnel) return;
+      try {
+        tunnel.reset();
+      } catch {
+        tunnel.abort();
+      }
+    };
+    const failConnection = (error: unknown) => {
+      if (reportedFailure) return;
+      reportedFailure = true;
+      try {
+        input.onConnectionError?.(error);
+      } catch {
+        // Diagnostics must not affect forwarding or socket teardown.
+      }
+      resetTunnel();
+      socket.destroy();
+    };
+    const sendToTunnel = (action: "write" | "end" | "pause" | "resume", data?: Uint8Array) => {
+      if (!tunnel) return;
+      try {
+        switch (action) {
+          case "write":
+            if (data) tunnel.write(data);
+            break;
+          case "end":
+            tunnel.end();
+            break;
+          case "pause":
+            tunnel.pauseRemote();
+            break;
+          case "resume":
+            tunnel.resumeRemote();
+            break;
+        }
+      } catch (error) {
+        failConnection(error);
+      }
+    };
+
+    // A failed upstream open may destroy this socket before handlers are installed below.
+    // Always consume socket errors so one browser resource cannot become an uncaught
+    // exception in the Electron main process.
+    socket.on("error", resetTunnel);
+    socket.once("close", (hadError) => {
+      finished = true;
+      sockets.delete(socket);
+      if (hadError || !localEnded) resetTunnel();
+    });
 
     const idleTunnel = idleTunnels.shift();
     fillIdleTunnels();
     void (idleTunnel ? Promise.resolve(idleTunnel) : openTunnel(input.target))
-      .then((tunnel) => {
+      .then((openedTunnel) => {
+        tunnel = openedTunnel;
         if (finished || socket.destroyed) {
-          tunnel.reset();
+          resetTunnel();
           return undefined;
         }
         let remotePaused = false;
-        tunnel.setHandlers({
+        openedTunnel.setHandlers({
           onData: (data) => {
+            if (socket.destroyed) return;
             socket.write(data);
             if (!remotePaused && socket.writableLength >= LOCAL_SOCKET_HIGH_WATER_BYTES) {
               remotePaused = true;
-              tunnel.pauseRemote();
+              sendToTunnel("pause");
+              if (socket.destroyed) return;
               socket.once("drain", () => {
                 remotePaused = false;
-                tunnel.resumeRemote();
+                sendToTunnel("resume");
               });
             }
           },
@@ -95,26 +151,21 @@ export async function createLocalTunnelForwarder(input: {
           onPause: () => socket.pause(),
           onResume: () => socket.resume(),
         });
-        socket.on("data", (data) => tunnel.write(data));
+        socket.on("data", (data) => sendToTunnel("write", data));
         socket.once("end", () => {
           localEnded = true;
-          tunnel.end();
-        });
-        socket.once("error", () => tunnel.reset());
-        socket.once("close", (hadError) => {
-          if (hadError || !localEnded) tunnel.reset();
+          sendToTunnel("end");
         });
         socket.resume();
         return undefined;
       })
       .catch((error: unknown) => {
-        socket.destroy(error instanceof Error ? error : new Error(String(error)));
+        if (finished || socket.destroyed) return;
+        // This is one failed browser connection, not a failure of the listener.
+        // Destroy without an Error: passing it to destroy() emits an uncaught socket
+        // error before an upstream tunnel exists, which Electron shows as a modal.
+        failConnection(error);
       });
-
-    socket.once("close", () => {
-      finished = true;
-      sockets.delete(socket);
-    });
   });
 
   await new Promise<void>((resolve, reject) => {

@@ -53,6 +53,7 @@ import {
   ExperimentViewerResolveResponseSchema,
 } from "./experiments.js";
 import { TunnelOpenRequestSchema, TunnelOpenResponseSchema } from "./tunnels.js";
+import { ViewerHttpFetchRequestSchema, ViewerHttpFetchResponseSchema } from "./viewer-http.js";
 import {
   ChatCreateRequestSchema,
   ChatListRequestSchema,
@@ -3241,6 +3242,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ExperimentViewerConfigureRequestSchema,
   ExperimentViewerResolveRequestSchema,
   TunnelOpenRequestSchema,
+  ViewerHttpFetchRequestSchema,
   WorkspaceRecoveryInspectRequestSchema,
   WorkspaceRecoveryRestoreRequestSchema,
   SetVoiceModeMessageSchema,
@@ -3753,6 +3755,7 @@ export const ServerInfoStatusPayloadSchema = z
         explicitEventSubscriptions: z.boolean().optional(),
         ownedSubscriptions: z.boolean().optional(),
         experimentViewerTransport: z.boolean().optional(),
+        viewerHttpProxy: z.boolean().optional(),
         experimentViewerListenControl: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
@@ -6881,6 +6884,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ExperimentViewerConfigureResponseSchema,
   ExperimentViewerResolveResponseSchema,
   TunnelOpenResponseSchema,
+  ViewerHttpFetchResponseSchema,
   ProjectUpdateMessageSchema,
   ProjectListResponseMessageSchema,
   ScriptStatusUpdateMessageSchema,

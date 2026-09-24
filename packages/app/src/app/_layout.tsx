@@ -315,14 +315,14 @@ function HostSessionManager() {
       {hosts.map((daemon) => (
         <Fragment key={daemon.serverId}>
           <ManagedDaemonSession daemon={daemon} />
-          <ViewerTunnelRouteSync host={daemon} />
+          <ViewerHttpRouteSync host={daemon} />
         </Fragment>
       ))}
     </>
   );
 }
 
-function ViewerTunnelRouteSync({ host }: { host: HostProfile }) {
+function ViewerHttpRouteSync({ host }: { host: HostProfile }) {
   const snapshot = useHostRuntimeSnapshot(host.serverId);
   const activeConnection = host.connections.find(
     (connection) => connection.id === snapshot?.activeConnectionId,
@@ -331,10 +331,9 @@ function ViewerTunnelRouteSync({ host }: { host: HostProfile }) {
   useEffect(() => {
     if (activeConnection?.type !== "relay" && activeConnection?.type !== "directTcp") return;
     void getDesktopHost()
-      ?.tunnel?.updateRoute?.({
+      ?.viewerHttp?.updateRoute?.({
         serverId: host.serverId,
         connection: activeConnection,
-        target: { type: "service", name: "viewers" },
       })
       .catch(() => undefined);
   }, [activeConnection, host.serverId]);

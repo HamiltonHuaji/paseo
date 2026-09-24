@@ -144,10 +144,13 @@ import {
   asUint8Array,
   decodeFileTransferFrame,
   decodeTunnelStreamFrame,
+  decodeViewerHttpFrame,
+  encodeViewerHttpFrame,
   encodeFileTransferFrame,
   decodeTerminalStreamFrame,
   FileTransferOpcode,
   TerminalStreamOpcode,
+  ViewerHttpOpcode,
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import type { TunnelTarget } from "@getpaseo/protocol/tunnels";
@@ -170,6 +173,7 @@ import {
 } from "./compat/normalize-provider-models.js";
 import { TerminalStreamRouter, type TerminalStreamEvent } from "./terminal-stream-router.js";
 import { DaemonTunnel } from "./daemon-tunnel.js";
+import { ViewerHttpStream } from "./viewer-http-stream.js";
 import type {
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
@@ -1223,6 +1227,7 @@ export class DaemonClient {
   private connectionState: ConnectionState = { status: "idle" };
   private readonly terminalStreams = new TerminalStreamRouter();
   private readonly tunnels = new Map<string, DaemonTunnel>();
+  private readonly viewerHttpStreams = new Map<string, ViewerHttpStream>();
   private pendingBinaryFileReads = new Map<string, PendingBinaryFileRead>();
   private activeBinaryFileTransfers = new Map<string, BinaryFileTransferState>();
   private completedBinaryFileReads = new Map<string, FileReadResult>();
@@ -1339,6 +1344,63 @@ export class DaemonClient {
     );
     this.tunnels.set(payload.tunnelId, tunnel);
     return tunnel;
+  }
+
+  async fetchViewerHttp(input: {
+    method: "GET" | "HEAD";
+    path: string;
+    headers: Record<string, string>;
+    signal?: AbortSignal;
+  }): Promise<{ status: number; headers: Record<string, string>; stream: ViewerHttpStream }> {
+    if (this.getLastServerInfoMessage()?.features?.viewerHttpProxy !== true) {
+      throw new Error("Update the host to use the viewer HTTP proxy");
+    }
+    if (input.signal?.aborted) throw new Error("Viewer request cancelled");
+    const requestId = this.createRequestId();
+    let rejectAbort: ((error: Error) => void) | null = null;
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
+    });
+    const onAbort = () => {
+      try {
+        this.sendBinaryFrame(encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.Reset, requestId }));
+      } catch {
+        // A disconnected transport has already ended the upstream request.
+      }
+      rejectAbort?.(new Error("Viewer request cancelled"));
+    };
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    const pending = this.sendNamespacedCorrelatedSessionRequest<"viewer.http.fetch.response">({
+      requestId,
+      // The daemon allows 30 seconds for response headers; leave room for relay transit.
+      timeout: 40_000,
+      message: {
+        type: "viewer.http.fetch.request",
+        method: input.method,
+        path: input.path,
+        headers: input.headers,
+      },
+    });
+    void pending.then(
+      () => {
+        if (input.signal?.aborted) onAbort();
+        return undefined;
+      },
+      () => undefined,
+    );
+    try {
+      const payload = await Promise.race([pending, abortPromise]);
+      if (input.signal?.aborted) throw new Error("Viewer request cancelled");
+      const stream = new ViewerHttpStream(
+        requestId,
+        (frame) => this.sendBinaryFrame(frame),
+        () => this.viewerHttpStreams.delete(requestId),
+      );
+      this.viewerHttpStreams.set(requestId, stream);
+      return { status: payload.status, headers: payload.headers, stream };
+    } finally {
+      input.signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   private attemptConnect(): void {
@@ -6484,6 +6546,14 @@ export class DaemonClient {
       return true;
     }
 
+    const viewerFrame = decodeViewerHttpFrame(rawBytes);
+    if (viewerFrame) {
+      this.consecutiveLivenessFailures = 0;
+      this.viewerHttpStreams.get(viewerFrame.requestId)?.handleFrame(viewerFrame);
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
+
     const frame = decodeTerminalStreamFrame(rawBytes);
     if (!frame) {
       return false;
@@ -6674,6 +6744,9 @@ export class DaemonClient {
     const tunnels = [...this.tunnels.values()];
     this.tunnels.clear();
     for (const tunnel of tunnels) tunnel.abort();
+    const viewerStreams = [...this.viewerHttpStreams.values()];
+    this.viewerHttpStreams.clear();
+    for (const stream of viewerStreams) stream.abort();
   }
 
   private emitDisconnectedStateForReconnect(

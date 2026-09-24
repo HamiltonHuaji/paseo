@@ -41,6 +41,7 @@ import { TerminalSessionController } from "../terminal/terminal-session-controll
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
 import type { BinaryFrame } from "@getpaseo/protocol/binary-frames/index";
 import { TunnelController } from "./tunnels/controller.js";
+import { ViewerHttpController, ViewerHttpRequestCancelledError } from "./viewer-http/controller.js";
 import { CursorError } from "./pagination/cursor.js";
 import { SortablePager, type SortSpec } from "./pagination/sortable-pager.js";
 import { matchesAgentHistoryQuery } from "./agent-history-search.js";
@@ -790,6 +791,7 @@ export class Session {
   private readonly messageReceipts: Pick<MessageReceipts, "send">;
   private readonly experimentService: ExperimentService;
   private readonly tunnelController: TunnelController;
+  private readonly viewerHttpController: ViewerHttpController;
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
   private readonly creationService: Pick<CreationService, "create" | "subscribe">;
 
@@ -1123,6 +1125,7 @@ export class Session {
     this.providerSnapshotManager = providerSnapshotManager;
     this.serviceProxy = serviceProxy ?? null;
     this.tunnelController = new TunnelController(this.serviceProxy);
+    this.viewerHttpController = new ViewerHttpController(this.serviceProxy);
     this.scriptRuntimeStore = scriptRuntimeStore ?? null;
     this.workspaceSetupSnapshots = workspaceSetupSnapshots ?? new Map();
     this.workspaceSetupRuntime = resolveWorkspaceSetupRuntime(workspaceSetupRuntime);
@@ -3021,7 +3024,50 @@ export class Session {
     msg: SessionInboundMessage,
     source?: object,
   ): Promise<void> | undefined {
+    if (msg.type === "viewer.http.fetch.request") return this.handleViewerHttpFetch(msg, source);
     return this.dispatchTunnelMessage(msg, source) ?? this.dispatchExperimentMessage(msg);
+  }
+
+  private async handleViewerHttpFetch(
+    msg: Extract<SessionInboundMessage, { type: "viewer.http.fetch.request" }>,
+    source?: object,
+  ): Promise<void> {
+    if (!source) throw new Error("Viewer HTTP requests require a physical client connection");
+    if (!this.supportsForSource(CLIENT_CAPS.viewerHttpProxy, source)) {
+      throw new Error("Viewer HTTP proxy requires a newer Paseo client");
+    }
+    const owner = this.delivery.operation(
+      () => false,
+      () => this.viewerHttpController.cancel(msg.requestId),
+    );
+    try {
+      const response = await this.viewerHttpController.open(msg, owner);
+      this.emitForSource(
+        {
+          type: "viewer.http.fetch.response",
+          payload: { requestId: msg.requestId, ...response },
+        },
+        source,
+      );
+      this.viewerHttpController.start(msg.requestId, source);
+    } catch (error) {
+      await owner.release();
+      if (error instanceof ViewerHttpRequestCancelledError) return;
+      const message = error instanceof Error ? error.message : String(error);
+      const timedOut = /timeout|timed out/i.test(message);
+      this.emitForSource(
+        {
+          type: "rpc_error",
+          payload: {
+            requestId: msg.requestId,
+            requestType: msg.type,
+            error: timedOut ? "Viewer upstream response timeout" : "Viewer service unavailable",
+            code: timedOut ? "viewer_timeout" : "viewer_unavailable",
+          },
+        },
+        source,
+      );
+    }
   }
 
   private async handleExperimentList(
@@ -3327,6 +3373,12 @@ export class Session {
   }
 
   public async handleBinaryFrame(binaryFrame: BinaryFrame, source: object): Promise<void> {
+    if (binaryFrame.kind === "viewer_http") {
+      if (this.authorization.allowsPermission("workspace.read")) {
+        this.viewerHttpController.handleFrame(binaryFrame.frame, source);
+      }
+      return;
+    }
     if (!this.authorization.allowsPermission("workspace.write")) {
       return;
     }
@@ -8710,6 +8762,7 @@ export class Session {
 
     this.terminalController.dispose();
     this.tunnelController.dispose();
+    this.viewerHttpController.dispose();
 
     this.checkoutSession.cleanup();
 

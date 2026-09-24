@@ -1701,6 +1701,7 @@ export class VoiceAssistantWebSocketServer {
       features: {
         ownedSubscriptions: true,
         experimentViewerTransport: true,
+        viewerHttpProxy: true,
         experimentViewerListenControl:
           this.daemonRuntimeConfig?.configureExperimentViewerHost !== undefined,
         agentRequestReceipts: true,

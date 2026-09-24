@@ -29,6 +29,10 @@
       "types": "./dist/node/local-tunnel-forwarder.d.ts",
       "default": "./dist/node/local-tunnel-forwarder.js"
     },
+    "./node/local-viewer-http-proxy": {
+      "types": "./dist/node/local-viewer-http-proxy.d.ts",
+      "default": "./dist/node/local-viewer-http-proxy.js"
+    },
     "./internal/daemon-transport-bridge": {
       "types": "./dist/daemon-transport-bridge.d.ts",
       "default": "./dist/daemon-transport-bridge.js"

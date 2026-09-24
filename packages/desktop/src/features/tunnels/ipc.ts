@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { ipcMain } from "electron";
+import log from "electron-log/main";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { WebSocketLike } from "@getpaseo/client/internal/daemon-client-transport-types";
 import {
   createLocalTunnelForwarder,
   type LocalTunnelForwarder,
 } from "@getpaseo/client/node/local-tunnel-forwarder";
+import {
+  createLocalViewerHttpProxy,
+  type LocalViewerHttpProxy,
+} from "@getpaseo/client/node/local-viewer-http-proxy";
 import {
   buildDaemonWebSocketUrl,
   buildRelayWebSocketUrl,
@@ -52,8 +57,14 @@ interface ManagedTunnel {
   close(): Promise<void>;
 }
 
+interface ManagedViewerProxy {
+  proxy: LocalViewerHttpProxy;
+  updateRoute(connection: TunnelConnection): Promise<void>;
+  close(): Promise<void>;
+}
+
 const tunnels = new Map<string, Promise<ManagedTunnel>>();
-const VIEWER_IDLE_TUNNEL_POOL_SIZE = 1;
+const viewerProxies = new Map<string, Promise<ManagedViewerProxy>>();
 
 export function registerTunnelHandlers(): void {
   ipcMain.handle("paseo:tunnel:ensure", async (_event, rawInput: unknown) => {
@@ -79,12 +90,104 @@ export function registerTunnelHandlers(): void {
     await (await pending).updateRoute(input.connection);
     return { updated: true };
   });
+  ipcMain.handle("paseo:viewerHttp:ensure", async (_event, rawInput: unknown) => {
+    const input = EnsureTunnelInputSchema.omit({ target: true }).parse(rawInput);
+    let pending = viewerProxies.get(input.serverId);
+    if (!pending) {
+      pending = createManagedViewerProxy(input).catch((error) => {
+        viewerProxies.delete(input.serverId);
+        throw error;
+      });
+      viewerProxies.set(input.serverId, pending);
+    }
+    const managed = await pending;
+    await managed.updateRoute(input.connection);
+    return { origin: managed.proxy.origin };
+  });
+  ipcMain.handle("paseo:viewerHttp:updateRoute", async (_event, rawInput: unknown) => {
+    const input = EnsureTunnelInputSchema.omit({ target: true }).parse(rawInput);
+    const pending = viewerProxies.get(input.serverId);
+    if (!pending) return { updated: false };
+    await (await pending).updateRoute(input.connection);
+    return { updated: true };
+  });
 }
 
 export async function closeAllTunnelForwarders(): Promise<void> {
   const active = [...tunnels.values()];
+  const viewers = [...viewerProxies.values()];
   tunnels.clear();
+  viewerProxies.clear();
   await Promise.allSettled(active.map(async (pending) => (await pending).close()));
+  await Promise.allSettled(viewers.map(async (pending) => (await pending).close()));
+}
+
+async function createManagedViewerProxy(input: {
+  serverId: string;
+  connection: TunnelConnection;
+}): Promise<ManagedViewerProxy> {
+  let current = await createUpstream(input.serverId, input.connection);
+  if (current.client.getLastServerInfoMessage()?.features?.viewerHttpProxy !== true) {
+    await current.client.close();
+    throw new Error("Update the host to use the viewer HTTP proxy");
+  }
+  const generations = new Set<UpstreamGeneration>([current]);
+  let routeUpdate = Promise.resolve();
+  const retireIfDrained = async (generation: UpstreamGeneration): Promise<void> => {
+    if (!generation.retiring || generation.activeStreams > 0) return;
+    generations.delete(generation);
+    await generation.client.close();
+  };
+  const proxy = await createLocalViewerHttpProxy({
+    fetch: async (request) => {
+      const generation = current;
+      generation.activeStreams += 1;
+      try {
+        const response = await generation.client.fetchViewerHttp(request);
+        void response.stream.whenClosed().then(() => {
+          generation.activeStreams -= 1;
+          void retireIfDrained(generation);
+          return undefined;
+        });
+        return response;
+      } catch (error) {
+        generation.activeStreams -= 1;
+        void retireIfDrained(generation);
+        throw error;
+      }
+    },
+    onRequestError: (error) => log.debug("[viewer-http] Upstream resource failed", error),
+  });
+  const updateRoute = (connection: TunnelConnection): Promise<void> => {
+    routeUpdate = routeUpdate
+      .catch(() => undefined)
+      .then(async () => {
+        const nextRouteKey = JSON.stringify(connection);
+        if (current.routeKey === nextRouteKey) return undefined;
+        const replacement = await createUpstream(input.serverId, connection);
+        if (replacement.client.getLastServerInfoMessage()?.features?.viewerHttpProxy !== true) {
+          await replacement.client.close();
+          throw new Error("Update the host to use the viewer HTTP proxy");
+        }
+        generations.add(replacement);
+        const previous = current;
+        current = replacement;
+        previous.retiring = true;
+        await retireIfDrained(previous);
+        return undefined;
+      });
+    return routeUpdate;
+  };
+  return {
+    proxy,
+    updateRoute,
+    close: async () => {
+      await routeUpdate.catch(() => undefined);
+      await proxy.close();
+      await Promise.allSettled([...generations].map((generation) => generation.client.close()));
+      generations.clear();
+    },
+  };
 }
 
 async function createManagedTunnel(
@@ -120,10 +223,9 @@ async function createManagedTunnel(
   const forwarder = await createLocalTunnelForwarder({
     openTunnel,
     target: input.target,
-    idleTunnelPoolSize:
-      input.target.type === "service" && input.target.name === "viewers"
-        ? VIEWER_IDLE_TUNNEL_POOL_SIZE
-        : 0,
+    onConnectionError: (error) => {
+      log.warn("[tunnel-forwarder] Browser connection failed", error);
+    },
   });
   const updateRoute = (connection: TunnelConnection): Promise<void> => {
     routeUpdate = routeUpdate

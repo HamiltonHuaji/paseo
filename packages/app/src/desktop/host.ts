@@ -91,6 +91,17 @@ export interface DesktopTunnelBridge {
   }) => Promise<{ updated: boolean }>;
 }
 
+export interface DesktopViewerHttpBridge {
+  ensure?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
+  }) => Promise<{ origin: string }>;
+  updateRoute?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
+  }) => Promise<{ updated: boolean }>;
+}
+
 export interface DesktopEditorTargetDescriptor {
   id: string;
   label: string;
@@ -211,6 +222,7 @@ export interface DesktopHostBridge {
   notification?: DesktopNotificationBridge;
   opener?: DesktopOpenerBridge;
   tunnel?: DesktopTunnelBridge;
+  viewerHttp?: DesktopViewerHttpBridge;
   editor?: DesktopEditorBridge;
   webUtils?: DesktopWebUtilsBridge;
   menu?: DesktopMenuBridge;

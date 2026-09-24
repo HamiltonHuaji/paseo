@@ -1014,7 +1014,8 @@ function ViewerEntry({
   tunnelConnection: ViewerTunnelConnection | null;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const usable = entry.available && (directUrl !== null || tunnelConnection !== null);
+  const canProxy = Boolean(getDesktopHost()?.viewerHttp?.ensure && tunnelConnection);
+  const usable = entry.available && (directUrl !== null || canProxy);
   const onPress = useCallback(() => {
     void (async () => {
       setError(null);
@@ -1023,12 +1024,11 @@ function ViewerEntry({
           await openExternalUrl(directUrl);
           return;
         }
-        const tunnel = getDesktopHost()?.tunnel?.ensure;
-        if (tunnel && tunnelConnection) {
-          const { origin } = await tunnel({
+        const viewerHttp = getDesktopHost()?.viewerHttp?.ensure;
+        if (viewerHttp && tunnelConnection) {
+          const { origin } = await viewerHttp({
             serverId,
             connection: tunnelConnection,
-            target: { type: "service", name: "viewers" },
           });
           await openExternalUrl(`${origin}${entry.url}`);
           return;
@@ -1045,7 +1045,7 @@ function ViewerEntry({
       {!entry.available && entry.unavailableReason ? (
         <Text style={styles.meta}>{entry.unavailableReason}</Text>
       ) : null}
-      {!directUrl && !tunnelConnection ? (
+      {!directUrl && !canProxy ? (
         <Text style={styles.meta}>open from desktop or connect directly</Text>
       ) : null}
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
