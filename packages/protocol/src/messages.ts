@@ -3756,6 +3756,7 @@ export const ServerInfoStatusPayloadSchema = z
         ownedSubscriptions: z.boolean().optional(),
         experimentViewerTransport: z.boolean().optional(),
         viewerHttpProxy: z.boolean().optional(),
+        viewerHttpFlowControl: z.boolean().optional(),
         experimentViewerListenControl: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),

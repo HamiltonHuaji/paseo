@@ -1395,6 +1395,8 @@ export class DaemonClient {
         requestId,
         (frame) => this.sendBinaryFrame(frame),
         () => this.viewerHttpStreams.delete(requestId),
+        // COMPAT(viewerHttpFlowControl): added after v0.9.5; old daemons use pause/resume.
+        this.getLastServerInfoMessage()?.features?.viewerHttpFlowControl === true,
       );
       this.viewerHttpStreams.set(requestId, stream);
       return { status: payload.status, headers: payload.headers, stream };

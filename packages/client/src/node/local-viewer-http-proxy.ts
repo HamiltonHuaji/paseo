@@ -71,6 +71,7 @@ export async function createLocalViewerHttpProxy(input: {
     let stream: ViewerHttpStream | null = null;
     let completed = false;
     let waitingForDrain = false;
+    let pendingConsumedBytes = 0;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const clearIdleTimer = () => {
       if (idleTimer) clearTimeout(idleTimer);
@@ -132,7 +133,8 @@ export async function createLocalViewerHttpProxy(input: {
           onData: (data) => {
             try {
               writeHeaders();
-              if (!res.write(Buffer.from(data))) {
+              if (!res.write(Buffer.from(data)) || waitingForDrain) {
+                pendingConsumedBytes += data.byteLength;
                 clearIdleTimer();
                 if (!waitingForDrain) {
                   waitingForDrain = true;
@@ -141,6 +143,8 @@ export async function createLocalViewerHttpProxy(input: {
                     waitingForDrain = false;
                     if (completed) return;
                     try {
+                      stream?.consumed(pendingConsumedBytes);
+                      pendingConsumedBytes = 0;
                       armIdleTimer();
                       stream?.resume();
                     } catch (error) {
@@ -150,7 +154,10 @@ export async function createLocalViewerHttpProxy(input: {
                     }
                   });
                 }
-              } else armIdleTimer();
+              } else {
+                stream?.consumed(data.byteLength);
+                armIdleTimer();
+              }
             } catch (error) {
               reportError(error);
               onClose();

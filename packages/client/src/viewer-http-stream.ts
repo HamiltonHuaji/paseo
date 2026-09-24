@@ -1,7 +1,9 @@
 import {
   encodeViewerHttpFrame,
   ViewerHttpOpcode,
+  VIEWER_HTTP_WINDOW_BYTES,
   type ViewerHttpFrame,
+  viewerHttpCreditPayload,
 } from "@getpaseo/protocol/binary-frames/index";
 
 export interface ViewerHttpHandlers {
@@ -20,6 +22,7 @@ export class ViewerHttpStream {
     readonly id: string,
     private readonly send: (frame: Uint8Array) => void,
     private readonly onClosed: () => void,
+    private readonly flowControlled: boolean,
   ) {
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
@@ -33,15 +36,22 @@ export class ViewerHttpStream {
   setHandlers(handlers: ViewerHttpHandlers): void {
     if (this.closed) return;
     this.handlers = handlers;
-    this.resume();
+    if (this.flowControlled) this.grant(VIEWER_HTTP_WINDOW_BYTES);
+    else this.resume();
   }
 
   pause(): void {
+    if (this.flowControlled) return;
     this.control(ViewerHttpOpcode.Pause);
   }
 
   resume(): void {
+    if (this.flowControlled) return;
     this.control(ViewerHttpOpcode.Resume);
+  }
+
+  consumed(bytes: number): void {
+    if (this.flowControlled && !this.closed && bytes > 0) this.grant(bytes);
   }
 
   cancel(): void {
@@ -74,6 +84,16 @@ export class ViewerHttpStream {
   private control(opcode: ViewerHttpOpcode): void {
     if (this.closed) return;
     this.send(encodeViewerHttpFrame({ opcode, requestId: this.id }));
+  }
+
+  private grant(bytes: number): void {
+    this.send(
+      encodeViewerHttpFrame({
+        opcode: ViewerHttpOpcode.Credit,
+        requestId: this.id,
+        payload: viewerHttpCreditPayload(bytes),
+      }),
+    );
   }
 
   private finish(): void {

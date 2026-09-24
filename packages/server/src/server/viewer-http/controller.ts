@@ -2,12 +2,16 @@ import { request, type ClientRequest, type IncomingMessage } from "node:http";
 import {
   encodeViewerHttpFrame,
   ViewerHttpOpcode,
+  VIEWER_HTTP_WINDOW_BYTES,
   type ViewerHttpFrame,
+  viewerHttpCreditBytes,
 } from "@getpaseo/protocol/binary-frames/index";
 import type { OwnedOperation } from "../session/owned-subscriptions/index.js";
 import type { ServiceProxySubsystem } from "../service-proxy.js";
 
 const BODY_CHUNK_BYTES = 64 * 1024;
+const MAX_INFLIGHT_FRAMES_PER_REQUEST = 4;
+const MAX_INFLIGHT_FRAMES_PER_SOURCE = 16;
 const HEADER_TIMEOUT_MS = 30_000;
 const REQUEST_HEADERS = new Set([
   "accept",
@@ -45,11 +49,25 @@ interface ActiveRequest {
   request: ClientRequest;
   response: IncomingMessage | null;
   paused: boolean;
-  resume: (() => void) | null;
+  wake: (() => void) | null;
+  flowControlled: boolean;
+  creditBytes: number;
   started: boolean;
   finished: boolean;
   cancelled: boolean;
   onAbort: () => void;
+}
+
+interface PendingFrame {
+  entry: ActiveRequest;
+  frame: Uint8Array;
+  resolve: () => void;
+  reject: (error: Error) => void;
+}
+
+interface SourceQueue {
+  pending: PendingFrame[];
+  inflight: number;
 }
 
 export class ViewerHttpRequestCancelledError extends Error {
@@ -61,12 +79,14 @@ export class ViewerHttpRequestCancelledError extends Error {
 
 export class ViewerHttpController {
   private readonly requests = new Map<string, ActiveRequest>();
+  private readonly sourceQueues = new Map<object, SourceQueue>();
 
   constructor(private readonly serviceProxy: ServiceProxySubsystem | null) {}
 
   async open(
     input: ViewerRequest,
     owner: OwnedOperation,
+    flowControlled: boolean,
   ): Promise<{
     status: number;
     headers: Record<string, string>;
@@ -92,8 +112,12 @@ export class ViewerHttpController {
       owner,
       request: upstream,
       response: null,
-      paused: true,
-      resume: null,
+      // COMPAT(viewerHttpFlowControl): added after v0.9.5; remove the pause/resume path
+      // once supported clients all advertise viewer_http_flow_control.
+      paused: !flowControlled,
+      wake: null,
+      flowControlled,
+      creditBytes: 0,
       started: false,
       finished: false,
       cancelled: false,
@@ -151,12 +175,21 @@ export class ViewerHttpController {
     if (!entry || entry.owner.source !== source) return;
     if (frame.opcode === ViewerHttpOpcode.Reset) {
       this.abort(frame.requestId, entry);
-    } else if (frame.opcode === ViewerHttpOpcode.Pause) {
+    } else if (frame.opcode === ViewerHttpOpcode.Pause && !entry.flowControlled) {
       entry.paused = true;
-    } else if (frame.opcode === ViewerHttpOpcode.Resume) {
+    } else if (frame.opcode === ViewerHttpOpcode.Resume && !entry.flowControlled) {
       entry.paused = false;
-      entry.resume?.();
-      entry.resume = null;
+      entry.wake?.();
+      entry.wake = null;
+    } else if (frame.opcode === ViewerHttpOpcode.Credit && entry.flowControlled) {
+      const bytes = viewerHttpCreditBytes(frame.payload);
+      if (bytes < 1 || bytes > VIEWER_HTTP_WINDOW_BYTES) {
+        this.abort(frame.requestId, entry);
+        return;
+      }
+      entry.creditBytes = Math.min(VIEWER_HTTP_WINDOW_BYTES, entry.creditBytes + bytes);
+      entry.wake?.();
+      entry.wake = null;
     }
   }
 
@@ -172,46 +205,108 @@ export class ViewerHttpController {
   private async stream(requestId: string, entry: ActiveRequest): Promise<void> {
     const response = entry.response;
     if (!response) return;
+    const inflight: Promise<void>[] = [];
+    let sendError: Error | null = null;
+    const flush = async () => {
+      await Promise.all(inflight);
+      inflight.length = 0;
+      if (sendError) throw sendError;
+    };
     try {
       for await (const chunk of response) {
         const data = chunk as Buffer;
-        for (let offset = 0; offset < data.length; offset += BODY_CHUNK_BYTES) {
-          await this.waitUntilResumed(entry);
+        for (let offset = 0; offset < data.length; ) {
+          await this.waitUntilReady(entry, 1);
           if (entry.finished) return;
-          await entry.owner.emitBinary(
-            encodeViewerHttpFrame({
-              opcode: ViewerHttpOpcode.Data,
-              requestId,
-              payload: data.subarray(offset, offset + BODY_CHUNK_BYTES),
+          const length = Math.min(
+            BODY_CHUNK_BYTES,
+            data.length - offset,
+            entry.flowControlled ? entry.creditBytes : BODY_CHUNK_BYTES,
+          );
+          const piece = data.subarray(offset, offset + length);
+          offset += length;
+          if (entry.flowControlled) entry.creditBytes -= piece.byteLength;
+          inflight.push(
+            this.sendFrame(
+              entry,
+              encodeViewerHttpFrame({
+                opcode: ViewerHttpOpcode.Data,
+                requestId,
+                payload: piece,
+              }),
+            ).catch((error: unknown) => {
+              sendError = error instanceof Error ? error : new Error(String(error));
             }),
           );
+          if (inflight.length >= MAX_INFLIGHT_FRAMES_PER_REQUEST) await flush();
         }
       }
-      await this.waitUntilResumed(entry);
+      await flush();
+      await this.waitUntilReady(entry, 0);
       if (!entry.finished) {
-        await entry.owner.emitBinary(
+        await this.sendFrame(
+          entry,
           encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.End, requestId }),
         );
       }
     } catch {
       if (!entry.finished) {
-        await this.waitUntilResumed(entry);
+        await this.waitUntilReady(entry, 0);
       }
       if (!entry.finished) {
-        await entry.owner
-          .emitBinary(encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.Reset, requestId }))
-          .catch(() => undefined);
+        await this.sendFrame(
+          entry,
+          encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.Reset, requestId }),
+        ).catch(() => undefined);
       }
     } finally {
       this.finish(requestId, entry);
     }
   }
 
-  private async waitUntilResumed(entry: ActiveRequest): Promise<void> {
-    if (!entry.paused || entry.finished) return;
-    await new Promise<void>((resolve) => {
-      entry.resume = resolve;
+  private async waitUntilReady(entry: ActiveRequest, bytes: number): Promise<void> {
+    while (
+      !entry.finished &&
+      (entry.paused || (entry.flowControlled && entry.creditBytes < bytes))
+    ) {
+      await new Promise<void>((resolve) => {
+        entry.wake = resolve;
+      });
+    }
+  }
+
+  private sendFrame(entry: ActiveRequest, frame: Uint8Array): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const source = entry.owner.source;
+      let queue = this.sourceQueues.get(source);
+      if (!queue) {
+        queue = { pending: [], inflight: 0 };
+        this.sourceQueues.set(source, queue);
+      }
+      queue.pending.push({ entry, frame, resolve, reject });
+      this.drainFrames(source, queue);
     });
+  }
+
+  private drainFrames(source: object, queue: SourceQueue): void {
+    while (queue.inflight < MAX_INFLIGHT_FRAMES_PER_SOURCE && queue.pending.length > 0) {
+      const next = queue.pending.shift()!;
+      if (next.entry.finished) {
+        next.reject(new Error("Viewer HTTP stream closed"));
+        continue;
+      }
+      queue.inflight += 1;
+      void next.entry.owner
+        .emitBinary(next.frame)
+        .then(next.resolve, (error: unknown) =>
+          next.reject(error instanceof Error ? error : new Error(String(error))),
+        )
+        .finally(() => {
+          queue.inflight -= 1;
+          this.drainFrames(source, queue);
+        });
+    }
+    if (queue.inflight === 0 && queue.pending.length === 0) this.sourceQueues.delete(source);
   }
 
   private abort(requestId: string, entry: ActiveRequest): void {
@@ -227,8 +322,8 @@ export class ViewerHttpController {
     entry.finished = true;
     this.requests.delete(requestId);
     entry.owner.signal.removeEventListener("abort", entry.onAbort);
-    entry.resume?.();
-    entry.resume = null;
+    entry.wake?.();
+    entry.wake = null;
     void entry.owner.release();
   }
 }

@@ -540,6 +540,12 @@ remain stable while the desktop process lives, including across browser tab clos
 changes. An upstream HTTP status is preserved; a failure before response headers returns 502 or
 504, while a failure after headers ends only that browser resource.
 
+Each viewer response has a bounded byte-credit window tied to the local browser write drain. The
+daemon admits bounded frames from ready requests into a shared, bounded send pipeline; a video
+response cannot fill the relay socket ahead of unrelated assets. Browser `Range` and `If-Range` requests and the
+upstream `206`/`416` response headers retain their HTTP meaning. Keep the single viewer connection
+even when several requests are active; connection-pool expansion is not part of this contract.
+
 ### Viewer inheritance
 
 Resolve Experiment viewer configuration in this order:

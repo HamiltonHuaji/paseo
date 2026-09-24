@@ -48,6 +48,7 @@ export const CLIENT_CAPS = {
   agentConversationFork: "agent_conversation_fork",
   tunnelStreamV2: "tunnel_stream_v2",
   viewerHttpProxy: "viewer_http_proxy",
+  viewerHttpFlowControl: "viewer_http_flow_control",
   browserHost: "browser_host",
 } as const;
 

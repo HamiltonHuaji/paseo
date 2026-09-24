@@ -144,6 +144,7 @@ export const DEFAULT_CLIENT_CAPABILITIES = {
   [CLIENT_CAPS.agentConversationFork]: true,
   [CLIENT_CAPS.tunnelStreamV2]: true,
   [CLIENT_CAPS.viewerHttpProxy]: true,
+  [CLIENT_CAPS.viewerHttpFlowControl]: true,
 } satisfies Record<Exclude<ClientCapability, typeof CLIENT_CAPS.browserHost>, true>;
 
 /** Calling releases demand; ready waits for membership, or local attachment on broadcast hosts. */

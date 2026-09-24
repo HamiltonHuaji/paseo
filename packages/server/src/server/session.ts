@@ -3041,7 +3041,11 @@ export class Session {
       () => this.viewerHttpController.cancel(msg.requestId),
     );
     try {
-      const response = await this.viewerHttpController.open(msg, owner);
+      const response = await this.viewerHttpController.open(
+        msg,
+        owner,
+        this.supportsForSource(CLIENT_CAPS.viewerHttpFlowControl, source),
+      );
       this.emitForSource(
         {
           type: "viewer.http.fetch.response",
