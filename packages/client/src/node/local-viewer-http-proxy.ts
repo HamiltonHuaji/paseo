@@ -7,7 +7,9 @@ export interface LocalViewerHttpProxy {
   close(): Promise<void>;
 }
 
-type ViewerResponse = Awaited<ReturnType<DaemonClient["fetchViewerHttp"]>>;
+type ViewerResponse = Awaited<ReturnType<DaemonClient["fetchViewerHttp"]>> & {
+  onData?: (bytes: number) => void;
+};
 
 const REQUEST_HEADERS = [
   "accept",
@@ -17,7 +19,6 @@ const REQUEST_HEADERS = [
   "if-range",
   "range",
 ] as const;
-const REQUEST_IDLE_TIMEOUT_MS = 45_000;
 
 function errorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
@@ -72,11 +73,6 @@ export async function createLocalViewerHttpProxy(input: {
     let completed = false;
     let waitingForDrain = false;
     let pendingConsumedBytes = 0;
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const clearIdleTimer = () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = null;
-    };
     const reportError = (error: unknown) => {
       try {
         input.onRequestError?.(error);
@@ -84,35 +80,20 @@ export async function createLocalViewerHttpProxy(input: {
         // Diagnostic failures must not interrupt the local HTTP listener.
       }
     };
-    const armIdleTimer = () => {
-      clearIdleTimer();
-      idleTimer = setTimeout(() => {
-        if (completed || res.destroyed) return;
-        completed = true;
-        reportError(new Error(`Viewer HTTP request stalled: ${path}`));
-        cancellation.abort();
-        try {
-          stream?.cancel();
-        } catch {
-          stream?.abort();
-        }
-        sendProxyError(res, 504);
-      }, REQUEST_IDLE_TIMEOUT_MS);
-      idleTimer.unref();
-    };
-    const onClose = () => {
-      if (completed) return;
-      completed = true;
-      clearIdleTimer();
-      cancellation.abort();
+    const cancelStream = () => {
       try {
         stream?.cancel();
       } catch {
         stream?.abort();
       }
     };
+    const onClose = () => {
+      if (completed) return;
+      completed = true;
+      cancellation.abort();
+      cancelStream();
+    };
     res.once("close", onClose);
-    armIdleTimer();
     void (async () => {
       try {
         const upstream = await input.fetch({
@@ -124,6 +105,9 @@ export async function createLocalViewerHttpProxy(input: {
         stream = upstream.stream;
         if (cancellation.signal.aborted || res.destroyed) {
           onClose();
+          // The browser may have gone away while response headers were in flight.
+          // onClose already ran then, before this stream existed.
+          cancelStream();
           return;
         }
         const writeHeaders = () => {
@@ -132,10 +116,10 @@ export async function createLocalViewerHttpProxy(input: {
         stream.setHandlers({
           onData: (data) => {
             try {
+              upstream.onData?.(data.byteLength);
               writeHeaders();
               if (!res.write(Buffer.from(data)) || waitingForDrain) {
                 pendingConsumedBytes += data.byteLength;
-                clearIdleTimer();
                 if (!waitingForDrain) {
                   waitingForDrain = true;
                   stream?.pause();
@@ -145,7 +129,6 @@ export async function createLocalViewerHttpProxy(input: {
                     try {
                       stream?.consumed(pendingConsumedBytes);
                       pendingConsumedBytes = 0;
-                      armIdleTimer();
                       stream?.resume();
                     } catch (error) {
                       reportError(error);
@@ -156,7 +139,6 @@ export async function createLocalViewerHttpProxy(input: {
                 }
               } else {
                 stream?.consumed(data.byteLength);
-                armIdleTimer();
               }
             } catch (error) {
               reportError(error);
@@ -166,7 +148,6 @@ export async function createLocalViewerHttpProxy(input: {
           },
           onEnd: () => {
             completed = true;
-            clearIdleTimer();
             try {
               writeHeaders();
               res.end();
@@ -177,7 +158,6 @@ export async function createLocalViewerHttpProxy(input: {
           },
           onReset: () => {
             completed = true;
-            clearIdleTimer();
             reportError(new Error(`Viewer HTTP stream reset: ${path}`));
             sendProxyError(res, 502);
           },
@@ -185,7 +165,6 @@ export async function createLocalViewerHttpProxy(input: {
       } catch (error) {
         if (cancellation.signal.aborted || res.destroyed) return;
         completed = true;
-        clearIdleTimer();
         reportError(error);
         sendProxyError(res, errorStatus(error));
       }

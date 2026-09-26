@@ -532,19 +532,21 @@ five idle minutes; an expired cursor returns HTTP 410 with `{"error":"cursor_exp
 filesystem paths.
 
 A direct client opens the path on the daemon viewer HTTP origin. A relay-connected desktop client
-opens one loopback HTTP proxy per Host, backed by one dedicated daemon connection for viewer
-traffic. GET and HEAD requests share that connection as independent streams; viewer bytes do not
-ride on the control connection, and the viewer does not pre-open generic TCP tunnels. The system
-browser uses an ordinary `http://127.0.0.1:<port>/view/...` URL. The loopback listener and URL
-remain stable while the desktop process lives, including across browser tab closes and route
-changes. An upstream HTTP status is preserved; a failure before response headers returns 502 or
-504, while a failure after headers ends only that browser resource.
+opens one loopback HTTP proxy per Host, initially backed by one dedicated daemon connection for
+viewer traffic. Every GET or HEAD resource is an independent logical stream. Reuse a connection
+when its active responses have only a short tail left; otherwise the pool may add another physical
+connection. Select by outstanding work, not elapsed time. Close idle extra connections. Within
+each physical connection, send bounded frames fairly across ready resources, with per-resource
+credit tied to local browser write drain. A video response must not monopolize a relay connection.
+Pool expansion is relay-only and must not create a physical connection for every browser resource.
 
-Each viewer response has a bounded byte-credit window tied to the local browser write drain. The
-daemon admits bounded frames from ready requests into a shared, bounded send pipeline; a video
-response cannot fill the relay socket ahead of unrelated assets. Browser `Range` and `If-Range` requests and the
-upstream `206`/`416` response headers retain their HTTP meaning. Keep the single viewer connection
-even when several requests are active; connection-pool expansion is not part of this contract.
+Viewer bytes do not ride on the control connection, and the viewer does not pre-open generic TCP
+tunnels. The system browser uses an ordinary `http://127.0.0.1:<port>/view/...` URL. The loopback
+listener and URL remain stable while the desktop process lives, including across browser tab
+closes and route changes. Preserve upstream HTTP status, `Range` and `If-Range` requests, and
+`206`/`416` response headers. A failure before response headers returns 502 or 504; after headers,
+end only that browser resource. Relay transit has no per-resource deadline: browser cancellation
+resets its resource stream, and a disconnected transport cancels outstanding streams.
 
 ### Viewer inheritance
 

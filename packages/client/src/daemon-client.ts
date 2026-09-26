@@ -1162,6 +1162,7 @@ interface PendingSend {
   resolve: () => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
 }
 
 interface PingProbe {
@@ -1357,39 +1358,30 @@ export class DaemonClient {
     }
     if (input.signal?.aborted) throw new Error("Viewer request cancelled");
     const requestId = this.createRequestId();
-    let rejectAbort: ((error: Error) => void) | null = null;
-    const abortPromise = new Promise<never>((_resolve, reject) => {
-      rejectAbort = reject;
-    });
     const onAbort = () => {
       try {
         this.sendBinaryFrame(encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.Reset, requestId }));
       } catch {
         // A disconnected transport has already ended the upstream request.
       }
-      rejectAbort?.(new Error("Viewer request cancelled"));
     };
     input.signal?.addEventListener("abort", onAbort, { once: true });
-    const pending = this.sendNamespacedCorrelatedSessionRequest<"viewer.http.fetch.response">({
-      requestId,
-      // The daemon allows 30 seconds for response headers; leave room for relay transit.
-      timeout: 40_000,
-      message: {
-        type: "viewer.http.fetch.request",
-        method: input.method,
-        path: input.path,
-        headers: input.headers,
-      },
-    });
-    void pending.then(
-      () => {
-        if (input.signal?.aborted) onAbort();
-        return undefined;
-      },
-      () => undefined,
-    );
+    if (input.signal?.aborted) onAbort();
     try {
-      const payload = await Promise.race([pending, abortPromise]);
+      const payload =
+        await this.sendNamespacedCorrelatedSessionRequest<"viewer.http.fetch.response">({
+          requestId,
+          // Relay transit does not define a resource deadline. Browser abort or
+          // transport closure cancels the waiter instead.
+          timeout: 0,
+          signal: input.signal,
+          message: {
+            type: "viewer.http.fetch.request",
+            method: input.method,
+            path: input.path,
+            headers: input.headers,
+          },
+        });
       if (input.signal?.aborted) throw new Error("Viewer request cancelled");
       const stream = new ViewerHttpStream(
         requestId,
@@ -1877,7 +1869,11 @@ export class DaemonClient {
    * is queued and will be sent once connected (or rejected after timeout).
    * This prevents waiters from hanging forever when called during connection.
    */
-  private sendSessionMessageOrThrow(message: SessionInboundMessage): Promise<void> {
+  private sendSessionMessageOrThrow(
+    message: SessionInboundMessage,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (signal?.aborted) return Promise.reject(new Error("Request cancelled"));
     const status = this.connectionState.status;
 
     // If connected, send immediately
@@ -1890,13 +1886,30 @@ export class DaemonClient {
     // If connecting, queue the message to be sent once connected
     if (status === "connecting") {
       return new Promise((resolve, reject) => {
+        let settled = false;
+        let pending: PendingSend;
+        const resolveQueued = () => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        };
+        const rejectQueued = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+          reject(error);
+        };
+        const onAbort = () => {
+          clearTimeout(timeoutHandle);
+          const index = this.pendingSendQueue.indexOf(pending);
+          if (index >= 0) this.pendingSendQueue.splice(index, 1);
+          rejectQueued(new Error("Request cancelled"));
+        };
         const timeoutHandle = setTimeout(() => {
-          // Remove from queue
-          const idx = this.pendingSendQueue.findIndex((p) => p.resolve === resolve);
-          if (idx !== -1) {
-            this.pendingSendQueue.splice(idx, 1);
-          }
-          reject(
+          const index = this.pendingSendQueue.indexOf(pending);
+          if (index >= 0) this.pendingSendQueue.splice(index, 1);
+          rejectQueued(
             new DaemonConnectionError(
               "Timed out waiting for connection to send message",
               "DAEMON_REQUEST_TIMEOUT",
@@ -1904,7 +1917,10 @@ export class DaemonClient {
           );
         }, DEFAULT_SEND_QUEUE_TIMEOUT_MS);
 
-        this.pendingSendQueue.push({ message, resolve, reject, timeoutHandle });
+        pending = { message, resolve: resolveQueued, reject: rejectQueued, timeoutHandle, signal };
+        this.pendingSendQueue.push(pending);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
       });
     }
 
@@ -1922,6 +1938,10 @@ export class DaemonClient {
     for (const pending of queue) {
       clearTimeout(pending.timeoutHandle);
       try {
+        if (pending.signal?.aborted) {
+          pending.reject(new Error("Request cancelled"));
+          continue;
+        }
         if (this.transport && this.connectionState.status === "connected") {
           const payload = SessionInboundMessageSchema.parse(pending.message);
           this.sendJsonMessage("session", payload.type, { type: "session", message: payload });
@@ -1952,6 +1972,7 @@ export class DaemonClient {
     requestId: string;
     message: SessionInboundMessage;
     timeout?: number;
+    signal?: AbortSignal;
     select: (msg: SessionOutboundMessage) => T | null;
     options?: { skipQueue?: boolean };
   }): Promise<T> {
@@ -1979,13 +2000,17 @@ export class DaemonClient {
       timeout,
       { ...params.options, requestId: params.requestId },
     );
+    const onAbort = () => cancel(new Error("Request cancelled"));
+    params.signal?.addEventListener("abort", onAbort, { once: true });
+    if (params.signal?.aborted) onAbort();
 
     try {
-      await this.sendSessionMessageOrThrow(wire.message);
+      await this.sendSessionMessageOrThrow(wire.message, params.signal);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       cancel(err);
       void promise.catch(() => undefined);
+      params.signal?.removeEventListener("abort", onAbort);
       throw err;
     }
 
@@ -1994,6 +2019,7 @@ export class DaemonClient {
       if (result.kind === "error") throw result.error;
       return result.value;
     } finally {
+      params.signal?.removeEventListener("abort", onAbort);
       await wire.finish();
     }
   }
@@ -2005,6 +2031,7 @@ export class DaemonClient {
     requestId: string;
     message: SessionInboundMessage;
     timeout?: number;
+    signal?: AbortSignal;
     responseType: TResponseType;
     options?: { skipQueue?: boolean };
     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
@@ -2013,6 +2040,7 @@ export class DaemonClient {
       requestId: params.requestId,
       message: params.message,
       timeout: params.timeout,
+      signal: params.signal,
       options: params.options,
       select: (msg) => {
         const correlated = msg as CorrelatedResponseMessage;
@@ -2039,6 +2067,7 @@ export class DaemonClient {
     message: { type: SessionInboundMessage["type"] } & Record<string, unknown>;
     responseType: TResponseType;
     timeout?: number;
+    signal?: AbortSignal;
     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
   }): Promise<TResult> {
     const resolvedRequestId = this.createRequestId(params.requestId);
@@ -2051,6 +2080,7 @@ export class DaemonClient {
       message,
       responseType: params.responseType,
       timeout: params.timeout,
+      signal: params.signal,
       options: { skipQueue: true },
       ...(params.selectPayload ? { selectPayload: params.selectPayload } : {}),
     });
@@ -2066,6 +2096,7 @@ export class DaemonClient {
       unknown
     >;
     timeout?: number;
+    signal?: AbortSignal;
     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
   }): Promise<TResult> {
     const responseType = params.message.type.replace(/\.request$/, ".response") as TResponseType;

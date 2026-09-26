@@ -2,6 +2,7 @@ import { request, type ClientRequest, type IncomingMessage } from "node:http";
 import {
   encodeViewerHttpFrame,
   ViewerHttpOpcode,
+  VIEWER_HTTP_DATA_FRAME_BYTES,
   VIEWER_HTTP_WINDOW_BYTES,
   type ViewerHttpFrame,
   viewerHttpCreditBytes,
@@ -9,9 +10,11 @@ import {
 import type { OwnedOperation } from "../session/owned-subscriptions/index.js";
 import type { ServiceProxySubsystem } from "../service-proxy.js";
 
-const BODY_CHUNK_BYTES = 64 * 1024;
 const MAX_INFLIGHT_FRAMES_PER_REQUEST = 4;
-const MAX_INFLIGHT_FRAMES_PER_SOURCE = 16;
+// Keep a small send pipeline across the physical socket so WebSocket send
+// callbacks do not serialize every frame. Admission still rotates ready
+// resources and bounds how far a large response can get ahead of a new one.
+const MAX_INFLIGHT_FRAMES_PER_SOURCE = 4;
 const HEADER_TIMEOUT_MS = 30_000;
 const REQUEST_HEADERS = new Set([
   "accept",
@@ -66,7 +69,9 @@ interface PendingFrame {
 }
 
 interface SourceQueue {
-  pending: PendingFrame[];
+  pendingByRequest: Map<ActiveRequest, PendingFrame[]>;
+  readyRequests: ActiveRequest[];
+  lastSent: ActiveRequest | null;
   inflight: number;
 }
 
@@ -219,9 +224,9 @@ export class ViewerHttpController {
           await this.waitUntilReady(entry, 1);
           if (entry.finished) return;
           const length = Math.min(
-            BODY_CHUNK_BYTES,
+            VIEWER_HTTP_DATA_FRAME_BYTES,
             data.length - offset,
-            entry.flowControlled ? entry.creditBytes : BODY_CHUNK_BYTES,
+            entry.flowControlled ? entry.creditBytes : VIEWER_HTTP_DATA_FRAME_BYTES,
           );
           const piece = data.subarray(offset, offset + length);
           offset += length;
@@ -280,22 +285,41 @@ export class ViewerHttpController {
       const source = entry.owner.source;
       let queue = this.sourceQueues.get(source);
       if (!queue) {
-        queue = { pending: [], inflight: 0 };
+        queue = {
+          pendingByRequest: new Map(),
+          readyRequests: [],
+          lastSent: null,
+          inflight: 0,
+        };
         this.sourceQueues.set(source, queue);
       }
-      queue.pending.push({ entry, frame, resolve, reject });
+      let pending = queue.pendingByRequest.get(entry);
+      if (!pending) {
+        pending = [];
+        queue.pendingByRequest.set(entry, pending);
+        queue.readyRequests.push(entry);
+      }
+      pending.push({ entry, frame, resolve, reject });
       this.drainFrames(source, queue);
     });
   }
 
   private drainFrames(source: object, queue: SourceQueue): void {
-    while (queue.inflight < MAX_INFLIGHT_FRAMES_PER_SOURCE && queue.pending.length > 0) {
-      const next = queue.pending.shift()!;
+    while (queue.inflight < MAX_INFLIGHT_FRAMES_PER_SOURCE && queue.readyRequests.length > 0) {
+      if (queue.readyRequests.length > 1 && queue.readyRequests[0] === queue.lastSent) {
+        queue.readyRequests.push(queue.readyRequests.shift()!);
+      }
+      const activeRequest = queue.readyRequests.shift()!;
+      const pending = queue.pendingByRequest.get(activeRequest)!;
+      const next = pending.shift()!;
+      if (pending.length > 0) queue.readyRequests.push(activeRequest);
+      else queue.pendingByRequest.delete(activeRequest);
       if (next.entry.finished) {
         next.reject(new Error("Viewer HTTP stream closed"));
         continue;
       }
       queue.inflight += 1;
+      queue.lastSent = activeRequest;
       void next.entry.owner
         .emitBinary(next.frame)
         .then(next.resolve, (error: unknown) =>
@@ -306,7 +330,9 @@ export class ViewerHttpController {
           this.drainFrames(source, queue);
         });
     }
-    if (queue.inflight === 0 && queue.pending.length === 0) this.sourceQueues.delete(source);
+    if (queue.inflight === 0 && queue.readyRequests.length === 0) {
+      this.sourceQueues.delete(source);
+    }
   }
 
   private abort(requestId: string, entry: ActiveRequest): void {
@@ -321,6 +347,17 @@ export class ViewerHttpController {
     if (entry.finished) return;
     entry.finished = true;
     this.requests.delete(requestId);
+    const queue = this.sourceQueues.get(entry.owner.source);
+    const pending = queue?.pendingByRequest.get(entry);
+    if (queue && pending) {
+      queue.pendingByRequest.delete(entry);
+      const readyIndex = queue.readyRequests.indexOf(entry);
+      if (readyIndex >= 0) queue.readyRequests.splice(readyIndex, 1);
+      for (const frame of pending) frame.reject(new Error("Viewer HTTP stream closed"));
+      if (queue.inflight === 0 && queue.readyRequests.length === 0) {
+        this.sourceQueues.delete(entry.owner.source);
+      }
+    }
     entry.owner.signal.removeEventListener("abort", entry.onAbort);
     entry.wake?.();
     entry.wake = null;

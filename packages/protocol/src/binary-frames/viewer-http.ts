@@ -17,7 +17,8 @@ export interface ViewerHttpFrame {
   payload: Uint8Array;
 }
 
-export const VIEWER_HTTP_WINDOW_BYTES = 256 * 1024;
+export const VIEWER_HTTP_WINDOW_BYTES = 1024 * 1024;
+export const VIEWER_HTTP_DATA_FRAME_BYTES = 64 * 1024;
 
 export function viewerHttpCreditPayload(bytes: number): Uint8Array {
   if (!Number.isInteger(bytes) || bytes < 1 || bytes > VIEWER_HTTP_WINDOW_BYTES) {
