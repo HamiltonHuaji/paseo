@@ -96,6 +96,7 @@ import {
   type WorkspaceLabelService,
 } from "./workspace-labels/index.js";
 import type { ExperimentService } from "./experiments/service.js";
+import type { SkillRepositoryService } from "./skill-repositories/service.js";
 
 import { AgentManager, AgentRunCancellationError } from "./agent/agent-manager.js";
 import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
@@ -463,6 +464,7 @@ export interface SessionOptions {
   directorySync?: DirectorySyncService;
   workspaceLabelService?: WorkspaceLabelService;
   experimentService: ExperimentService;
+  skillRepositoryService?: SkillRepositoryService;
   filesystem?: SessionFileSystem;
   scheduleService: ScheduleService;
   checkoutDiffManager: CheckoutDiffManager;
@@ -790,6 +792,7 @@ export class Session {
   private readonly workspaceScripts: WorkspaceScriptsService;
   private readonly messageReceipts: Pick<MessageReceipts, "send">;
   private readonly experimentService: ExperimentService;
+  private readonly skillRepositoryService?: SkillRepositoryService;
   private readonly tunnelController: TunnelController;
   private readonly viewerHttpController: ViewerHttpController;
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
@@ -894,6 +897,7 @@ export class Session {
     this.projectRegistry = projectRegistry;
     this.workspaceRegistry = workspaceRegistry;
     this.experimentService = experimentService;
+    this.skillRepositoryService = options.skillRepositoryService;
     this.directorySync = resolveDirectorySync(directorySync);
     this.workspaceLabelService = resolveWorkspaceLabelService(workspaceLabelService);
     this.filesystem = filesystem ?? nodeSessionFileSystem;
@@ -2259,6 +2263,40 @@ export class Session {
     msg: SessionInboundMessage,
     source?: object,
   ): Promise<void> | undefined {
+    if (msg.type === "skills.repository.executor.register.request") {
+      if (!this.skillRepositoryService || !source) {
+        throw new Error("Skill repository executor is unavailable");
+      }
+      let unregister: (() => void) | undefined;
+      const owner = this.delivery.begin("skill-repository-executor", undefined, () =>
+        unregister?.(),
+      );
+      unregister = this.skillRepositoryService.registerExecutor(
+        source,
+        msg.repositories,
+        (request) => owner.emit(request),
+      );
+      this.emit({
+        type: "skills.repository.executor.register.response",
+        payload: { requestId: msg.requestId, subscriptionId: owner.responseId },
+      });
+      return Promise.resolve();
+    }
+    if (msg.type === "skills.repository.executor.job.response") {
+      if (source) this.skillRepositoryService?.receiveJobResponse(source, msg);
+      return Promise.resolve();
+    }
+    if (msg.type === "skills.repository.executor.refresh.request") {
+      if (source) this.skillRepositoryService?.refreshExecutor(source);
+      this.emitForSource(
+        {
+          type: "skills.repository.executor.refresh.response",
+          payload: { requestId: msg.requestId },
+        },
+        source,
+      );
+      return Promise.resolve();
+    }
     if (msg.type === "browser.host.register.request") return this.registerBrowserHost(msg);
     if (msg.type === "browser.automation.execute.response") {
       if (source)
@@ -2297,7 +2335,7 @@ export class Session {
       this.dispatchAgentTimelineMessage(msg, source) ??
       this.dispatchHubExecutionMessage(msg) ??
       this.dispatchCreationMessage(msg, source) ??
-      this.dispatchAgentLifecycleMessage(msg) ??
+      this.dispatchAgentLifecycleMessage(msg, source) ??
       this.dispatchAgentConfigMessage(msg) ??
       this.dispatchCheckoutMessage(msg) ??
       this.dispatchWorkspaceLifecycleMessage(msg) ??
@@ -2305,6 +2343,7 @@ export class Session {
       this.dispatchWorkspaceFileMessage(msg, source) ??
       this.dispatchProviderMessage(msg) ??
       this.dispatchOrchestrationSkillsMessage(msg) ??
+      this.dispatchSkillRepositoryMessage(msg, source) ??
       this.dispatchPluginDirectoryMessage(msg) ??
       this.dispatchPluginMessage(msg) ??
       this.dispatchTerminalMessage(msg) ??
@@ -2380,6 +2419,81 @@ export class Session {
       default:
         return undefined;
     }
+  }
+
+  private dispatchSkillRepositoryMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
+    if (!this.skillRepositoryService) return undefined;
+    if (msg.type === "skills.repository.list.request") {
+      this.emitForSource(
+        {
+          type: "skills.repository.list.response",
+          payload: {
+            requestId: msg.requestId,
+            subscriptions: this.skillRepositoryService.list(),
+          },
+        },
+        source,
+      );
+      return Promise.resolve();
+    }
+    if (msg.type === "skills.repository.upsert.request") {
+      return this.skillRepositoryService
+        .upsert(msg.subscription)
+        .then((subscription) => {
+          this.emitForSource(
+            {
+              type: "skills.repository.upsert.response",
+              payload: { requestId: msg.requestId, subscription },
+            },
+            source,
+          );
+          return undefined;
+        })
+        .catch((error) => {
+          this.emitForSource(
+            {
+              type: "skills.repository.upsert.response",
+              payload: {
+                requestId: msg.requestId,
+                subscription: msg.subscription,
+                error: error instanceof Error ? error.message : String(error),
+              },
+            },
+            source,
+          );
+        });
+    }
+    if (msg.type === "skills.repository.remove.request") {
+      return this.skillRepositoryService
+        .remove(msg.repositoryId)
+        .then(() => {
+          this.emitForSource(
+            {
+              type: "skills.repository.remove.response",
+              payload: { requestId: msg.requestId, repositoryId: msg.repositoryId },
+            },
+            source,
+          );
+          return undefined;
+        })
+        .catch((error) => {
+          this.emitForSource(
+            {
+              type: "skills.repository.remove.response",
+              payload: {
+                requestId: msg.requestId,
+                repositoryId: msg.repositoryId,
+                error: error instanceof Error ? error.message : String(error),
+              },
+            },
+            source,
+          );
+        });
+    }
+    return undefined;
   }
 
   private dispatchPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
@@ -2716,7 +2830,10 @@ export class Session {
     }
   }
 
-  private dispatchAgentLifecycleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchAgentLifecycleMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     switch (msg.type) {
       case "fetch_agents_request":
         return this.handleFetchAgents(msg);
@@ -2739,11 +2856,11 @@ export class Session {
       case "project.icon.set.request":
         return this.handleProjectIconSetRequest(msg);
       case "send_agent_message_request":
-        return this.handleSendAgentMessageRequest(msg);
+        return this.handleSendAgentMessageRequest(msg, source);
       case "wait_for_finish_request":
         return this.handleWaitForFinish(msg.agentId, msg.requestId, msg.timeoutMs);
       case "create_agent_request":
-        return this.handleCreateAgentRequest(msg);
+        return this.handleCreateAgentRequest(msg, source);
       case "resume_agent_request":
         return this.handleResumeAgentRequest(msg);
       case "import_agent_request":
@@ -4260,6 +4377,7 @@ export class Session {
   private createRequestedAgent(
     request: AgentCreateRequest,
     observer?: (snapshot: CreationSnapshot) => void,
+    source?: object,
   ): Promise<CreationSnapshot> {
     const { requestId, type: _type, subscribe: _subscribe, idempotencyKey, ...intent } = request;
     return this.creationService.create(
@@ -4282,6 +4400,7 @@ export class Session {
               { ...request, type: "create_agent_request" },
               id,
               onReady,
+              source,
             );
           } catch (error) {
             throw new WorktreeRequestError(toWorktreeWireError(error));
@@ -4305,6 +4424,7 @@ export class Session {
       const creation = await this.createRequestedAgent(
         request,
         progress ? (snapshot) => progress.emit(this.creationUpdate(snapshot)) : undefined,
+        source,
       );
       this.emitForSource(
         {
@@ -4407,6 +4527,7 @@ export class Session {
                   },
                   id,
                   onReady,
+                  source,
                 );
               }
             : undefined,
@@ -4451,14 +4572,21 @@ export class Session {
     }
   }
 
-  private async handleCreateAgentRequest(msg: CreateAgentRequestMessage): Promise<void> {
+  private async handleCreateAgentRequest(
+    msg: CreateAgentRequestMessage,
+    source?: object,
+  ): Promise<void> {
     try {
       let agent: AgentSnapshotPayload;
       if (msg.idempotencyKey !== undefined) {
         if (msg.initialPrompt !== undefined) {
           throw new Error("Idempotent creation requires sending the initial prompt separately");
         }
-        const creation = await this.createRequestedAgent({ ...msg, type: "agent.create.request" });
+        const creation = await this.createRequestedAgent(
+          { ...msg, type: "agent.create.request" },
+          undefined,
+          source,
+        );
         if (creation.error || !creation.agent)
           throw new SessionRequestError(
             creation.errorCode ?? "unknown",
@@ -4468,7 +4596,7 @@ export class Session {
         if (!record) throw new Error("Previously created agent no longer exists");
         agent = this.buildStoredAgentPayload(record);
       } else {
-        agent = await this.createSessionAgent(msg);
+        agent = await this.createSessionAgent(msg, undefined, undefined, source);
       }
       this.emit({
         type: "status",
@@ -4507,6 +4635,7 @@ export class Session {
     msg: CreateAgentRequestMessage,
     agentId?: string,
     onAgentReady?: (agent: AgentSnapshotPayload) => Promise<void>,
+    source?: object,
   ): Promise<AgentSnapshotPayload> {
     const {
       config,
@@ -4580,6 +4709,9 @@ export class Session {
           kind: "session",
           onAgentReady: async (agent) => {
             createdAgentId = agent.id;
+            if (initialPrompt?.trim()) {
+              this.skillRepositoryService?.setTurnOrigin(agent.id, source ?? null);
+            }
             await onAgentReady?.(await this.buildAgentPayload(agent));
           },
           agentId,
@@ -8369,6 +8501,7 @@ export class Session {
 
   private async handleSendAgentMessageRequest(
     msg: Extract<SessionInboundMessage, { type: "send_agent_message_request" }>,
+    source?: object,
   ): Promise<void> {
     const resolved = await this.resolveAgentIdentifier(msg.agentId);
     if (!resolved.ok) {
@@ -8409,6 +8542,11 @@ export class Session {
           logger: this.sessionLogger,
         });
         if (result.disposition === "turn_started") {
+          this.skillRepositoryService?.setTurnOrigin(
+            agentId,
+            source ?? null,
+            this.agentManager.getAgent(agentId)?.activeForegroundTurnId ?? undefined,
+          );
           await waitForAgentRunStartWithTimeout(
             this.agentManager,
             agentId,

@@ -283,6 +283,8 @@ bundled copy 的路径。
 
 验收条件：daemon 的自动维护不会改变手动编辑的字节内容和目录位置。
 
+跨 daemon 的 Git skill 素材库扩展需求见 [Skill 仓库同步需求](skill-repository-sync.md)。
+
 相关提交： 73.
 
 ### VS Code 客户端

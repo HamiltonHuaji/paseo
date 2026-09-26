@@ -1965,6 +1965,7 @@ export const ar: TranslationResources = {
       permissions: "الأذونات",
       diagnostics: "التشخيص",
       about: "عن",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

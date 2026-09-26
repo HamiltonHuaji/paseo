@@ -53,6 +53,7 @@ import { createExternalUrlOpener } from "./features/opener.js";
 import { createBrowserCaptureService } from "./features/browser-capture.js";
 import { closeAllTunnelForwarders, registerTunnelHandlers } from "./features/tunnels/ipc.js";
 import { registerEditorTargetHandlers } from "./features/editor-targets/ipc.js";
+import { registerSkillRepositoryIpc } from "./features/skill-repositories/ipc.js";
 import { resolveAppIconPath } from "./features/stamped-icon.js";
 import { setupApplicationMenu } from "./features/menu.js";
 import {
@@ -970,6 +971,7 @@ async function bootstrap(): Promise<void> {
   ipcMain.handle("paseo:opener:openUrl", (_event, value: unknown) => openExternalUrl(value));
   registerTunnelHandlers();
   registerEditorTargetHandlers();
+  registerSkillRepositoryIpc();
   registerBrowserAutomationIpc();
 
   // In-app "Open in new window": opens a window that lands on the given project

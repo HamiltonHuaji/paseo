@@ -17,6 +17,20 @@ export {
 import { TerminalProfileSchema } from "./terminal-profile.js";
 export { TerminalProfileSchema, type TerminalProfile } from "./terminal-profile.js";
 import { z } from "zod";
+import {
+  SkillRepositoryUpsertRequestSchema,
+  SkillRepositoryUpsertResponseSchema,
+  SkillRepositoryListRequestSchema,
+  SkillRepositoryListResponseSchema,
+  SkillRepositoryRemoveRequestSchema,
+  SkillRepositoryRemoveResponseSchema,
+  SkillRepositoryExecutorRegisterRequestSchema,
+  SkillRepositoryExecutorRegisterResponseSchema,
+  SkillRepositoryExecutorRefreshRequestSchema,
+  SkillRepositoryExecutorRefreshResponseSchema,
+  SkillRepositoryExecutorJobRequestSchema,
+  SkillRepositoryExecutorJobResponseSchema,
+} from "./skill-repositories.js";
 import { TerminalActivitySchema } from "./terminal-activity.js";
 import { CLIENT_CAPS } from "./client-capabilities.js";
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
@@ -3199,6 +3213,12 @@ export const SubscriptionReleaseResponseSchema = z.object({
 });
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+  SkillRepositoryUpsertRequestSchema,
+  SkillRepositoryListRequestSchema,
+  SkillRepositoryRemoveRequestSchema,
+  SkillRepositoryExecutorRegisterRequestSchema,
+  SkillRepositoryExecutorRefreshRequestSchema,
+  SkillRepositoryExecutorJobResponseSchema,
   BrowserHostRegisterRequestSchema,
   SubscriptionReleaseRequestSchema,
   SessionEventsSetSubscriptionRequestSchema,
@@ -3754,6 +3774,7 @@ export const ServerInfoStatusPayloadSchema = z
         selectiveAgentTimeline: z.boolean().optional(),
         explicitEventSubscriptions: z.boolean().optional(),
         ownedSubscriptions: z.boolean().optional(),
+        skillRepositories: z.boolean().optional(),
         experimentViewerTransport: z.boolean().optional(),
         viewerHttpProxy: z.boolean().optional(),
         viewerHttpFlowControl: z.boolean().optional(),
@@ -6819,6 +6840,12 @@ export const AgentSkillsImportLegacySelectionResponseSchema = z.object({
 });
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+  SkillRepositoryUpsertResponseSchema,
+  SkillRepositoryListResponseSchema,
+  SkillRepositoryRemoveResponseSchema,
+  SkillRepositoryExecutorRegisterResponseSchema,
+  SkillRepositoryExecutorRefreshResponseSchema,
+  SkillRepositoryExecutorJobRequestSchema,
   BrowserHostRegisterResponseSchema,
   SubscriptionReleaseResponseSchema,
   SessionEventsSetSubscriptionResponseSchema,

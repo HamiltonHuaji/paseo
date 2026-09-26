@@ -1992,6 +1992,7 @@ export const en = {
       permissions: "Permissions",
       diagnostics: "Diagnostics",
       about: "About",
+      skillRepositories: "Skill repositories",
     },
     layout: {
       openInSidePane: {

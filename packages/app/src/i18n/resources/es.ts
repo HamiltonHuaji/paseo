@@ -2014,6 +2014,7 @@ export const es: TranslationResources = {
       permissions: "Permisos",
       diagnostics: "Diagnóstico",
       about: "Acerca de",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

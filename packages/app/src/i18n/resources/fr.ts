@@ -2019,6 +2019,7 @@ export const fr: TranslationResources = {
       permissions: "Autorisations",
       diagnostics: "Diagnostic",
       about: "À propos",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

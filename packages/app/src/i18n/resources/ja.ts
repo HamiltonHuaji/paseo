@@ -1986,6 +1986,7 @@ export const ja: TranslationResources = {
       permissions: "権限",
       diagnostics: "診断",
       about: "アプリ情報",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

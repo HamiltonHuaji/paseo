@@ -628,7 +628,9 @@ function RestartDaemonCard({ host }: { host: HostProfile }) {
           {
             restartServer: (reason) => daemonClient.restartServer(reason),
             getStatus: async () => ({
-              ...(await daemonClient.getDaemonStatus({ timeout: 1500 })),
+              ...(await daemonClient.getDaemonStatus({
+                timeout: DAEMON_LIFECYCLE_STATUS_TIMEOUT_MS,
+              })),
               serverId: daemonClient.getLastServerInfoMessage()?.serverId ?? "",
               version: daemonClient.getLastServerInfoMessage()?.version ?? null,
             }),
@@ -676,6 +678,8 @@ type DaemonUpdateState =
   | { status: "updating"; phase: string; output: string }
   | { status: "failed"; title: string; message: string; output?: string };
 
+// Status collection includes provider availability and can take more than a relay round trip.
+const DAEMON_LIFECYCLE_STATUS_TIMEOUT_MS = 10_000;
 const MAX_DAEMON_UPDATE_OUTPUT_CHARS = 8192;
 const MAX_DAEMON_UPDATE_OUTPUT_LINES = 8;
 
@@ -798,6 +802,15 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     })
       .then((confirmed) => {
         if (!confirmed || !isMountedRef.current) return;
+        const liveServerInfo = daemonClient.getLastServerInfoMessage();
+        if (liveServerInfo?.serverId === host.serverId) {
+          useSessionStore.getState().updateSessionServerInfo(host.serverId, liveServerInfo);
+          const liveVersion = liveServerInfo.distribution?.version ?? liveServerInfo.version;
+          if (!isVersionOlder(liveVersion, appVersion)) {
+            setUpdateState({ status: "idle" });
+            return;
+          }
+        }
         setUpdateState({
           status: "updating",
           phase: t("settings.host.daemon.update.phaseStarting"),
@@ -823,7 +836,9 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
         void updateDaemonFromSettings(host.serverId, {
           updateDaemon: () => daemonClient.updateDaemon(requestId),
           getStatus: async () => {
-            const status = await daemonClient.getDaemonStatus({ timeout: 1500 });
+            const status = await daemonClient.getDaemonStatus({
+              timeout: DAEMON_LIFECYCLE_STATUS_TIMEOUT_MS,
+            });
             const latestServerInfo = daemonClient.getLastServerInfoMessage();
             return {
               ...status,
@@ -869,7 +884,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
           message: t("settings.host.daemon.update.dialogFailedMessage"),
         });
       });
-  }, [daemonClient, host.label, host.serverId, isHostConnected, t]);
+  }, [appVersion, daemonClient, host.label, host.serverId, isHostConnected, t]);
 
   const shouldShowUpdate = hasDaemonUpdate && (supportsSelfUpdate || desktopManaged);
   if (!shouldShowUpdate && updateState.status !== "complete") {

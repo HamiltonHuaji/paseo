@@ -42,7 +42,14 @@ export async function updateDaemonFromSettings(
     }>;
   },
 ): Promise<{ workerVersion: string }> {
-  const previous = await readSelectedWorker(hostServerId, deps);
+  let previous: WorkerStatus;
+  try {
+    previous = await readSelectedWorker(hostServerId, deps);
+  } catch (error) {
+    throw new Error(`Daemon status check failed before installation started. ${String(error)}`, {
+      cause: error,
+    });
+  }
   let installed: Awaited<ReturnType<typeof deps.updateDaemon>>;
   try {
     installed = await deps.updateDaemon();

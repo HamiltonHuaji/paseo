@@ -225,6 +225,7 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
 }
 
 import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
+import { SkillRepositoryService } from "./skill-repositories/service.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
 import { ExperimentService } from "./experiments/service.js";
@@ -1087,6 +1088,7 @@ export async function createPaseoDaemon(
     workspaceRegistry,
   });
   experimentService = new ExperimentService(projectRegistry);
+  const skillRepositoryService = await SkillRepositoryService.open(config.paseoHome);
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
     logger,
@@ -1150,6 +1152,16 @@ export async function createPaseoDaemon(
     resolvePaseoToolPolicy: (provider) =>
       resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
+  });
+  agentManager.subscribe((event) => {
+    if (
+      event.type === "agent_stream" &&
+      (event.event.type === "turn_completed" ||
+        event.event.type === "turn_failed" ||
+        event.event.type === "turn_canceled")
+    ) {
+      skillRepositoryService.clearTurnOrigin(event.agentId, event.event.turnId);
+    }
   });
   const syncPluginProviders = () => {
     agentManager.updateProviderRegistry(
@@ -1596,6 +1608,7 @@ export async function createPaseoDaemon(
     workspaceRegistry,
     projectRegistry,
     experimentService,
+    skillRepositoryService,
     createDirectoryWorkspace: async (cwd, title, projectId) => {
       const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
         cwd,
@@ -2066,6 +2079,7 @@ export async function createPaseoDaemon(
               orchestrationSkills,
               workspaceLabelService,
               experimentService,
+              skillRepositoryService,
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();

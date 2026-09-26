@@ -2417,6 +2417,75 @@ export class DaemonClient {
     );
   }
 
+  registerSkillRepositoryExecutor(
+    repositories: Array<{
+      repositoryId: string;
+      remoteUrl: string;
+      branch: string;
+      read: boolean;
+      publish: boolean;
+    }>,
+    options?: { signal?: AbortSignal },
+  ): OwnedSubscription<CorrelatedResponsePayload<"skills.repository.executor.register.response">> {
+    return this.observe(
+      "skills.repository.executor.register.response",
+      { type: "skills.repository.executor.register.request", repositories },
+      options,
+    );
+  }
+
+  async refreshSkillRepositoryExecutor(): Promise<void> {
+    await this.sendCorrelatedSessionRequest({
+      message: { type: "skills.repository.executor.refresh.request" },
+      responseType: "skills.repository.executor.refresh.response",
+    });
+  }
+
+  async listSkillRepositories(
+    requestId?: string,
+  ): Promise<CorrelatedResponsePayload<"skills.repository.list.response">> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.repository.list.request" },
+      responseType: "skills.repository.list.response",
+    });
+  }
+
+  async upsertSkillRepository(
+    subscription: Extract<
+      SessionInboundMessage,
+      { type: "skills.repository.upsert.request" }
+    >["subscription"],
+    requestId?: string,
+  ): Promise<CorrelatedResponsePayload<"skills.repository.upsert.response">> {
+    const result = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.repository.upsert.request", subscription },
+      responseType: "skills.repository.upsert.response",
+    });
+    if (result.error) throw new Error(result.error);
+    return result;
+  }
+
+  async removeSkillRepository(
+    repositoryId: string,
+    requestId?: string,
+  ): Promise<CorrelatedResponsePayload<"skills.repository.remove.response">> {
+    const result = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "skills.repository.remove.request", repositoryId },
+      responseType: "skills.repository.remove.response",
+    });
+    if (result.error) throw new Error(result.error);
+    return result;
+  }
+
+  sendSkillRepositoryExecutorJobResponse(
+    response: Extract<SessionInboundMessage, { type: "skills.repository.executor.job.response" }>,
+  ): void {
+    this.sendSessionMessageStrict(response);
+  }
+
   observeEvents(
     events: SessionEventSubscription[],
     options?: { signal?: AbortSignal; notifications?: boolean },

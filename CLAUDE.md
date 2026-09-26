@@ -27,6 +27,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/architecture.md](docs/architecture.md)                         | System design, package layering, WebSocket protocol, agent lifecycle, data flow                                                |
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                   | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                  |
 | [docs/data-model.md](docs/data-model.md)                             | File-based JSON persistence, Zod schemas, atomic writes, no migrations                                                         |
+| [docs/skill-repository-sync.md](docs/skill-repository-sync.md)       | Fork requirement for Git-backed skill repositories, client credential mediation, and daemon subscriptions                      |
 | [docs/experiments.md](docs/experiments.md)                           | Project-local Experiment/Attempt coordination, progress, static viewers, and agent interfaces                                  |
 | [Viewer transport spec][viewer-transport-spec]                       | Target daemon viewer host, stable ports, direct access, client forwarding, and tunnel stream lifecycle                         |
 | [docs/glossary.md](docs/glossary.md)                                 | Authoritative terminology — UI label wins, no synonyms                                                                         |

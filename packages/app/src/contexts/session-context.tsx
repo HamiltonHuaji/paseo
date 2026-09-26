@@ -319,22 +319,30 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   );
 
   useEffect(() => {
-    const serverInfo = client.getLastServerInfoMessage();
-    if (!serverInfo) {
-      return;
-    }
+    const syncServerInfo = (serverInfo: ReturnType<typeof client.getLastServerInfoMessage>) => {
+      if (!serverInfo || serverInfo.serverId !== serverId) return;
+      updateSessionServerInfo(serverId, {
+        serverId: serverInfo.serverId,
+        hostname: serverInfo.hostname,
+        version: serverInfo.version,
+        ...(serverInfo.distribution ? { distribution: serverInfo.distribution } : {}),
+        ...(serverInfo.desktopManaged !== undefined
+          ? { desktopManaged: serverInfo.desktopManaged }
+          : {}),
+        ...(serverInfo.capabilities ? { capabilities: serverInfo.capabilities } : {}),
+        ...(serverInfo.features ? { features: serverInfo.features } : {}),
+      });
+    };
 
-    updateSessionServerInfo(serverId, {
-      serverId: serverInfo.serverId,
-      hostname: serverInfo.hostname,
-      version: serverInfo.version,
-      ...(serverInfo.distribution ? { distribution: serverInfo.distribution } : {}),
-      ...(serverInfo.desktopManaged !== undefined
-        ? { desktopManaged: serverInfo.desktopManaged }
-        : {}),
-      ...(serverInfo.capabilities ? { capabilities: serverInfo.capabilities } : {}),
-      ...(serverInfo.features ? { features: serverInfo.features } : {}),
+    // The handshake arrives before owned event subscriptions are restored. Observe the raw
+    // status message so reconnects also replace the displayed daemon distribution version.
+    const unsubscribe = client.subscribeRawMessages((message) => {
+      if (message.type === "status") {
+        syncServerInfo(parseServerInfoStatusPayload(message.payload));
+      }
     });
+    syncServerInfo(client.getLastServerInfoMessage());
+    return unsubscribe;
   }, [client, serverId, updateSessionServerInfo]);
 
   useEffect(() => {
@@ -565,25 +573,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       applyWorkspaceSetupProgress(message.payload);
     });
 
-    const unsubStatus = onFeed("status", (message) => {
-      if (message.type !== "status") return;
-      const serverInfo = parseServerInfoStatusPayload(message.payload);
-      if (serverInfo) {
-        updateSessionServerInfo(serverId, {
-          serverId: serverInfo.serverId,
-          hostname: serverInfo.hostname,
-          version: serverInfo.version,
-          ...(serverInfo.distribution ? { distribution: serverInfo.distribution } : {}),
-          ...(serverInfo.desktopManaged !== undefined
-            ? { desktopManaged: serverInfo.desktopManaged }
-            : {}),
-          ...(serverInfo.capabilities ? { capabilities: serverInfo.capabilities } : {}),
-          ...(serverInfo.features ? { features: serverInfo.features } : {}),
-        });
-        return;
-      }
-    });
-
     const unsubPermissionRequest = onFeed("agent_permission_request", (message) => {
       if (message.type !== "agent_permission_request") return;
       const { agentId, request } = message.payload;
@@ -734,7 +723,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       unsubAgentAttention();
       unsubCheckoutStatusUpdate();
       unsubWorkspaceSetupProgress();
-      unsubStatus();
       unsubPermissionRequest();
       unsubPermissionResolved();
       unsubAudioOutput();
@@ -756,7 +744,6 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     setPendingPermissions,
     notifyAgentAttention,
     applyWorkspaceSetupProgress,
-    updateSessionServerInfo,
     toast,
     voiceRuntime,
     voiceAudioEngine,

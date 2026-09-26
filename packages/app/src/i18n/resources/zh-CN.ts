@@ -1944,6 +1944,7 @@ export const zhCN: TranslationResources = {
       permissions: "权限",
       diagnostics: "诊断",
       about: "关于",
+      skillRepositories: "Skill 仓库",
     },
     layout: en.settings.layout,
     editor: {

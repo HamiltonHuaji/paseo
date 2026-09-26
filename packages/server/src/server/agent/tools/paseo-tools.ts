@@ -86,6 +86,7 @@ import {
 import { registerBrowserTools } from "../../browser-tools/tools.js";
 import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
 import type { ExperimentService } from "../../experiments/service.js";
+import type { SkillRepositoryService } from "../../skill-repositories/service.js";
 import {
   CreateAttemptInputSchema,
   CreateExperimentInputSchema,
@@ -123,6 +124,7 @@ export interface PaseoToolHostDependencies {
   workspaceRegistry?: Pick<WorkspaceRegistry, "get" | "list" | "upsert">;
   projectRegistry?: Pick<ProjectRegistry, "get" | "list">;
   experimentService?: ExperimentService;
+  skillRepositoryService?: SkillRepositoryService;
   createDirectoryWorkspace?: (
     cwd: string,
     title?: string | null,
@@ -630,6 +632,90 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       handler: handler as PaseoToolDefinition["handler"],
     });
   };
+
+  if (options.skillRepositoryService) {
+    const service = options.skillRepositoryService;
+    registerTool(
+      "list_skill_repositories",
+      {
+        title: "List subscribed skill repositories",
+        description: "List this daemon's Git-backed skill checkouts and their receive policy.",
+        inputSchema: {},
+      },
+      async () => ({
+        content: [],
+        structuredContent: ensureValidJson({
+          repositories: await Promise.all(
+            service.list().map(async (subscription) => {
+              const status = await service.status(subscription.repositoryId);
+              return {
+                repositoryId: subscription.repositoryId,
+                label: subscription.label,
+                checkoutPath: status.checkoutPath,
+                branch: subscription.branch,
+                initialized: status.localHead !== null,
+                autoReceive: subscription.autoReceive,
+                agentPublishAllowed: subscription.agentPublishAllowed,
+              };
+            }),
+          ),
+        }),
+      }),
+    );
+    registerTool(
+      "get_skill_repository_status",
+      {
+        title: "Get skill repository status",
+        description:
+          "Inspect local and last-fetched Git state for one subscribed skill repository.",
+        inputSchema: { repositoryId: z.string().min(1) },
+      },
+      async ({ repositoryId }) => ({
+        content: [],
+        structuredContent: ensureValidJson({ ...(await service.status(repositoryId)) }),
+      }),
+    );
+    registerTool(
+      "fetch_skill_repository",
+      {
+        title: "Fetch skill repository",
+        description: "Ask a connected capable client to fetch a subscribed skill repository.",
+        inputSchema: { repositoryId: z.string().min(1), allowRewrite: z.boolean().optional() },
+      },
+      async ({ repositoryId, allowRewrite }) => ({
+        content: [],
+        structuredContent: ensureValidJson({
+          ...(await service.fetch(
+            repositoryId,
+            callerAgentId ? service.getTurnOrigin(callerAgentId) : null,
+            allowRewrite ?? false,
+          )),
+        }),
+      }),
+    );
+    registerTool(
+      "publish_skill_repository",
+      {
+        title: "Publish skill repository commit",
+        description:
+          "Publish the committed checkout HEAD through an eligible client, or queue it locally.",
+        inputSchema: { repositoryId: z.string().min(1), expectedHead: z.string().min(1) },
+      },
+      async ({ repositoryId, expectedHead }) => {
+        if (!callerAgentId) throw new Error("Publication requires an agent-scoped tool session");
+        return {
+          content: [],
+          structuredContent: ensureValidJson({
+            ...(await service.publish(
+              repositoryId,
+              expectedHead,
+              service.getTurnOrigin(callerAgentId),
+            )),
+          }),
+        };
+      },
+    );
+  }
   const toCatalog = (): PaseoToolCatalog => ({
     tools,
     getTool(name: string): PaseoToolDefinition | undefined {
@@ -1512,6 +1598,12 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
           callerAgentId,
           callerContext,
           worktree,
+          onCreated: ({ agentId }) => {
+            options.skillRepositoryService?.setTurnOrigin(
+              agentId,
+              callerAgentId ? options.skillRepositoryService.getTurnOrigin(callerAgentId) : null,
+            );
+          },
         },
       );
 
@@ -1928,7 +2020,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     }) => {
       const shouldNotifyOnFinish = Boolean(callerAgentId && notifyOnFinish && background);
 
-      await sendPromptToAgent({
+      const dispatch = await sendPromptToAgent({
         agentManager,
         agentStorage,
         agentId,
@@ -1936,6 +2028,13 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         sessionMode,
         logger: childLogger,
       });
+      if (dispatch.disposition === "turn_started") {
+        options.skillRepositoryService?.setTurnOrigin(
+          agentId,
+          callerAgentId ? options.skillRepositoryService.getTurnOrigin(callerAgentId) : null,
+          agentManager.getAgent(agentId)?.activeForegroundTurnId ?? undefined,
+        );
+      }
 
       if (shouldNotifyOnFinish && callerAgentId) {
         setupFinishNotification({

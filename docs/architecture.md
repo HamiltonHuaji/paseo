@@ -89,6 +89,9 @@ not retain non-Git directories.
 | `server/relay-transport.ts`     | Outbound relay connection with E2E encryption                                  |
 | `server/schedule/`              | Cron-based scheduled agents                                                    |
 
+Git-backed user skill repository behavior is specified in
+[skill repository sync](skill-repository-sync.md).
+
 ### `packages/protocol` — Wire schemas and shared protocol types
 
 The source of truth for WebSocket messages, binary frame codecs, endpoint parsing,

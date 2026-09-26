@@ -1999,6 +1999,7 @@ export const ru: TranslationResources = {
       permissions: "Разрешения",
       diagnostics: "Диагностика",
       about: "О приложении",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

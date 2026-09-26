@@ -1976,6 +1976,7 @@ export const ko: TranslationResources = {
       permissions: "권한",
       diagnostics: "진단",
       about: "정보",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

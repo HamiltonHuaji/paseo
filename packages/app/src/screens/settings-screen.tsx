@@ -124,6 +124,7 @@ import { resolvePluginIcon } from "@/plugins/icons";
 import { PluginSettingsContent } from "@/plugins/settings";
 import { useInstalledPlugins } from "@/plugins/registry";
 import { HostPluginsPage } from "@/screens/settings/plugins-page";
+import { SkillRepositoriesPage } from "@/screens/settings/skill-repositories-page";
 import { MetadataGenerationPage } from "@/screens/settings/metadata-generation-page";
 import ProjectsScreen from "@/screens/projects-screen";
 import ProjectSettingsScreen from "@/screens/project-settings-screen";
@@ -188,6 +189,7 @@ const SIDEBAR_SECTION_ITEMS: SidebarSectionItem[] = [
   },
   { id: "diagnostics", labelKey: "settings.sections.diagnostics", icon: Stethoscope },
   { id: "about", labelKey: "settings.sections.about", icon: Info },
+  { id: "skill-repositories", labelKey: "settings.sections.skillRepositories", icon: FolderGit2 },
 ];
 
 interface HostSectionItem {
@@ -1686,6 +1688,7 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   if (view.kind === "section" && view.section === "layout") {
     content = isDesktopApp ? <LayoutSection /> : null;
   } else {
+    // oxlint-disable-next-line eslint/complexity -- Settings sections are independent render cases.
     content = (() => {
       if (view.kind === "plugin")
         return (
@@ -1732,6 +1735,8 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
             return isDesktopApp ? <KeyboardShortcutsSection /> : null;
           case "integrations":
             return isDesktopApp ? <IntegrationsSection /> : null;
+          case "skill-repositories":
+            return <SkillRepositoriesPage />;
           case "notifications":
             return isDesktopApp ? <DesktopNotificationsSection /> : null;
           case "permissions":

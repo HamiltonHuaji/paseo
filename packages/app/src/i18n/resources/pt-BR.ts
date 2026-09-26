@@ -1999,6 +1999,7 @@ export const ptBR: TranslationResources = {
       permissions: "Permissões",
       diagnostics: "Diagnósticos",
       about: "Sobre",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

@@ -175,6 +175,10 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
       column?: number;
     }) => ipcRenderer.invoke("paseo:editor:openTarget", input),
   },
+  skillRepositories: {
+    execute: (input: { job: unknown; subscription: unknown }) =>
+      ipcRenderer.invoke("paseo:skill-repository:execute", input),
+  },
   webUtils: {
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
   },

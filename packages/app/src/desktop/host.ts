@@ -227,6 +227,9 @@ export interface DesktopHostBridge {
   webUtils?: DesktopWebUtilsBridge;
   menu?: DesktopMenuBridge;
   browser?: DesktopBrowserBridge;
+  skillRepositories?: {
+    execute: (input: { job: unknown; subscription: unknown }) => Promise<unknown>;
+  };
 }
 
 declare global {
