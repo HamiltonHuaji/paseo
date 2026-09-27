@@ -29,13 +29,30 @@ The generated distribution manifest records the fork version, official daemon ba
 install URL. Daemon self-update reads that manifest, runs npm directly with `--force`, and updates
 the same distribution. It never resolves `paseo` from `PATH`. `server_info.version` remains the
 internal server compatibility version; `server_info.distribution.version` is the exact fork release
-and is the value clients use for display and self-update confirmation. An official installation
+and is the value clients use for display and post-update reporting. An official installation
 without a manifest keeps using `@getpaseo/cli@latest`.
 
 Self-update restarts the worker through its existing supervisor. The replacement worker inherits
 the supervisor's startup environment and loads code from the updated package path. The supervisor
 process itself remains in memory; a release that changes supervisor behavior still requires one
 full external daemon restart or a host reboot after the package update.
+
+## Explicit self-update contract
+
+After the user confirms **Update daemon** for a standalone fork daemon, execute the distribution
+manifest's install command. Do not gate the request or installation on the app version, the running
+worker version, the global npm package version, whether any two of those versions match, whether
+the target version is newer, or whether the worker still resides under the current npm package
+directory. npm may replace that directory while the old worker remains alive; same-version
+reinstallation must also work. Version checks may drive notices and report the replacement worker's
+actual version, but must not decide whether an explicit update runs or is considered installed.
+
+Keep checks that protect the operation itself: the client must be authorized and connected to the
+selected host, Desktop-managed daemons use Desktop's update path, and concurrent installs are
+rejected. A nonzero npm exit code is an installation failure. After installation, confirm the
+selected host has a replacement worker; do not require a particular version string to call the
+replacement successful. Do not add a new pre-install gate without a concrete safety invariant
+that cannot be checked during or after installation.
 
 Network filesystems can make npm's directory replacement much slower than local disk. Self-update
 does not impose a wall-clock timeout on npm and disables audit and funding metadata requests. npm

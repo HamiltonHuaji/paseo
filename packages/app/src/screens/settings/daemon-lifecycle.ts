@@ -56,28 +56,16 @@ export async function updateDaemonFromSettings(
   } catch (error) {
     if (!isReconnectFailure(error)) throw error;
     const worker = await observeReplacement(previous, deps);
-    if (!worker.version || worker.version === previous.version) {
-      throw new Error(
-        `Update connection closed, but no newer replacement worker was confirmed (still ${worker.version ?? "unknown"}).`,
-        { cause: error },
-      );
-    }
-    return { workerVersion: worker.version };
+    return { workerVersion: worker.version ?? "unknown" };
   }
   if (!installed.success) throw new Error(installed.error ?? "Package installation failed");
   try {
     const worker = await observeReplacement(previous, deps);
-    if (!worker.version || !installed.newVersion || worker.version !== installed.newVersion) {
-      throw new Error(
-        `Expected installed version ${installed.newVersion ?? "unknown"}; observed worker ${worker.version}.`,
-      );
-    }
-    return { workerVersion: worker.version };
+    return { workerVersion: worker.version ?? "unknown" };
   } catch (error) {
-    throw new Error(
-      `Package installed; replacement worker version was not confirmed. ${String(error)}`,
-      { cause: error },
-    );
+    throw new Error(`Package installed; replacement worker was not confirmed. ${String(error)}`, {
+      cause: error,
+    });
   }
 }
 

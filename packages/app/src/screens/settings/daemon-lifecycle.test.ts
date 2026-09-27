@@ -51,7 +51,7 @@ test("a lost restart acknowledgment can still confirm the replacement", async ()
   expect(pid).toBe(11);
 });
 
-test("installation and worker version confirmation are separate outcomes", async () => {
+test("installation reports the replacement worker's actual version", async () => {
   let pid = 10;
   await expect(
     updateDaemonFromSettings("daemon", {
@@ -61,10 +61,10 @@ test("installation and worker version confirmation are separate outcomes", async
         return { success: true, error: null, newVersion: "2.0.0" };
       },
     }),
-  ).rejects.toThrow("Package installed; replacement worker version was not confirmed");
+  ).resolves.toEqual({ workerVersion: "1.0.0" });
 });
 
-test("an installed version is confirmed only in its replacement worker", async () => {
+test("successful installation waits for a replacement worker without comparing version strings", async () => {
   let pid = 10,
     version = "1.0.0";
   await expect(
@@ -72,11 +72,11 @@ test("an installed version is confirmed only in its replacement worker", async (
       getStatus: async () => ({ pid, version, serverId: "daemon" }),
       updateDaemon: async () => {
         pid = 11;
-        version = "2.0.0";
-        return { success: true, error: null, newVersion: version };
+        version = "1.5.0";
+        return { success: true, error: null, newVersion: "2.0.0" };
       },
     }),
-  ).resolves.toEqual({ workerVersion: "2.0.0" });
+  ).resolves.toEqual({ workerVersion: "1.5.0" });
 });
 
 test("RPC errors mentioning transport are not retried", async () => {

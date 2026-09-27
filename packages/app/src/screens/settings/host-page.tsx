@@ -802,15 +802,6 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     })
       .then((confirmed) => {
         if (!confirmed || !isMountedRef.current) return;
-        const liveServerInfo = daemonClient.getLastServerInfoMessage();
-        if (liveServerInfo?.serverId === host.serverId) {
-          useSessionStore.getState().updateSessionServerInfo(host.serverId, liveServerInfo);
-          const liveVersion = liveServerInfo.distribution?.version ?? liveServerInfo.version;
-          if (!isVersionOlder(liveVersion, appVersion)) {
-            setUpdateState({ status: "idle" });
-            return;
-          }
-        }
         setUpdateState({
           status: "updating",
           phase: t("settings.host.daemon.update.phaseStarting"),
@@ -884,9 +875,9 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
           message: t("settings.host.daemon.update.dialogFailedMessage"),
         });
       });
-  }, [appVersion, daemonClient, host.label, host.serverId, isHostConnected, t]);
+  }, [daemonClient, host.label, host.serverId, isHostConnected, t]);
 
-  const shouldShowUpdate = hasDaemonUpdate && (supportsSelfUpdate || desktopManaged);
+  const shouldShowUpdate = supportsSelfUpdate || (desktopManaged && hasDaemonUpdate);
   if (!shouldShowUpdate && updateState.status !== "complete") {
     return null;
   }

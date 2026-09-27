@@ -6,6 +6,7 @@ import {
   type DaemonSelfUpdatePhase,
 } from "./daemon-self-updater.js";
 import type { CommandResult, NpmGlobalPaseoInstall } from "./npm-global-cli.js";
+import { OFFICIAL_PASEO_DISTRIBUTION } from "./distribution.js";
 
 interface TestLogger {
   errors: Array<{ obj: object; msg?: string }>;
@@ -56,6 +57,7 @@ function createRuntime(input: {
 }): DaemonSelfUpdateRuntime {
   const calls = input.calls ?? [];
   return {
+    distribution: OFFICIAL_PASEO_DISTRIBUTION,
     npm: {
       async inspect() {
         calls.push("inspect");
@@ -207,6 +209,7 @@ describe("DaemonSelfUpdater", () => {
       installStartedResolve = resolve;
     });
     const runtime: DaemonSelfUpdateRuntime = {
+      distribution: OFFICIAL_PASEO_DISTRIBUTION,
       npm: {
         async inspect() {
           calls.push("inspect");

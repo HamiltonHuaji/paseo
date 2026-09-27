@@ -68,17 +68,21 @@ export class DaemonSelfUpdater {
     this.inProgress = true;
     try {
       input.onProgress("starting");
-      const install = await this.runtime.npm.inspect();
-      const unsupportedReason = validateDaemonInstallOrigin(
-        install,
-        input.daemonVersion,
-        this.runtime.distribution,
-        this.runtime.installOrigin,
-      );
-      if (unsupportedReason) {
-        return { success: false, error: unsupportedReason, newVersion: null };
+      if (this.runtime.distribution.kind === "official") {
+        const install = await this.runtime.npm.inspect();
+        const unsupportedReason = validateDaemonInstallOrigin(
+          install,
+          input.daemonVersion,
+          this.runtime.distribution,
+          this.runtime.installOrigin,
+        );
+        if (unsupportedReason) {
+          return { success: false, error: unsupportedReason, newVersion: null };
+        }
       }
 
+      // A fork worker may still be running from a package tree npm has already replaced.
+      // An explicit update must install the configured fork release even in that state.
       input.onProgress("downloading");
       input.onProgress("installing");
 
