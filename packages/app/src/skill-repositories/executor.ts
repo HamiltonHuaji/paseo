@@ -1,5 +1,8 @@
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import type { SkillRepositoryExecutorJobRequest } from "@getpaseo/protocol/skill-repositories";
+import type {
+  SkillRepositoryExecutorJobRequest,
+  SkillRepositorySubscription,
+} from "@getpaseo/protocol/skill-repositories";
 import { getDesktopHost } from "@/desktop/host";
 import {
   getSkillRepositoryLocalState,
@@ -17,6 +20,7 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
   let sequence = 0;
   let queue: Promise<void> = Promise.resolve();
   let repositories = new Map<string, SkillRepositoryPlan["repositories"][number]>();
+  let subscriptions = new Map<string, SkillRepositorySubscription>();
 
   const respond = (
     payload: Parameters<DaemonClient["sendSkillRepositoryExecutorJobResponse"]>[0]["payload"],
@@ -33,7 +37,7 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
   };
 
   const handleJob = async (job: SkillRepositoryExecutorJobRequest): Promise<void> => {
-    const subscription = repositories.get(job.repositoryId);
+    const subscription = subscriptions.get(job.repositoryId);
     if (!subscription || !desktop) {
       respond({
         requestId: job.requestId,
@@ -43,15 +47,7 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
       return;
     }
     try {
-      const result = (await desktop.execute({ job, subscription })) as {
-        requestId: string;
-        repositoryId: string;
-        state: "ok" | "unavailable" | "conflict" | "failed";
-        bundleBase64?: string;
-        remoteHead?: string;
-        publishedHead?: string;
-        error?: string;
-      };
+      const result = await desktop.execute({ job, subscription });
       respond(result);
     } catch (error) {
       respond({
@@ -84,6 +80,7 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
         const memberEntries = state.plan.members.filter(
           (item) => item.serverId === serverId && !item.deleted,
         );
+        const nextSubscriptions = new Map<string, SkillRepositorySubscription>();
         const daemonSubscriptions = await client.listSkillRepositories();
         for (const current of daemonSubscriptions.subscriptions) {
           const member = state.plan.members.find(
@@ -99,16 +96,19 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
         for (const member of memberEntries) {
           const repository = repositories.get(member.repositoryId);
           if (!repository) continue;
-          await client.upsertSkillRepository({
+          const subscription: SkillRepositorySubscription = {
             repositoryId: repository.repositoryId,
             label: repository.label,
             remoteUrl: repository.remoteUrl,
             branch: repository.branch,
             autoReceive: member.autoReceive,
             agentPublishAllowed: member.agentPublishAllowed,
-          });
+          };
+          nextSubscriptions.set(subscription.repositoryId, subscription);
+          await client.upsertSkillRepository(subscription);
         }
         if (revision !== sequence || disposed) return;
+        subscriptions = nextSubscriptions;
         const capabilities = memberEntries.flatMap((member) => {
           if (!desktop) return [];
           const local = state.executors.find((item) => item.repositoryId === member.repositoryId);
