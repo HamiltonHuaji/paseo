@@ -18,7 +18,13 @@ import { TerminalProfileSchema } from "./terminal-profile.js";
 export { TerminalProfileSchema, type TerminalProfile } from "./terminal-profile.js";
 import { z } from "zod";
 import {
+  SkillRepositoryGetStateRequestSchema,
+  SkillRepositoryConfigureRequestSchema,
+  SkillRepositorySyncRequestSchema,
   SkillRepositoryUpsertRequestSchema,
+  SkillRepositoryGetStateResponseSchema,
+  SkillRepositoryConfigureResponseSchema,
+  SkillRepositorySyncResponseSchema,
   SkillRepositoryUpsertResponseSchema,
   SkillRepositoryListRequestSchema,
   SkillRepositoryListResponseSchema,
@@ -3213,6 +3219,9 @@ export const SubscriptionReleaseResponseSchema = z.object({
 });
 
 export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
+  SkillRepositoryGetStateRequestSchema,
+  SkillRepositoryConfigureRequestSchema,
+  SkillRepositorySyncRequestSchema,
   SkillRepositoryUpsertRequestSchema,
   SkillRepositoryListRequestSchema,
   SkillRepositoryRemoveRequestSchema,
@@ -3775,6 +3784,7 @@ export const ServerInfoStatusPayloadSchema = z
         explicitEventSubscriptions: z.boolean().optional(),
         ownedSubscriptions: z.boolean().optional(),
         skillRepositories: z.boolean().optional(),
+        skillRepositoryManagement: z.boolean().optional(),
         experimentViewerTransport: z.boolean().optional(),
         viewerHttpProxy: z.boolean().optional(),
         viewerHttpFlowControl: z.boolean().optional(),
@@ -6840,6 +6850,9 @@ export const AgentSkillsImportLegacySelectionResponseSchema = z.object({
 });
 
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
+  SkillRepositoryGetStateResponseSchema,
+  SkillRepositoryConfigureResponseSchema,
+  SkillRepositorySyncResponseSchema,
   SkillRepositoryUpsertResponseSchema,
   SkillRepositoryListResponseSchema,
   SkillRepositoryRemoveResponseSchema,

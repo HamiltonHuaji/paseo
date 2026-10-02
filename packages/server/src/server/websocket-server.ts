@@ -1705,7 +1705,9 @@ export class VoiceAssistantWebSocketServer {
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         ownedSubscriptions: true,
-        ...(this.skillRepositoryService ? { skillRepositories: true } : {}),
+        ...(this.skillRepositoryService
+          ? { skillRepositories: true, skillRepositoryManagement: true }
+          : {}),
         experimentViewerTransport: true,
         viewerHttpProxy: true,
         viewerHttpFlowControl: true,

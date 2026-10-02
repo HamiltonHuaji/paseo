@@ -1946,6 +1946,7 @@ export const ko: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "설정",
     loading: "설정 불러오는 중...",
     groups: {

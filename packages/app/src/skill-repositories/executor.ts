@@ -7,7 +7,9 @@ import { getDesktopHost } from "@/desktop/host";
 import {
   getSkillRepositoryLocalState,
   subscribeSkillRepositoryPlan,
-  type SkillRepositoryPlan,
+  subscriptionFromPlan,
+  rememberSkillRepositorySubscriptions,
+  recordSkillRepositoryApply,
 } from "./plan";
 import { setSkillRepositoryPlanError } from "./status";
 
@@ -16,16 +18,17 @@ type Subscription = ReturnType<DaemonClient["registerSkillRepositoryExecutor"]>;
 export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: string): () => void {
   const desktop = getDesktopHost()?.skillRepositories;
   let disposed = false;
+  const isLive = () => !disposed && client.getConnectionState().status === "connected";
   let active: Subscription | null = null;
   let sequence = 0;
   let queue: Promise<void> = Promise.resolve();
-  let repositories = new Map<string, SkillRepositoryPlan["repositories"][number]>();
+  let registrationKey = "";
   let subscriptions = new Map<string, SkillRepositorySubscription>();
 
   const respond = (
     payload: Parameters<DaemonClient["sendSkillRepositoryExecutorJobResponse"]>[0]["payload"],
   ): void => {
-    if (disposed || client.getConnectionState().status !== "connected") return;
+    if (!isLive()) return;
     try {
       client.sendSkillRepositoryExecutorJobResponse({
         type: "skills.repository.executor.job.response",
@@ -64,66 +67,75 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
     queue = queue
       .catch(() => {})
       .then(async () => {
-        if (active) {
-          await active.release().catch(() => {});
+        if (disposed) return;
+        if (client.getConnectionState().status !== "connected") {
+          await active?.release().catch(() => {});
           active = null;
+          registrationKey = "";
+          return;
         }
-        if (disposed || client.getConnectionState().status !== "connected") return;
-        if (client.getLastServerInfoMessage()?.features?.skillRepositories !== true) return;
+        if (client.getLastServerInfoMessage()?.features?.skillRepositoryManagement !== true) return;
         const state = await getSkillRepositoryLocalState();
         if (revision !== sequence || disposed) return;
-        repositories = new Map(
-          state.plan.repositories
-            .filter((item) => !item.deleted)
-            .map((item) => [item.repositoryId, item]),
-        );
-        const memberEntries = state.plan.members.filter(
-          (item) => item.serverId === serverId && !item.deleted,
-        );
-        const nextSubscriptions = new Map<string, SkillRepositorySubscription>();
-        const daemonSubscriptions = await client.listSkillRepositories();
-        for (const current of daemonSubscriptions.subscriptions) {
-          const member = state.plan.members.find(
-            (item) => item.serverId === serverId && item.repositoryId === current.repositoryId,
-          );
-          const repository = state.plan.repositories.find(
-            (item) => item.repositoryId === current.repositoryId,
-          );
-          if (member?.deleted || repository?.deleted) {
-            await client.removeSkillRepository(current.repositoryId);
+        for (const pending of state.pending.filter((p) => p.serverId === serverId && !p.error)) {
+          const desired = subscriptionFromPlan(state.plan, serverId, pending.repositoryId);
+          try {
+            const actual =
+              (await client.listSkillRepositories()).subscriptions.find(
+                (s) => s.repositoryId === pending.repositoryId,
+              ) ?? null;
+            // A lost acknowledgement can leave a persisted edit pending locally.
+            if (JSON.stringify(actual) !== JSON.stringify(desired)) {
+              await client.configureSkillRepository({
+                repositoryId: pending.repositoryId,
+                expected: pending.expected,
+                subscription: desired,
+              });
+            }
+            await recordSkillRepositoryApply(serverId, pending.repositoryId, pending.revision);
+          } catch (error) {
+            if (!isLive()) throw error;
+            await recordSkillRepositoryApply(
+              serverId,
+              pending.repositoryId,
+              pending.revision,
+              error instanceof Error ? error.message : String(error),
+            );
           }
         }
-        for (const member of memberEntries) {
-          const repository = repositories.get(member.repositoryId);
-          if (!repository) continue;
-          const subscription: SkillRepositorySubscription = {
-            repositoryId: repository.repositoryId,
-            label: repository.label,
-            remoteUrl: repository.remoteUrl,
-            branch: repository.branch,
-            autoReceive: member.autoReceive,
-            agentPublishAllowed: member.agentPublishAllowed,
-          };
-          nextSubscriptions.set(subscription.repositoryId, subscription);
-          await client.upsertSkillRepository(subscription);
-        }
-        if (revision !== sequence || disposed) return;
-        subscriptions = nextSubscriptions;
-        const capabilities = memberEntries.flatMap((member) => {
+        const daemonSubscriptions = (await client.listSkillRepositories()).subscriptions;
+        await rememberSkillRepositorySubscriptions(serverId, daemonSubscriptions);
+        if (!isLive()) return;
+        subscriptions = new Map(daemonSubscriptions.map((s) => [s.repositoryId, s]));
+        const capabilities = daemonSubscriptions.flatMap((subscription) => {
           if (!desktop) return [];
-          const local = state.executors.find((item) => item.repositoryId === member.repositoryId);
-          const repository = repositories.get(member.repositoryId);
-          if (!local || !repository) return [];
+          const repository = state.plan.repositories.find(
+            (r) => r.repositoryId === subscription.repositoryId && !r.deleted,
+          );
+          const local = state.executors.find((e) => e.repositoryId === subscription.repositoryId);
+          if (
+            !repository ||
+            !local ||
+            (!local.read && !local.publish) ||
+            repository.remoteUrl !== subscription.remoteUrl ||
+            repository.branch !== subscription.branch
+          )
+            return [];
           return [
             {
-              repositoryId: member.repositoryId,
-              remoteUrl: repository.remoteUrl,
-              branch: repository.branch,
+              repositoryId: subscription.repositoryId,
+              remoteUrl: subscription.remoteUrl,
+              branch: subscription.branch,
               read: local.read || local.publish,
-              publish: local.publish && member.agentPublishAllowed,
+              publish: local.publish && subscription.agentPublishAllowed,
             },
           ];
         });
+        const nextKey = JSON.stringify(capabilities);
+        if (nextKey === registrationKey) return;
+        await active?.release().catch(() => {});
+        active = null;
+        registrationKey = "";
         if (capabilities.length === 0) return;
         const registration = client.registerSkillRepositoryExecutor(capabilities);
         active = registration;
@@ -136,6 +148,7 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
           },
         });
         await registration.ready;
+        registrationKey = nextKey;
         return undefined;
       })
       .then(() => {
@@ -154,6 +167,7 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
 
   const unsubscribePlan = subscribeSkillRepositoryPlan(reconcile);
   const unsubscribeConnection = client.subscribeConnectionStatus(() => reconcile());
+  const configurationTimer = setInterval(reconcile, 15_000);
   const refreshTimer = setInterval(() => {
     if (active && client.getConnectionState().status === "connected") {
       void client.refreshSkillRepositoryExecutor().catch(() => {});
@@ -164,6 +178,7 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
     disposed = true;
     setSkillRepositoryPlanError(serverId, null);
     clearInterval(refreshTimer);
+    clearInterval(configurationTimer);
     unsubscribePlan();
     unsubscribeConnection();
     void active?.release().catch(() => {});

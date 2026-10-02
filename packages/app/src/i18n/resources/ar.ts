@@ -1935,6 +1935,7 @@ export const ar: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "إعدادات",
     loading: "جارٍ تحميل الإعدادات...",
     groups: {

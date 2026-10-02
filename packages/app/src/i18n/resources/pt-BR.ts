@@ -1969,6 +1969,7 @@ export const ptBR: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "Configurações",
     loading: "Carregando configurações...",
     groups: {

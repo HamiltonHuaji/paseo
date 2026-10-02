@@ -1,354 +1,344 @@
-/* oxlint-disable eslint-plugin-react-perf/jsx-no-new-function-as-prop -- Settings actions close over each repository and daemon ID; this screen does not render during agent streaming. */
-import { useCallback, useEffect, useRef, useState } from "react";
+/* oxlint-disable eslint-plugin-react-perf/jsx-no-jsx-as-prop, eslint-plugin-react-perf/jsx-no-new-function-as-prop, eslint-plugin-react-perf/jsx-no-new-object-as-prop -- Settings actions dispatch local form intents. */
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
-import { EditingTextInput, type EditingTextInputHandle } from "@/components/ui/text-input";
-import { StyleSheet } from "react-native-unistyles";
+import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
+import { SettingsCard, SettingsRow, SettingsSection, SettingsSelect } from "@/components/settings";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
+import { Field, FormTextInput } from "@/components/ui/form-field";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { useHosts } from "@/runtime/host-runtime";
 import { getDesktopHost } from "@/desktop/host";
+import { useIsCompactFormFactor } from "@/constants/layout";
 import { settingsStyles } from "@/styles/settings";
+import { useSkillRepositoryPlan } from "@/skill-repositories/hooks";
+import { openPlanImportForm, type RepositoryAccess } from "@/skill-repositories/forms";
 import {
   exportSkillRepositoryPlan,
-  getSkillRepositoryLocalState,
+  previewSkillRepositoryPlan,
   importSkillRepositoryPlan,
   removeSkillRepository,
-  removeSkillRepositoryMember,
-  saveSkillRepository,
-  saveSkillRepositoryExecutor,
-  saveSkillRepositoryMember,
-  subscribeSkillRepositoryPlan,
+  type PlanConflict,
 } from "@/skill-repositories/plan";
 import {
-  getSkillRepositoryPlanErrors,
-  subscribeSkillRepositoryPlanErrors,
-} from "@/skill-repositories/status";
+  RepositoryFormSheet,
+  repositoryError,
+  skillRepositoryStyles as styles,
+} from "./skill-repository-shared";
 
-type LocalState = Awaited<ReturnType<typeof getSkillRepositoryLocalState>>;
-type Member = LocalState["plan"]["members"][number];
+type RepositoryDraft = NonNullable<Parameters<typeof RepositoryFormSheet>[0]["initial"]>;
 
-const modes = ["overwrite", "fastforward", "none"] as const;
-const modeLabel = {
-  overwrite: "Overwrite",
-  fastforward: "Fast forward",
-  none: "Manual",
-} as const;
-
-export function SkillRepositoriesPage() {
-  const hosts = useHosts();
-  const desktop = Boolean(getDesktopHost()?.skillRepositories);
-  const [state, setState] = useState<LocalState | null>(null);
-  const [label, setLabel] = useState("");
-  const [remoteUrl, setRemoteUrl] = useState("");
-  const [branch, setBranch] = useState("main");
-  const [planText, setPlanText] = useState("");
-  const [notice, setNotice] = useState("");
-  const [planErrors, setPlanErrors] = useState(getSkillRepositoryPlanErrors);
-  const labelRef = useRef<EditingTextInputHandle>(null);
-  const remoteUrlRef = useRef<EditingTextInputHandle>(null);
-  const branchRef = useRef<EditingTextInputHandle>(null);
-  const planRef = useRef<EditingTextInputHandle>(null);
-
-  useEffect(() => {
-    let active = true;
-    const refresh = () => {
-      void (async () => {
-        const next = await getSkillRepositoryLocalState();
-        if (active) setState(next);
-      })();
-    };
-    refresh();
-    const unsubscribe = subscribeSkillRepositoryPlan(refresh);
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, []);
-
-  useEffect(
-    () => subscribeSkillRepositoryPlanErrors(() => setPlanErrors(getSkillRepositoryPlanErrors())),
-    [],
-  );
-
-  const act = useCallback(async (action: () => Promise<void>) => {
-    try {
-      setNotice("");
-      await action();
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
-
-  const create = () =>
-    act(async () => {
-      const repositoryId = `skr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-      await saveSkillRepository({
-        repositoryId,
-        label: label.trim(),
-        remoteUrl: remoteUrl.trim(),
-        branch: branch.trim(),
-      });
-      setLabel("");
-      setRemoteUrl("");
-      setBranch("main");
-      labelRef.current?.reset();
-      remoteUrlRef.current?.reset();
-      branchRef.current?.replaceText("main");
-    });
-
-  const updateMember = (member: Member, changes: Partial<Member>) =>
-    act(() =>
-      saveSkillRepositoryMember({
-        serverId: member.serverId,
-        repositoryId: member.repositoryId,
-        autoReceive: changes.autoReceive ?? member.autoReceive,
-        agentPublishAllowed: changes.agentPublishAllowed ?? member.agentPublishAllowed,
-      }),
-    );
-
-  const importPlan = () =>
-    act(async () => {
-      const result = await importSkillRepositoryPlan(planText);
-      setNotice(
-        result.conflicts.length > 0
-          ? `Configuration conflicts: ${result.conflicts.join(", ")}`
-          : "Plan imported. Members without a connection on this device remain inactive here.",
-      );
-    });
-
-  const repositories = state?.plan.repositories.filter((item) => !item.deleted) ?? [];
-  return (
-    <View style={styles.root}>
-      <Text style={styles.title}>Skill repositories</Text>
-      <Text style={styles.hint}>
-        Each repository contains one skill per first-level directory. Sync updates its checkout;
-        agents maintain links in ~/.agents/skills themselves.
+function PlanVersion({ record }: { record: PlanConflict["local"] }) {
+  const { t } = useTranslation();
+  if (record.deleted)
+    return <Text style={styles.metadata}>{t("settings.skillRepos.removed")}</Text>;
+  if ("remoteUrl" in record)
+    return (
+      <Text selectable style={styles.metadata}>
+        {record.label}
+        {"\n"}
+        {record.remoteUrl} · {record.branch}
       </Text>
-
-      <View style={settingsStyles.card}>
-        <View style={styles.cardContent}>
-          <Text style={settingsStyles.rowTitle}>Add repository</Text>
-          <EditingTextInput
-            ref={labelRef}
-            onChangeText={setLabel}
-            placeholder="Name"
-            style={styles.input}
-          />
-          <EditingTextInput
-            ref={remoteUrlRef}
-            onChangeText={setRemoteUrl}
-            placeholder="GitHub HTTPS or SSH URL"
-            autoCapitalize="none"
-            style={styles.input}
-          />
-          <EditingTextInput
-            ref={branchRef}
-            initialValue="main"
-            onChangeText={setBranch}
-            placeholder="Branch"
-            autoCapitalize="none"
-            style={styles.input}
-          />
-          <Button onPress={create} disabled={!label.trim() || !remoteUrl.trim() || !branch.trim()}>
-            Add repository
-          </Button>
-        </View>
-      </View>
-
-      {repositories.map((repository) => {
-        const executor = state?.executors.find(
-          (item) => item.repositoryId === repository.repositoryId,
-        );
-        const members =
-          state?.plan.members.filter(
-            (item) => item.repositoryId === repository.repositoryId && !item.deleted,
-          ) ?? [];
-        return (
-          <View key={repository.repositoryId} style={settingsStyles.card}>
-            <View style={styles.cardContent}>
-              <Text style={settingsStyles.rowTitle}>{repository.label}</Text>
-              <Text style={styles.hint}>
-                {repository.remoteUrl} · {repository.branch}
-              </Text>
-              {desktop ? (
-                <View style={styles.row}>
-                  <Text style={styles.hint}>This device reads the repository</Text>
-                  <Switch
-                    value={executor?.read ?? false}
-                    onValueChange={(read) =>
-                      void act(() =>
-                        saveSkillRepositoryExecutor({
-                          repositoryId: repository.repositoryId,
-                          read,
-                          publish: executor?.publish ?? false,
-                        }),
-                      )
-                    }
-                  />
-                </View>
-              ) : null}
-              {desktop ? (
-                <View style={styles.row}>
-                  <Text style={styles.hint}>This device can publish</Text>
-                  <Switch
-                    value={executor?.publish ?? false}
-                    onValueChange={(publish) =>
-                      void act(() =>
-                        saveSkillRepositoryExecutor({
-                          repositoryId: repository.repositoryId,
-                          read: (executor?.read ?? false) || publish,
-                          publish,
-                        }),
-                      )
-                    }
-                  />
-                </View>
-              ) : null}
-              {members.map((member) => {
-                const host = hosts.find((item) => item.serverId === member.serverId);
-                return (
-                  <View key={member.serverId} style={styles.member}>
-                    <Text style={settingsStyles.rowTitle}>
-                      {host?.label ?? `${member.serverId} (no connection on this device)`}
-                    </Text>
-                    <View style={styles.rowWrap}>
-                      {modes.map((mode) => (
-                        <Button
-                          key={mode}
-                          size="sm"
-                          variant={member.autoReceive === mode ? "default" : "outline"}
-                          onPress={() => void updateMember(member, { autoReceive: mode })}
-                        >
-                          {modeLabel[mode]}
-                        </Button>
-                      ))}
-                    </View>
-                    <View style={styles.row}>
-                      <Text style={styles.hint}>Agent may request publication</Text>
-                      <Switch
-                        value={member.agentPublishAllowed}
-                        onValueChange={(agentPublishAllowed) =>
-                          void updateMember(member, { agentPublishAllowed })
-                        }
-                      />
-                    </View>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onPress={() =>
-                        void act(() =>
-                          removeSkillRepositoryMember(member.serverId, repository.repositoryId),
-                        )
-                      }
-                    >
-                      Unsubscribe daemon
-                    </Button>
-                  </View>
-                );
-              })}
-              {hosts
-                .filter((host) => !members.some((member) => member.serverId === host.serverId))
-                .map((host) => (
-                  <Button
-                    key={host.serverId}
-                    size="sm"
-                    variant="outline"
-                    onPress={() =>
-                      void act(() =>
-                        saveSkillRepositoryMember({
-                          serverId: host.serverId,
-                          repositoryId: repository.repositoryId,
-                          autoReceive: "fastforward",
-                          agentPublishAllowed: false,
-                        }),
-                      )
-                    }
-                  >
-                    Subscribe {host.label}
-                  </Button>
-                ))}
-              <Button
-                size="sm"
-                variant="outline"
-                onPress={() => void act(() => removeSkillRepository(repository.repositoryId))}
-              >
-                Remove repository from plan
-              </Button>
-            </View>
-          </View>
-        );
-      })}
-
-      <View style={settingsStyles.card}>
-        <View style={styles.cardContent}>
-          <Text style={settingsStyles.rowTitle}>Import or export plan</Text>
-          <Text style={styles.hint}>
-            The plan excludes Git and daemon credentials and local paths.
-          </Text>
-          <EditingTextInput
-            ref={planRef}
-            onChangeText={setPlanText}
-            multiline
-            placeholder="Paste a plan here"
-            style={styles.planInput}
-          />
-          <View style={styles.rowWrap}>
-            <Button
-              size="sm"
-              variant="outline"
-              onPress={() =>
-                void act(async () => {
-                  const plan = await exportSkillRepositoryPlan();
-                  setPlanText(plan);
-                  planRef.current?.replaceText(plan);
-                  await Clipboard.setStringAsync(plan);
-                })
-              }
-            >
-              Export and copy
-            </Button>
-            <Button size="sm" variant="outline" onPress={() => void importPlan()}>
-              Import pasted plan
-            </Button>
-          </View>
-        </View>
-      </View>
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      {planErrors.map((error) => {
-        const host = hosts.find((item) => item.serverId === error.serverId);
-        return (
-          <Text key={error.serverId} style={styles.notice}>
-            {host?.label ?? error.serverId}: {error.message}
-          </Text>
-        );
-      })}
-    </View>
+    );
+  return (
+    <Text style={styles.metadata}>
+      {t(`settings.skillRepos.mode_${record.autoReceive}`)} ·{" "}
+      {t(
+        record.agentPublishAllowed
+          ? "settings.skillRepos.publishAllowed"
+          : "settings.skillRepos.publishDisabled",
+      )}
+    </Text>
   );
 }
 
-const styles = StyleSheet.create((theme) => ({
-  root: { gap: theme.spacing[4] },
-  title: { color: theme.colors.foreground, fontSize: theme.fontSize.lg, fontWeight: "600" },
-  hint: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
-  cardContent: { padding: theme.spacing[4], gap: theme.spacing[3] },
-  input: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
-    color: theme.colors.foreground,
-    padding: theme.spacing[3],
-  },
-  planInput: {
-    minHeight: 150,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.borderRadius.md,
-    color: theme.colors.foreground,
-    padding: theme.spacing[3],
-  },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  rowWrap: { flexDirection: "row", flexWrap: "wrap", gap: theme.spacing[2] },
-  member: { gap: theme.spacing[3], paddingVertical: theme.spacing[3] },
-  notice: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
-}));
+function PlanImportSheet({ onClose }: { onClose(): void }) {
+  const { t } = useTranslation();
+  const hosts = useHosts();
+  const size = useIsCompactFormFactor() ? "md" : "sm";
+  const [model] = useState(openPlanImportForm);
+  const state = useSyncExternalStore(model.subscribe, model.getState);
+  useEffect(() => () => model.close(), [model]);
+  const [preview, setPreview] = useState<Awaited<
+    ReturnType<typeof previewSkillRepositoryPlan>
+  > | null>(null);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const act = async () => {
+    setPending(true);
+    setError("");
+    try {
+      if (!preview) setPreview(await previewSkillRepositoryPlan(state.raw));
+      else {
+        await importSkillRepositoryPlan(state.raw, state.choices);
+        onClose();
+      }
+    } catch (cause) {
+      setError(repositoryError(cause));
+    } finally {
+      setPending(false);
+    }
+  };
+  const unknownHosts = [
+    ...new Set(
+      preview?.plan.members
+        .filter((m) => !m.deleted && !hosts.some((h) => h.serverId === m.serverId))
+        .map((m) => m.serverId),
+    ),
+  ];
+  const submitLabel = preview ? "settings.skillRepos.importPlan" : "settings.skillRepos.preview";
+  return (
+    <AdaptiveModalSheet
+      visible
+      onClose={onClose}
+      header={{ title: t("settings.skillRepos.importPlan") }}
+    >
+      <View style={styles.form}>
+        {!preview ? (
+          <Field label={t("settings.skillRepos.planJson")}>
+            <FormTextInput
+              accessibilityLabel={t("settings.skillRepos.planJson")}
+              initialValue={state.raw}
+              multiline
+              numberOfLines={8}
+              size={size}
+              onChangeText={(raw) => model.set({ raw, choices: {} })}
+              autoCapitalize="none"
+            />
+          </Field>
+        ) : (
+          <>
+            <Text style={styles.metadata}>
+              {t("settings.skillRepos.importSummary", {
+                repositories: preview.plan.repositories.filter((r) => !r.deleted).length,
+                subscriptions: preview.plan.members.filter((m) => !m.deleted).length,
+              })}
+            </Text>
+            {unknownHosts.length ? (
+              <Text style={styles.metadata}>
+                {t("settings.skillRepos.unknownHosts", { count: unknownHosts.length })}
+              </Text>
+            ) : null}
+            {preview.conflicts.map((conflict) => (
+              <SettingsCard key={conflict.key}>
+                <SettingsRow
+                  label={conflict.label}
+                  hint={t("settings.skillRepos.configConflict")}
+                />
+                <SettingsRow
+                  label={t("settings.skillRepos.keepLocal")}
+                  hint={<PlanVersion record={conflict.local} />}
+                />
+                <SettingsRow
+                  label={t("settings.skillRepos.useIncoming")}
+                  hint={<PlanVersion record={conflict.incoming} />}
+                />
+                <SettingsSelect
+                  label={t("settings.skillRepos.chooseVersion")}
+                  value={state.choices[conflict.key] ?? ""}
+                  options={[
+                    { value: "", label: t("settings.skillRepos.chooseVersion") },
+                    { value: "local", label: t("settings.skillRepos.keepLocal") },
+                    { value: "incoming", label: t("settings.skillRepos.useIncoming") },
+                  ]}
+                  onValueChange={(choice) => {
+                    if (choice)
+                      model.set({ choices: { ...state.choices, [conflict.key]: choice } });
+                  }}
+                />
+              </SettingsCard>
+            ))}
+            <Text style={styles.metadata}>{t("settings.skillRepos.importInfo")}</Text>
+          </>
+        )}
+        {error ? (
+          <Text accessibilityRole="alert" style={settingsStyles.rowError}>
+            {error}
+          </Text>
+        ) : null}
+        <View style={styles.actions}>
+          {preview ? (
+            <Button variant="outline" onPress={() => setPreview(null)} disabled={pending}>
+              {t("settings.skillRepos.back")}
+            </Button>
+          ) : null}
+          <Button
+            onPress={act}
+            disabled={
+              pending ||
+              !state.raw.trim() ||
+              Boolean(preview?.conflicts.some((c) => !state.choices[c.key]))
+            }
+          >
+            {t(pending ? "settings.skillRepos.saving" : submitLabel)}
+          </Button>
+        </View>
+      </View>
+    </AdaptiveModalSheet>
+  );
+}
+
+export function SkillRepositoriesPage() {
+  const { t } = useTranslation();
+  const plan = useSkillRepositoryPlan();
+  const hosts = useHosts();
+  const desktop = Boolean(getDesktopHost()?.skillRepositories);
+  const [editing, setEditing] = useState<RepositoryDraft | "new" | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const repositories = plan.data?.plan.repositories.filter((r) => !r.deleted) ?? [];
+  const unknownCount = new Set(
+    plan.data?.plan.members
+      .filter((m) => !m.deleted && !hosts.some((h) => h.serverId === m.serverId))
+      .map((m) => m.serverId),
+  ).size;
+  const act = async (run: () => Promise<void>) => {
+    setError("");
+    setNotice("");
+    try {
+      await run();
+    } catch (cause) {
+      setError(repositoryError(cause));
+    }
+  };
+  return (
+    <View>
+      <SettingsSection
+        title={t("settings.skillRepos.clientRepositories")}
+        info={t("settings.skillRepos.clientInfo")}
+        trailing={
+          <Button size="sm" variant="outline" onPress={() => setEditing("new")}>
+            {t("settings.skillRepos.addRepository")}
+          </Button>
+        }
+      >
+        {plan.isPending ? (
+          <Text style={styles.metadata}>{t("settings.skillRepos.loading")}</Text>
+        ) : null}
+        {plan.isError ? (
+          <SettingsCard>
+            <SettingsRow
+              label={t("settings.skillRepos.loadFailed")}
+              error={repositoryError(plan.error)}
+            >
+              <Button size="sm" variant="outline" onPress={() => void plan.refetch()}>
+                {t("settings.skillRepos.retry")}
+              </Button>
+            </SettingsRow>
+          </SettingsCard>
+        ) : null}
+        {plan.isSuccess && repositories.length > 0 ? (
+          <SettingsCard>
+            {repositories.map((repository) => {
+              const executor = plan.data?.executors.find(
+                (e) => e.repositoryId === repository.repositoryId,
+              );
+              let access: RepositoryAccess = "none";
+              if (executor?.read) access = "read";
+              if (executor?.publish) access = "publish";
+              const members =
+                plan.data?.plan.members.filter(
+                  (m) => !m.deleted && m.repositoryId === repository.repositoryId,
+                ) ?? [];
+              return (
+                <SettingsRow
+                  key={repository.repositoryId}
+                  label={repository.label}
+                  hint={`${repository.remoteUrl} · ${repository.branch}`}
+                >
+                  <View style={styles.actions}>
+                    {desktop ? (
+                      <StatusBadge label={t(`settings.skillRepos.access_${access}`)} />
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onPress={() => setEditing({ ...repository, access })}
+                    >
+                      {t("settings.skillRepos.configure")}
+                    </Button>
+                    {members.length === 0 ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onPress={() =>
+                          void act(() => removeSkillRepository(repository.repositoryId))
+                        }
+                      >
+                        {t("settings.skillRepos.remove")}
+                      </Button>
+                    ) : null}
+                  </View>
+                </SettingsRow>
+              );
+            })}
+          </SettingsCard>
+        ) : null}
+        {plan.isSuccess && repositories.length === 0 ? (
+          <SettingsCard>
+            <SettingsRow
+              label={t("settings.skillRepos.noRepositories")}
+              hint={t("settings.skillRepos.noRepositoriesInfo")}
+            />
+          </SettingsCard>
+        ) : null}
+        {!desktop ? (
+          <Text style={styles.metadata}>{t("settings.skillRepos.desktopRequired")}</Text>
+        ) : null}
+      </SettingsSection>
+      <SettingsSection
+        title={t("settings.skillRepos.syncPlan")}
+        info={t("settings.skillRepos.planInfo")}
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={t("settings.skillRepos.transferPlan")}
+            hint={
+              unknownCount
+                ? t("settings.skillRepos.unknownHosts", { count: unknownCount })
+                : undefined
+            }
+          >
+            <View style={styles.actions}>
+              <Button size="sm" variant="outline" onPress={() => setImporting(true)}>
+                {t("settings.skillRepos.importPlan")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() =>
+                  void act(async () => {
+                    await Clipboard.setStringAsync(await exportSkillRepositoryPlan());
+                    setNotice(t("settings.skillRepos.copied"));
+                  })
+                }
+              >
+                {t("settings.skillRepos.exportPlan")}
+              </Button>
+            </View>
+          </SettingsRow>
+        </SettingsCard>
+        {notice ? (
+          <Text accessibilityLiveRegion="polite" style={styles.metadata}>
+            {notice}
+          </Text>
+        ) : null}
+        {error ? (
+          <Text accessibilityRole="alert" style={settingsStyles.rowError}>
+            {error}
+          </Text>
+        ) : null}
+      </SettingsSection>
+      {editing !== null ? (
+        <RepositoryFormSheet
+          key={editing === "new" ? "new" : editing.repositoryId}
+          initial={editing === "new" ? undefined : editing}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+      {importing ? <PlanImportSheet onClose={() => setImporting(false)} /> : null}
+    </View>
+  );
+}

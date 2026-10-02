@@ -1989,6 +1989,7 @@ export const fr: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "Paramètres",
     loading: "Chargement des paramètres...",
     groups: {

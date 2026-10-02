@@ -2426,6 +2426,80 @@ export class Session {
     source?: object,
   ): Promise<void> | undefined {
     if (!this.skillRepositoryService) return undefined;
+    if (msg.type === "skills.repository.get_state.request") {
+      return this.skillRepositoryService.getState().then((repositories) => {
+        this.emitForSource(
+          {
+            type: "skills.repository.get_state.response",
+            payload: { requestId: msg.requestId, repositories },
+          },
+          source,
+        );
+        return undefined;
+      });
+    }
+    if (msg.type === "skills.repository.configure.request") {
+      const service = this.skillRepositoryService;
+      return Promise.resolve()
+        .then(async () => {
+          if (msg.subscription) {
+            if (msg.subscription.repositoryId !== msg.repositoryId)
+              throw new Error("Repository ID mismatch");
+            await service.upsert(msg.subscription, msg.expected);
+          } else {
+            await service.remove(msg.repositoryId, msg.expected);
+          }
+          return undefined;
+        })
+        .then(() => {
+          this.emitForSource(
+            { type: "skills.repository.configure.response", payload: { requestId: msg.requestId } },
+            source,
+          );
+          return undefined;
+        })
+        .catch((error) => {
+          this.emitForSource(
+            {
+              type: "skills.repository.configure.response",
+              payload: {
+                requestId: msg.requestId,
+                error: error instanceof Error ? error.message : String(error),
+              },
+            },
+            source,
+          );
+          return undefined;
+        });
+    }
+    if (msg.type === "skills.repository.sync.request") {
+      return this.skillRepositoryService
+        .sync(msg.repositoryId, source ?? null, msg.expected)
+        .then((state) => {
+          this.emitForSource(
+            {
+              type: "skills.repository.sync.response",
+              payload: { requestId: msg.requestId, state },
+            },
+            source,
+          );
+          return undefined;
+        })
+        .catch((error) => {
+          this.emitForSource(
+            {
+              type: "skills.repository.sync.response",
+              payload: {
+                requestId: msg.requestId,
+                state: "failed",
+                error: error instanceof Error ? error.message : String(error),
+              },
+            },
+            source,
+          );
+          return undefined;
+        });
+    }
     if (msg.type === "skills.repository.list.request") {
       this.emitForSource(
         {

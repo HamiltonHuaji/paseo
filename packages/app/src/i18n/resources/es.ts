@@ -1984,6 +1984,7 @@ export const es: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "Ajustes",
     loading: "Cargando configuración...",
     groups: {

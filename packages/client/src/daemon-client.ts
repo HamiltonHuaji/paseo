@@ -2441,6 +2441,42 @@ export class DaemonClient {
     });
   }
 
+  async getSkillRepositoryState(): Promise<
+    CorrelatedResponsePayload<"skills.repository.get_state.response">
+  > {
+    return this.sendCorrelatedSessionRequest({
+      message: { type: "skills.repository.get_state.request" },
+      responseType: "skills.repository.get_state.response",
+    });
+  }
+
+  async configureSkillRepository(
+    input: Omit<
+      Extract<SessionInboundMessage, { type: "skills.repository.configure.request" }>,
+      "type" | "requestId"
+    >,
+  ): Promise<void> {
+    const result = await this.sendCorrelatedSessionRequest({
+      message: { type: "skills.repository.configure.request", ...input },
+      responseType: "skills.repository.configure.response",
+    });
+    if (result.error) throw new Error(result.error);
+  }
+
+  async syncSkillRepository(
+    repositoryId: string,
+    expected: Extract<
+      SessionInboundMessage,
+      { type: "skills.repository.sync.request" }
+    >["expected"],
+  ): Promise<CorrelatedResponsePayload<"skills.repository.sync.response">> {
+    return this.sendCorrelatedSessionRequest({
+      message: { type: "skills.repository.sync.request", repositoryId, expected },
+      responseType: "skills.repository.sync.response",
+      timeout: 150_000,
+    });
+  }
+
   async listSkillRepositories(
     requestId?: string,
   ): Promise<CorrelatedResponsePayload<"skills.repository.list.response">> {

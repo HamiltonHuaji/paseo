@@ -7,6 +7,8 @@ import { z } from "zod";
 import {
   SkillRepositorySubscriptionSchema,
   type SkillRepositorySubscription,
+  type SkillRepositoryStatus,
+  type SkillRepositoryState,
   type SkillRepositoryExecutorJobRequest,
   type SkillRepositoryExecutorJobResponse,
 } from "@getpaseo/protocol/skill-repositories";
@@ -35,20 +37,7 @@ interface PendingJob {
   timeout: ReturnType<typeof setTimeout>;
 }
 
-export interface SkillRepositoryStatus {
-  repositoryId: string;
-  checkoutPath: string;
-  branch: string;
-  localHead: string | null;
-  remoteHead: string | null;
-  remoteTrackingRef: string | null;
-  remoteCheckedAt: string | null;
-  worktree: "clean" | "dirty" | "conflicted";
-  ahead: number | null;
-  behind: number | null;
-  publication: "none" | "pending" | "published" | "blocked";
-  syncError: string | null;
-}
+export type { SkillRepositoryStatus } from "@getpaseo/protocol/skill-repositories";
 
 export interface FetchResult {
   state: "fetched" | "unavailable";
@@ -152,12 +141,16 @@ export class SkillRepositoryService {
     return subscription;
   }
 
-  async upsert(input: SkillRepositorySubscription): Promise<SkillRepositorySubscription> {
+  async upsert(
+    input: SkillRepositorySubscription,
+    expected?: SkillRepositorySubscription | null,
+  ): Promise<SkillRepositorySubscription> {
     const subscription = SkillRepositorySubscriptionSchema.parse(input);
     assertRepositoryId(subscription.repositoryId);
     assertRemoteUrl(subscription.remoteUrl);
     await git(process.cwd(), "check-ref-format", "--branch", subscription.branch);
     return this.withLock(subscription.repositoryId, async () => {
+      this.assertConfiguration(subscription.repositoryId, expected);
       const previous = this.store.subscriptions.find(
         (entry) => entry.repositoryId === subscription.repositoryId,
       );
@@ -187,8 +180,9 @@ export class SkillRepositoryService {
     });
   }
 
-  async remove(repositoryId: string): Promise<void> {
+  async remove(repositoryId: string, expected?: SkillRepositorySubscription | null): Promise<void> {
     await this.withLock(repositoryId, async () => {
+      this.assertConfiguration(repositoryId, expected);
       this.get(repositoryId);
       this.store.subscriptions = this.store.subscriptions.filter(
         (entry) => entry.repositoryId !== repositoryId,
@@ -198,6 +192,67 @@ export class SkillRepositoryService {
       delete this.store.syncErrors[repositoryId];
       delete this.store.remoteCheckedAt[repositoryId];
       await this.saveStore();
+    });
+  }
+
+  private assertConfiguration(
+    repositoryId: string,
+    expected: SkillRepositorySubscription | null | undefined,
+  ): void {
+    if (expected === undefined) return;
+    const current =
+      this.store.subscriptions.find((item) => item.repositoryId === repositoryId) ?? null;
+    if (JSON.stringify(current) !== JSON.stringify(expected)) {
+      throw new Error(
+        "Subscription changed on this host. Review its current settings and try again.",
+      );
+    }
+  }
+
+  async getState(): Promise<SkillRepositoryState[]> {
+    return Promise.all(
+      this.list().map(async (subscription) => {
+        let status: SkillRepositoryStatus | null = null;
+        let error: string | null = null;
+        try {
+          status = await this.status(subscription.repositoryId);
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : String(cause);
+        }
+        return {
+          subscription,
+          status,
+          error,
+          busy: this.locks.has(subscription.repositoryId),
+          canRead: Boolean(this.chooseExecutor(subscription.repositoryId, "read", null)),
+          canPublish:
+            subscription.agentPublishAllowed &&
+            Boolean(this.chooseExecutor(subscription.repositoryId, "publish", null)),
+        };
+      }),
+    );
+  }
+
+  async sync(
+    repositoryId: string,
+    preferred: object | null = null,
+    expected?: SkillRepositorySubscription,
+  ): Promise<"updated" | "fetched" | "unavailable" | "needs_resolution"> {
+    return this.withLock(repositoryId, async () => {
+      this.assertConfiguration(repositoryId, expected);
+      try {
+        const subscription = this.get(repositoryId);
+        const fetched = await this.fetchLocked(repositoryId, preferred);
+        if (fetched.state === "unavailable") return "unavailable";
+        if (subscription.autoReceive === "none") return "fetched";
+        await this.applyReceived(subscription, fetched);
+        return this.store.syncErrors[repositoryId] ? "needs_resolution" : "updated";
+      } catch (error) {
+        this.store.syncErrors[repositoryId] =
+          error instanceof Error ? error.message : String(error);
+        await this.saveStore();
+        throw error;
+      }
     });
   }
 
@@ -287,6 +342,7 @@ export class SkillRepositoryService {
     const executor = this.executors.get(source);
     if (!executor) return;
     for (const [repositoryId, capability] of executor.repositories) {
+      if (!this.store.subscriptions.some((item) => item.repositoryId === repositoryId)) continue;
       if (
         capability.publish &&
         this.store.pendingPublications[repositoryId] &&
@@ -452,6 +508,7 @@ export class SkillRepositoryService {
     }
     const remoteCheckedAt = new Date().toISOString();
     this.store.remoteCheckedAt[repositoryId] = remoteCheckedAt;
+    delete this.store.syncErrors[repositoryId];
     await this.saveStore();
     return {
       state: "fetched",
@@ -477,61 +534,70 @@ export class SkillRepositoryService {
       if (subscription.autoReceive === "none") return;
       const fetched = await this.fetchLocked(repositoryId, null);
       if (fetched.state !== "fetched" || !fetched.remoteTrackingRef) return;
-      const checkout = this.checkoutPath(repositoryId);
-      const localHead = await gitMaybe(checkout, "rev-parse", "HEAD");
-      if (subscription.autoReceive === "overwrite") {
-        if (localHead) {
-          await git(checkout, "update-ref", `refs/paseo/recovery/${randomUUID()}`, localHead);
-        }
-        await git(checkout, "reset", "--hard", fetched.remoteTrackingRef);
-        await git(checkout, "clean", "-fdx");
-        delete this.store.pendingPublications[repositoryId];
-        delete this.store.blockedPublications[repositoryId];
-        delete this.store.syncErrors[repositoryId];
-        await this.saveStore();
-        return;
+      await this.applyReceived(subscription, fetched);
+    });
+  }
+
+  private async applyReceived(
+    subscription: SkillRepositorySubscription,
+    fetched: FetchResult,
+  ): Promise<void> {
+    const repositoryId = subscription.repositoryId;
+    if (!fetched.remoteTrackingRef) return;
+    const checkout = this.checkoutPath(repositoryId);
+    const localHead = await gitMaybe(checkout, "rev-parse", "HEAD");
+    if (subscription.autoReceive === "overwrite") {
+      if (localHead) {
+        await git(checkout, "update-ref", `refs/paseo/recovery/${randomUUID()}`, localHead);
       }
-      if (!localHead) {
-        await git(checkout, "checkout", "-B", subscription.branch, fetched.remoteTrackingRef);
-        delete this.store.syncErrors[repositoryId];
-        await this.saveStore();
-        return;
-      }
-      if (
-        (await gitMaybe(
-          checkout,
-          "merge-base",
-          "--is-ancestor",
-          fetched.remoteTrackingRef,
-          localHead,
-        )) !== null
-      ) {
-        delete this.store.syncErrors[repositoryId];
-        await this.saveStore();
-        return;
-      }
-      if ((await git(checkout, "status", "--porcelain")) !== "") {
-        this.store.syncErrors[repositoryId] = "Local skill checkout has uncommitted changes";
-        await this.saveStore();
-        return;
-      }
-      if (
-        (await gitMaybe(
-          checkout,
-          "merge-base",
-          "--is-ancestor",
-          localHead,
-          fetched.remoteTrackingRef,
-        )) === null
-      ) {
-        this.store.syncErrors[repositoryId] = "Local and remote skill histories have diverged";
-        await this.saveStore();
-        return;
-      }
-      await git(checkout, "merge", "--ff-only", fetched.remoteTrackingRef);
+      await git(checkout, "reset", "--hard", fetched.remoteTrackingRef);
+      await git(checkout, "clean", "-fdx");
+      delete this.store.pendingPublications[repositoryId];
+      delete this.store.blockedPublications[repositoryId];
       delete this.store.syncErrors[repositoryId];
       await this.saveStore();
-    });
+      return;
+    }
+    if (!localHead) {
+      await git(checkout, "checkout", "-B", subscription.branch, fetched.remoteTrackingRef);
+      delete this.store.syncErrors[repositoryId];
+      await this.saveStore();
+      return;
+    }
+    if (
+      (await gitMaybe(
+        checkout,
+        "merge-base",
+        "--is-ancestor",
+        fetched.remoteTrackingRef,
+        localHead,
+      )) !== null
+    ) {
+      delete this.store.syncErrors[repositoryId];
+      await this.saveStore();
+      return;
+    }
+    if ((await git(checkout, "status", "--porcelain")) !== "") {
+      this.store.syncErrors[repositoryId] = "Local skill checkout has uncommitted changes";
+      await this.saveStore();
+      return;
+    }
+    if (
+      (await gitMaybe(
+        checkout,
+        "merge-base",
+        "--is-ancestor",
+        localHead,
+        fetched.remoteTrackingRef,
+      )) === null
+    ) {
+      this.store.syncErrors[repositoryId] = "Local and remote skill histories have diverged";
+      await this.saveStore();
+      return;
+    }
+    await git(checkout, "merge", "--ff-only", fetched.remoteTrackingRef);
+    delete this.store.syncErrors[repositoryId];
+    await this.saveStore();
   }
 
   async status(repositoryId: string): Promise<SkillRepositoryStatus> {

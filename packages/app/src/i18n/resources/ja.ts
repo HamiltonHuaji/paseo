@@ -1956,6 +1956,7 @@ export const ja: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "設定",
     loading: "設定を読み込み中...",
     groups: {

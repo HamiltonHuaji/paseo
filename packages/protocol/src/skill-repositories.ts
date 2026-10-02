@@ -105,3 +105,71 @@ export type SkillRepositoryExecutorJobRequest = z.infer<
 export type SkillRepositoryExecutorJobResponse = z.infer<
   typeof SkillRepositoryExecutorJobResponseSchema
 >;
+
+export const SkillRepositoryStatusSchema = z.object({
+  repositoryId: z.string(),
+  checkoutPath: z.string(),
+  branch: z.string(),
+  localHead: z.string().nullable(),
+  remoteHead: z.string().nullable(),
+  remoteTrackingRef: z.string().nullable(),
+  remoteCheckedAt: z.string().nullable(),
+  worktree: z.enum(["clean", "dirty", "conflicted"]),
+  ahead: z.number().nullable(),
+  behind: z.number().nullable(),
+  publication: z.enum(["none", "pending", "published", "blocked"]),
+  syncError: z.string().nullable(),
+});
+export type SkillRepositoryStatus = z.infer<typeof SkillRepositoryStatusSchema>;
+
+export const SkillRepositoryGetStateRequestSchema = z.object({
+  type: z.literal("skills.repository.get_state.request"),
+  requestId: z.string(),
+});
+export const SkillRepositoryGetStateResponseSchema = z.object({
+  type: z.literal("skills.repository.get_state.response"),
+  payload: z.object({
+    requestId: z.string(),
+    repositories: z.array(
+      z.object({
+        subscription: SkillRepositorySubscriptionSchema,
+        status: SkillRepositoryStatusSchema.nullable(),
+        error: z.string().nullable(),
+        busy: z.boolean(),
+        canRead: z.boolean(),
+        canPublish: z.boolean(),
+      }),
+    ),
+  }),
+});
+export type SkillRepositoryState = z.infer<
+  typeof SkillRepositoryGetStateResponseSchema
+>["payload"]["repositories"][number];
+
+// Compare the configuration the user saw before replacing it. A different
+// client's changes must be surfaced, including deletion, rather than replayed over.
+export const SkillRepositoryConfigureRequestSchema = z.object({
+  type: z.literal("skills.repository.configure.request"),
+  requestId: z.string(),
+  repositoryId: z.string(),
+  expected: SkillRepositorySubscriptionSchema.nullable(),
+  subscription: SkillRepositorySubscriptionSchema.nullable(),
+});
+export const SkillRepositoryConfigureResponseSchema = z.object({
+  type: z.literal("skills.repository.configure.response"),
+  payload: z.object({ requestId: z.string(), error: z.string().optional() }),
+});
+export const SkillRepositorySyncRequestSchema = z.object({
+  type: z.literal("skills.repository.sync.request"),
+  requestId: z.string(),
+  repositoryId: z.string(),
+  expected: SkillRepositorySubscriptionSchema,
+});
+export const SkillRepositorySyncResponseSchema = z.object({
+  type: z.literal("skills.repository.sync.response"),
+  payload: z.object({
+    requestId: z.string(),
+    state: z.enum(["updated", "fetched", "unavailable", "needs_resolution", "failed"]),
+    error: z.string().optional(),
+  }),
+});
