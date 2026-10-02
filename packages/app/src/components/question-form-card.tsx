@@ -7,8 +7,10 @@ import { Check, X } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import type { PendingPermission } from "@/types/shared";
 import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
+import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { isWeb } from "@/constants/platform";
 import { EditingTextInput as TextInput } from "@/components/ui/text-input";
+import { QuestionFormMarkdown } from "./question-form-markdown";
 import {
   areQuestionsAnswered,
   buildQuestionFormAnswers,
@@ -25,6 +27,9 @@ interface QuestionFormCardProps {
   permission: PendingPermission;
   onRespond: (response: AgentPermissionResponse) => void;
   isResponding: boolean;
+  client: DaemonClient | null;
+  serverId: string;
+  workspaceRoot: string;
 }
 
 const IS_WEB = isWeb;
@@ -51,6 +56,10 @@ interface QuestionOptionRowProps {
   multiSelect: boolean;
   isResponding: boolean;
   onToggle: (qIndex: number, optIndex: number, multiSelect: boolean) => void;
+  occurrenceKey: string;
+  client: DaemonClient | null;
+  serverId: string;
+  workspaceRoot: string;
 }
 
 function QuestionOptionRow({
@@ -61,6 +70,10 @@ function QuestionOptionRow({
   multiSelect,
   isResponding,
   onToggle,
+  occurrenceKey,
+  client,
+  serverId,
+  workspaceRoot,
 }: QuestionOptionRowProps) {
   const { theme } = useUnistyles();
 
@@ -79,17 +92,6 @@ function QuestionOptionRow({
     [isSelected, theme.colors.surface2],
   );
 
-  const optionLabelStyle = useMemo(
-    () => [
-      styles.optionLabel,
-      { color: isSelected ? theme.colors.foreground : theme.colors.foregroundMuted },
-    ],
-    [isSelected, theme.colors.foreground, theme.colors.foregroundMuted],
-  );
-  const optionDescriptionStyle = useMemo(
-    () => [styles.optionDescription, { color: theme.colors.foregroundMuted }],
-    [theme.colors.foregroundMuted],
-  );
   const accessibilityState = useMemo(() => ({ checked: isSelected }), [isSelected]);
 
   // Static left-side control: square for multi-select, circle for single-select.
@@ -128,9 +130,23 @@ function QuestionOptionRow({
           {isSelected && !multiSelect ? <View style={radioDotStyle} /> : null}
         </View>
         <View style={styles.optionTextBlock}>
-          <Text style={optionLabelStyle}>{option.label}</Text>
+          <QuestionFormMarkdown
+            text={option.label}
+            occurrenceKey={`${occurrenceKey}:label`}
+            client={client}
+            serverId={serverId}
+            workspaceRoot={workspaceRoot}
+            muted={!isSelected}
+          />
           {option.description ? (
-            <Text style={optionDescriptionStyle}>{option.description}</Text>
+            <QuestionFormMarkdown
+              text={option.description}
+              occurrenceKey={`${occurrenceKey}:description`}
+              client={client}
+              serverId={serverId}
+              workspaceRoot={workspaceRoot}
+              muted
+            />
           ) : null}
         </View>
       </View>
@@ -317,7 +333,14 @@ function QuestionOtherInput({
   );
 }
 
-export function QuestionFormCard({ permission, onRespond, isResponding }: QuestionFormCardProps) {
+export function QuestionFormCard({
+  permission,
+  onRespond,
+  isResponding,
+  client,
+  serverId,
+  workspaceRoot,
+}: QuestionFormCardProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
@@ -480,10 +503,6 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
     ],
     [theme.colors.surface1, theme.colors.border],
   );
-  const questionTextStyle = useMemo(
-    () => [styles.questionText, { color: theme.colors.foreground }],
-    [theme.colors.foreground],
-  );
   // Single-select radios need a group; checkboxes are valid standalone.
   const optionsGroupAccessibility = useMemo(
     () =>
@@ -528,9 +547,15 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
         onSelect={handleSelectQuestion}
       />
       <View style={styles.questionHeader}>
-        <Text testID="question-form-current-question" style={questionTextStyle}>
-          {activeQuestion?.question}
-        </Text>
+        <View testID="question-form-current-question" style={styles.questionContent}>
+          <QuestionFormMarkdown
+            text={activeQuestion?.question ?? ""}
+            occurrenceKey={`${permission.key}:${resolvedActiveQuestionIndex}:question`}
+            client={client}
+            serverId={serverId}
+            workspaceRoot={workspaceRoot}
+          />
+        </View>
       </View>
 
       {activeQuestion ? (
@@ -547,6 +572,10 @@ export function QuestionFormCard({ permission, onRespond, isResponding }: Questi
                   multiSelect={activeQuestion.multiSelect}
                   isResponding={isResponding}
                   onToggle={toggleOption}
+                  occurrenceKey={`${permission.key}:${resolvedActiveQuestionIndex}:option:${optIndex}`}
+                  client={client}
+                  serverId={serverId}
+                  workspaceRoot={workspaceRoot}
                 />
               ))}
             </View>
@@ -628,11 +657,9 @@ const styles = StyleSheet.create((theme) => ({
     paddingBottom: theme.spacing[1],
     flex: 1,
   },
-  questionText: {
+  questionContent: {
     flex: 1,
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.normal,
-    lineHeight: 22,
+    minWidth: 0,
   },
   optionsWrap: {
     gap: theme.spacing[1],
@@ -676,16 +703,8 @@ const styles = StyleSheet.create((theme) => ({
   },
   optionTextBlock: {
     flex: 1,
+    minWidth: 0,
     gap: theme.spacing[1],
-  },
-  optionLabel: {
-    fontSize: theme.fontSize.base,
-    fontWeight: theme.fontWeight.normal,
-    lineHeight: 22,
-  },
-  optionDescription: {
-    fontSize: theme.fontSize.base,
-    lineHeight: 20,
   },
   selectionControl: {
     width: 18,

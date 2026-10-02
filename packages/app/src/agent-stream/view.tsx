@@ -145,6 +145,8 @@ function BottomOverlayInset({ height }: { height: number }) {
 function renderPendingPermissionsNode(input: {
   pendingPermissions: PendingPermission[];
   client: DaemonClient | null;
+  serverId: string;
+  workspaceRoot: string;
 }): ReactNode {
   if (input.pendingPermissions.length === 0) {
     return null;
@@ -152,7 +154,13 @@ function renderPendingPermissionsNode(input: {
   return (
     <View style={stylesheet.permissionsContainer}>
       {input.pendingPermissions.map((permission) => (
-        <PermissionRequestCard key={permission.key} permission={permission} client={input.client} />
+        <PermissionRequestCard
+          key={permission.key}
+          permission={permission}
+          client={input.client}
+          serverId={input.serverId}
+          workspaceRoot={input.workspaceRoot}
+        />
       ))}
     </View>
   );
@@ -964,14 +972,33 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       () => Array.from(pendingPermissions.values()).filter((perm) => perm.agentId === agentId),
       [pendingPermissions, agentId],
     );
-    const pendingPermissionsNode = useMemo(
-      () =>
-        renderPendingPermissionsNode({
-          pendingPermissions: pendingPermissionItems,
-          client,
-        }),
-      [client, pendingPermissionItems],
-    );
+    const pendingPermissionsNode = useMemo(() => {
+      const cards = renderPendingPermissionsNode({
+        pendingPermissions: pendingPermissionItems,
+        client,
+        serverId: resolvedServerId,
+        workspaceRoot,
+      });
+      if (!cards) return null;
+      return (
+        <AssistantFileLinkResolverProvider
+          client={client}
+          serverId={resolvedServerId}
+          workspaceRoot={workspaceRoot}
+          onOpenWorkspaceFile={handleInlinePathPress}
+          toast={toast}
+        >
+          {cards}
+        </AssistantFileLinkResolverProvider>
+      );
+    }, [
+      client,
+      handleInlinePathPress,
+      pendingPermissionItems,
+      resolvedServerId,
+      toast,
+      workspaceRoot,
+    ]);
     const turnFooterNode = useMemo(
       () =>
         isTurnActive || bottomTurnFooterHost ? (
@@ -1435,9 +1462,13 @@ function PermissionActionButton({
 function PermissionRequestCard({
   permission,
   client,
+  serverId,
+  workspaceRoot,
 }: {
   permission: PendingPermission;
   client: DaemonClient | null;
+  serverId: string;
+  workspaceRoot: string;
 }) {
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
@@ -1573,6 +1604,9 @@ function PermissionRequestCard({
         permission={permission}
         onRespond={handleResponse}
         isResponding={isResponding}
+        client={client}
+        serverId={serverId}
+        workspaceRoot={workspaceRoot}
       />
     );
   }
