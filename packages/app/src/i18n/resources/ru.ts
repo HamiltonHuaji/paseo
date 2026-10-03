@@ -415,6 +415,10 @@ export const ru: TranslationResources = {
       noProviders: "Нет включённых провайдеров с поддержкой импорта.",
       loading: "Загрузка недавних сессий...",
       failedProvider: "Не удалось загрузить сессии провайдера {{provider}}",
+      writerLocked: en.importSession.status.writerLocked,
+      retryImport: en.importSession.status.retryImport,
+      importCopy: en.importSession.status.importCopy,
+      updateForCopy: en.importSession.status.updateForCopy,
       failedImport: "Не удалось импортировать выбранную сессию.",
     },
     actions: {

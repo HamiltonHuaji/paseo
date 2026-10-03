@@ -416,6 +416,10 @@ export const es: TranslationResources = {
       noProviders: "No hay proveedores importables habilitados.",
       loading: "Cargando sesiones recientes...",
       failedProvider: "No se pudieron cargar las sesiones de {{provider}}",
+      writerLocked: en.importSession.status.writerLocked,
+      retryImport: en.importSession.status.retryImport,
+      importCopy: en.importSession.status.importCopy,
+      updateForCopy: en.importSession.status.updateForCopy,
       failedImport: "No se pudo importar la sesión seleccionada.",
     },
     actions: {

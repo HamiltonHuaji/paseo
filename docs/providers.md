@@ -110,6 +110,8 @@ Draft metadata lookups should avoid creating provider sessions when the upstream
 
 Provider session import has its own contract. The picker calls `listImportableSessions` and receives rows only: provider handle, cwd, title, prompt previews, and last activity. Import calls `importSession({ providerHandleId, cwd })` for the selected row and must not call listing again. The provider returns the resumed session, storage config, persistence handle, and hydrated timeline for that one native session; `AgentManager.importProviderSession` seeds the daemon timeline and publishes the Paseo agent only after it is ready.
 
+Codex permits one writer per native session. Closing a CLI window does not prove that its writer has exited. Preserve the provider's import error so the user can retry the original or explicitly import an independent copy through Codex's native fork. A copy continues from saved history with a new native handle; it does not take ownership from the original. Failed history hydration must close the resumed session so a failed import cannot retain its writer.
+
 ## Provider Helper Processes
 
 Provider-owned helper processes that can outlive an individual agent session must be recorded in the daemon's managed-process registry. Store provider/kind metadata, the PID, launch command/args, and process identity captured from the platform process table. Remove the record on normal exit or shutdown.

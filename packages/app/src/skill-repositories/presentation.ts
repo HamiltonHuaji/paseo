@@ -36,8 +36,18 @@ export function visibleSubscriptions(
   if (!local) return subscriptions;
   for (const member of local.plan.members.filter((m) => m.serverId === serverId && !m.deleted)) {
     const subscription = subscriptionFromPlan(local.plan, serverId, member.repositoryId);
-    if (subscription && !subscriptions.has(member.repositoryId))
+    if (
+      subscription &&
+      (local.pending.some(
+        (p) => p.serverId === serverId && p.repositoryId === member.repositoryId,
+      ) ||
+        !subscriptions.has(member.repositoryId))
+    )
       subscriptions.set(member.repositoryId, subscription);
+  }
+  for (const pending of local.pending.filter((p) => p.serverId === serverId)) {
+    if (!subscriptions.has(pending.repositoryId) && pending.expected)
+      subscriptions.set(pending.repositoryId, pending.expected);
   }
   return subscriptions;
 }

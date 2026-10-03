@@ -224,7 +224,17 @@ export async function importSkillRepositoryPlan(
         (member.deleted ||
           state.plan.repositories.some((r) => r.repositoryId === member.repositoryId && r.deleted));
       if (JSON.stringify(before) === JSON.stringify(after) && !explicitRemoval) continue;
-      queueMember(state, member, before);
+      const pending = state.pending.find(
+        (p) => p.serverId === member.serverId && p.repositoryId === member.repositoryId,
+      );
+      member.revision = revision();
+      queueMember(
+        state,
+        member,
+        pending
+          ? pending.expected
+          : (before ?? (explicitRemoval ? savedSubscription(state.plan, member) : null)),
+      );
     }
     await writeState(state);
   });
@@ -240,8 +250,17 @@ export function subscriptionFromPlan(
     (m) => m.serverId === serverId && m.repositoryId === repositoryId && !m.deleted,
   );
   if (!repository || !member) return null;
+  return savedSubscription(plan, member);
+}
+
+function savedSubscription(
+  plan: SkillRepositoryPlan,
+  member: SkillRepositoryPlan["members"][number],
+): SkillRepositorySubscription | null {
+  const repository = plan.repositories.find((r) => r.repositoryId === member.repositoryId);
+  if (!repository) return null;
   return {
-    repositoryId,
+    repositoryId: member.repositoryId,
     label: repository.label,
     remoteUrl: repository.remoteUrl,
     branch: repository.branch,
@@ -333,7 +352,7 @@ export async function saveSkillRepositoryExecutor(input: {
 export async function removeSkillRepositoryMember(
   serverId: string,
   repositoryId: string,
-  expected: SkillRepositorySubscription,
+  expected: SkillRepositorySubscription | null,
 ): Promise<void> {
   await mutate(async () => {
     const state = await readState();
@@ -350,11 +369,35 @@ export async function removeSkillRepositoryMember(
 export async function removeSkillRepository(repositoryId: string): Promise<void> {
   await mutate(async () => {
     const state = await readState();
-    if (state.plan.members.some((m) => m.repositoryId === repositoryId && !m.deleted))
-      throw new Error("Remove this repository's host subscriptions first");
+    for (const member of state.plan.members.filter((m) => m.repositoryId === repositoryId)) {
+      const pending = state.pending.find(
+        (p) => p.serverId === member.serverId && p.repositoryId === repositoryId,
+      );
+      if (member.deleted && !pending) continue;
+      const expected = pending
+        ? pending.expected
+        : subscriptionFromPlan(state.plan, member.serverId, repositoryId);
+      Object.assign(member, { deleted: true, revision: revision() });
+      queueMember(state, member, expected);
+    }
     const repository = state.plan.repositories.find((r) => r.repositoryId === repositoryId);
     if (repository) Object.assign(repository, { deleted: true, revision: revision() });
     state.executors = state.executors.filter((e) => e.repositoryId !== repositoryId);
+    await writeState(state);
+  });
+}
+
+export async function retrySkillRepositoryChange(
+  serverId: string,
+  repositoryId: string,
+): Promise<void> {
+  await mutate(async () => {
+    const state = await readState();
+    const pending = state.pending.find(
+      (p) => p.serverId === serverId && p.repositoryId === repositoryId,
+    );
+    if (!pending) return;
+    delete pending.error;
     await writeState(state);
   });
 }
@@ -364,16 +407,23 @@ export async function recordSkillRepositoryApply(
   repositoryId: string,
   appliedRevision: string,
   error?: string,
+  applied?: SkillRepositorySubscription | null,
 ): Promise<void> {
   await mutate(async () => {
     const state = await readState();
     const pending = state.pending.find(
-      (p) =>
-        p.serverId === serverId &&
-        p.repositoryId === repositoryId &&
-        p.revision === appliedRevision,
+      (p) => p.serverId === serverId && p.repositoryId === repositoryId,
     );
     if (!pending) return;
+    // An edit can be replaced while its RPC is in flight. The next edit must
+    // compare against the configuration our completed RPC actually installed.
+    if (pending.revision !== appliedRevision) {
+      if (!error && applied !== undefined) {
+        pending.expected = applied;
+        await writeState(state);
+      }
+      return;
+    }
     if (error) {
       if (pending.error === error) return;
       pending.error = error;
@@ -385,12 +435,33 @@ export async function recordSkillRepositoryApply(
 export async function discardSkillRepositoryChange(
   serverId: string,
   repositoryId: string,
+  actual: SkillRepositorySubscription | null,
 ): Promise<void> {
   await mutate(async () => {
     const state = await readState();
     state.pending = state.pending.filter(
       (p) => p.serverId !== serverId || p.repositoryId !== repositoryId,
     );
+    const member = state.plan.members.find(
+      (m) => m.serverId === serverId && m.repositoryId === repositoryId,
+    );
+    if (member) Object.assign(member, { deleted: !actual, revision: revision() });
+    if (actual) {
+      const repository = state.plan.repositories.find((r) => r.repositoryId === repositoryId);
+      if (repository)
+        Object.assign(repository, {
+          label: actual.label,
+          remoteUrl: actual.remoteUrl,
+          branch: actual.branch,
+          deleted: false,
+          revision: revision(),
+        });
+      if (member)
+        Object.assign(member, {
+          autoReceive: actual.autoReceive,
+          agentPublishAllowed: actual.agentPublishAllowed,
+        });
+    }
     await writeState(state);
   });
 }
@@ -412,7 +483,7 @@ export async function rememberSkillRepositorySubscriptions(
             (p) => p.serverId === serverId && p.repositoryId === member.repositoryId,
           )
         )
-          queueMember(state, member, null);
+          queueMember(state, member, savedSubscription(state.plan, member));
       }
     }
     for (const subscription of subscriptions) {
@@ -434,13 +505,8 @@ export async function rememberSkillRepositorySubscriptions(
       )
         continue;
       if (repository?.deleted) {
-        Object.assign(repository, {
-          label: subscription.label,
-          remoteUrl: subscription.remoteUrl,
-          branch: subscription.branch,
-          deleted: false,
-          revision: revision(),
-        });
+        queueRemovedRepositorySubscription(state, serverId, subscription);
+        continue;
       }
       const member = state.plan.members.find(
         (m) => m.serverId === serverId && m.repositoryId === subscription.repositoryId,
@@ -473,4 +539,23 @@ export async function rememberSkillRepositorySubscriptions(
     if (!state.observedServers.includes(serverId)) state.observedServers.push(serverId);
     if (before !== JSON.stringify(state)) await writeState(state);
   });
+}
+
+function queueRemovedRepositorySubscription(
+  state: SkillRepositoryLocalState,
+  serverId: string,
+  subscription: SkillRepositorySubscription,
+) {
+  const member = state.plan.members.find(
+    (m) => m.serverId === serverId && m.repositoryId === subscription.repositoryId,
+  ) ?? {
+    serverId,
+    repositoryId: subscription.repositoryId,
+    autoReceive: subscription.autoReceive,
+    agentPublishAllowed: subscription.agentPublishAllowed,
+    revision: revision(),
+  };
+  if (!state.plan.members.includes(member)) state.plan.members.push(member);
+  Object.assign(member, { deleted: true, revision: revision() });
+  queueMember(state, member, subscription);
 }

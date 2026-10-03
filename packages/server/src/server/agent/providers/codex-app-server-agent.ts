@@ -39,7 +39,10 @@ import {
   type ProviderRefreshContext,
   type ResolveAgentDefaultModeInput,
 } from "../agent-sdk-types.js";
-import { importSessionFromPersistence } from "../provider-session-import.js";
+import {
+  collectImportedHistory,
+  importSessionFromPersistence,
+} from "../provider-session-import.js";
 import { runProviderRefreshActivity } from "../provider-refresh-deadline.js";
 import type { Logger } from "pino";
 
@@ -4827,6 +4830,27 @@ export class CodexAppServerAgentSession implements AgentSession {
     };
   }
 
+  async forkNativeSession(threadId: string): Promise<void> {
+    await this.connect();
+    if (!this.client) throw new Error("Codex client is not initialized");
+    const config = this.buildCodexInnerConfig();
+    const developerInstructions = composeSystemPromptParts(
+      this.config.systemPrompt,
+      this.config.daemonAppendSystemPrompt,
+    );
+    const forked = await forkCodexThread(this.client, {
+      threadId,
+      cwd: this.config.cwd,
+      ...(config ? { config } : {}),
+      ...(developerInstructions ? { developerInstructions } : {}),
+      excludeTurns: false,
+      persistExtendedHistory: true,
+    });
+    this.currentThreadId = forked.thread.id;
+    this.rememberResolvedSandboxPolicy(forked);
+    await this.loadPersistedHistory(this.client);
+  }
+
   async forkFromConversation(
     source: CodexAppServerAgentSession,
     input: AgentConversationForkInput,
@@ -7184,7 +7208,7 @@ export class CodexAppServerAgentClient implements AgentClient {
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,
     options?: AgentCreateSessionOptions,
-  ): Promise<AgentSession> {
+  ): Promise<CodexAppServerAgentSession> {
     if (options?.persistSession === false) {
       this.logger.debug(
         "Codex app-server does not expose an ephemeral-session option; persistSession=false is currently a no-op",
@@ -7328,6 +7352,25 @@ export class CodexAppServerAgentClient implements AgentClient {
   }
 
   async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+    if (input.fork) {
+      const config = { ...context.config, cwd: input.cwd };
+      const session = await this.createSession(config, context.launchContext);
+      try {
+        await session.forkNativeSession(input.providerHandleId);
+        const persistence = session.describePersistence();
+        if (!persistence) throw new Error("Codex did not return a persistence handle for the copy");
+        const history = await collectImportedHistory(session.streamHistory());
+        return {
+          session,
+          config: { ...context.storedConfig, cwd: input.cwd },
+          persistence,
+          ...history,
+        };
+      } catch (error) {
+        await session.close().catch(() => undefined);
+        throw error;
+      }
+    }
     return importSessionFromPersistence({
       provider: CODEX_PROVIDER,
       request: input,

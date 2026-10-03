@@ -412,6 +412,10 @@ export const ko: TranslationResources = {
       noProviders: "가져올 수 있는 프로바이더가 활성화되어 있지 않습니다.",
       loading: "최근 세션을 불러오는 중...",
       failedProvider: "{{provider}} 세션을 불러올 수 없습니다",
+      writerLocked: en.importSession.status.writerLocked,
+      retryImport: en.importSession.status.retryImport,
+      importCopy: en.importSession.status.importCopy,
+      updateForCopy: en.importSession.status.updateForCopy,
       failedImport: "선택한 세션을 가져올 수 없습니다.",
     },
     actions: {

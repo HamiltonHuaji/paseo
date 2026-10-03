@@ -410,6 +410,11 @@ export const zhCN: TranslationResources = {
       noProviders: "没有已启用的可导入 Provider。",
       loading: "正在加载最近会话...",
       failedProvider: "无法加载 {{provider}} 的会话",
+      writerLocked:
+        "Codex 仍报告此会话的写入锁被占用。可在占用者释放后重试，或将已保存的历史导入为独立副本。副本使用新的会话 ID，后续消息不会与原会话共享。",
+      retryImport: "重试原会话",
+      importCopy: "导入副本",
+      updateForCopy: "更新此主机后可导入副本。",
       failedImport: "无法导入所选会话。",
     },
     actions: {
@@ -1915,6 +1920,13 @@ export const zhCN: TranslationResources = {
   },
   settings: {
     skillRepos: {
+      hostCount: "{{count}} 个主机订阅",
+      hostSettings: "主机设置",
+      pendingRemoval: "取消订阅已排队",
+      removeRepository: "删除 {{name}}？",
+      removeInfo:
+        "从计划中删除该仓库，并在主机连接后取消其订阅。保留各主机的仓库文件和 skill 软链接。导出计划可将此删除同步到其它客户端。",
+
       alreadyConfigured: "此地址和分支已配置为 {{name}}，请编辑已有仓库。",
       hideDetails: "收起详情",
       removed: "已移除",

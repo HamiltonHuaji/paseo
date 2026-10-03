@@ -43,6 +43,7 @@ const providerSessionImportMutations = new WeakMap<
 >();
 
 export interface NormalizedImportAgentRequest {
+  fork?: boolean;
   provider: AgentProvider;
   providerHandleId: string;
   cwd?: string;
@@ -108,6 +109,7 @@ export function normalizeImportAgentRequest(
   }
   return {
     provider: provider as AgentProvider,
+    fork: msg.fork,
     providerHandleId,
     cwd: msg.cwd,
     workspaceId: msg.workspaceId,
@@ -211,11 +213,11 @@ async function importProviderSessionNow(
     providerHandleId,
   );
   const activeRecord = matchingRecords.find((record) => !record.archivedAt);
-  if (activeRecord) {
+  if (activeRecord && !input.request.fork) {
     throw new Error(`Provider session is already imported: ${providerHandleId}`);
   }
   const archivedRecord = matchingRecords.find((record) => record.archivedAt);
-  if (archivedRecord?.persistence && archivedRecord.archivedAt) {
+  if (archivedRecord?.persistence && archivedRecord.archivedAt && !input.request.fork) {
     if (!createRealpathAwarePathMatcher(cwd)(archivedRecord.cwd)) {
       throw new Error(`Provider session cwd does not match import cwd: ${providerHandleId}`);
     }
@@ -250,6 +252,7 @@ async function importProviderSessionNow(
   const snapshot = await input.agentManager.importProviderSession({
     provider,
     providerHandleId,
+    fork: input.request.fork,
     cwd,
     workspaceId,
     labels,

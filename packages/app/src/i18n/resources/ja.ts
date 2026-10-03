@@ -416,6 +416,10 @@ export const ja: TranslationResources = {
       noProviders: "インポート可能なプロバイダーが有効になっていません。",
       loading: "最近のセッションを読み込み中...",
       failedProvider: "{{provider}} のセッションを読み込めませんでした",
+      writerLocked: en.importSession.status.writerLocked,
+      retryImport: en.importSession.status.retryImport,
+      importCopy: en.importSession.status.importCopy,
+      updateForCopy: en.importSession.status.updateForCopy,
       failedImport: "選択したセッションをインポートできませんでした。",
     },
     actions: {

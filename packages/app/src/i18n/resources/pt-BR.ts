@@ -415,6 +415,10 @@ export const ptBR: TranslationResources = {
       noProviders: "Nenhum provedor importável está ativado.",
       loading: "Carregando sessões recentes...",
       failedProvider: "Não foi possível carregar as sessões de {{provider}}",
+      writerLocked: en.importSession.status.writerLocked,
+      retryImport: en.importSession.status.retryImport,
+      importCopy: en.importSession.status.importCopy,
+      updateForCopy: en.importSession.status.updateForCopy,
       failedImport: "Não foi possível importar a sessão selecionada.",
     },
     actions: {

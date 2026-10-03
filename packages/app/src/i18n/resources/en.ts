@@ -407,6 +407,11 @@ export const en = {
       noProviders: "No importable providers are enabled.",
       loading: "Loading recent sessions...",
       failedProvider: "Could not load {{provider}} sessions",
+      writerLocked:
+        "Codex still reports a writer for this session. You can retry after the owner releases it, or import the saved history as an independent copy. The copy gets a new session ID; future messages are not shared with the original.",
+      retryImport: "Retry original session",
+      importCopy: "Import a copy",
+      updateForCopy: "Update this host to import a copy.",
       failedImport: "Could not import selected session.",
     },
     actions: {
@@ -1963,6 +1968,13 @@ export const en = {
   },
   settings: {
     skillRepos: {
+      hostCount: "{{count}} host subscriptions",
+      hostSettings: "Host settings",
+      pendingRemoval: "Unsubscribe queued",
+      removeRepository: "Remove {{name}}?",
+      removeInfo:
+        "Removes this repository from the plan and unsubscribes its hosts when they connect. Checkouts and skill links are kept. Export the plan to carry this deletion to your other clients.",
+
       alreadyConfigured:
         "This remote and branch are already configured as {{name}}. Edit that repository.",
       hideDetails: "Hide details",

@@ -136,7 +136,10 @@ interface SheetStatusMessagesProps {
   hasNoImportableProviders: boolean;
   isLoadingSessions: boolean;
   hasRows: boolean;
-  importErrored: boolean;
+  importError: Error | null;
+  supportsImportFork: boolean;
+  onRetryImport(): void;
+  onImportCopy(): void;
 }
 
 function SheetStatusMessages({
@@ -145,7 +148,10 @@ function SheetStatusMessages({
   hasNoImportableProviders,
   isLoadingSessions,
   hasRows,
-  importErrored,
+  importError,
+  supportsImportFork,
+  onRetryImport,
+  onImportCopy,
 }: SheetStatusMessagesProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -166,8 +172,27 @@ function SheetStatusMessages({
           <Text style={styles.statusText}>{t("importSession.status.loading")}</Text>
         </View>
       ) : null}
-      {importErrored ? (
-        <Text style={styles.statusText}>{t("importSession.status.failedImport")}</Text>
+      {importError ? (
+        <Text selectable accessibilityRole="alert" style={styles.statusText}>
+          {t("importSession.status.failedImport")}
+          {"\n"}
+          {importError.message}
+        </Text>
+      ) : null}
+      {importError?.message.includes("already has an active writer") ? (
+        <View>
+          <Text style={styles.statusText}>{t("importSession.status.writerLocked")}</Text>
+          <Button variant="outline" onPress={onRetryImport}>
+            {t("importSession.status.retryImport")}
+          </Button>
+          {supportsImportFork ? (
+            <Button variant="outline" onPress={onImportCopy}>
+              {t("importSession.status.importCopy")}
+            </Button>
+          ) : (
+            <Text style={styles.statusText}>{t("importSession.status.updateForCopy")}</Text>
+          )}
+        </View>
       ) : null}
     </>
   );
@@ -421,6 +446,7 @@ export function ImportSessionSheet({
 
   const scopeCwd = isShowingAllDirectories ? null : (cwd ?? null);
   const supportsSearch = useHostFeature(serverId, "importSessionSearch");
+  const supportsImportFork = useHostFeature(serverId, "importSessionFork");
   const query = useDebouncedValue(supportsSearch ? searchInput : "", SEARCH_DEBOUNCE_MS).trim();
 
   useEffect(() => {
@@ -587,7 +613,7 @@ export function ImportSessionSheet({
   );
 
   const importMutation = useMutation({
-    mutationFn: async (entry: FetchRecentProviderSessionEntry) => {
+    mutationFn: async (entry: FetchRecentProviderSessionEntry & { fork?: boolean }) => {
       if (!client) {
         throw new Error(t("workspace.terminal.hostDisconnected"));
       }
@@ -603,6 +629,7 @@ export function ImportSessionSheet({
       const agent = await client.importAgent({
         providerId: entry.providerId,
         providerHandleId: entry.providerHandleId,
+        ...(entry.fork ? { fork: true } : {}),
         cwd: entry.cwd,
         ...(target.workspaceId ? { workspaceId: target.workspaceId } : {}),
       });
@@ -621,6 +648,14 @@ export function ImportSessionSheet({
       });
     },
   });
+
+  const handleRetryImport = useCallback(() => {
+    if (importMutation.variables) importMutation.mutate(importMutation.variables);
+  }, [importMutation]);
+  const handleImportCopy = useCallback(() => {
+    if (importMutation.variables)
+      importMutation.mutate({ ...importMutation.variables, fork: true });
+  }, [importMutation]);
 
   const importingSessionKey =
     importMutation.isPending && importMutation.variables
@@ -771,7 +806,10 @@ export function ImportSessionSheet({
         hasNoImportableProviders={hasNoImportableProviders}
         isLoadingSessions={isLoadingSessions}
         hasRows={visibleEntries.length > 0}
-        importErrored={importMutation.isError}
+        importError={importMutation.error}
+        supportsImportFork={supportsImportFork}
+        onRetryImport={handleRetryImport}
+        onImportCopy={handleImportCopy}
       />
       {providerErrorRows.length > 0 ? (
         <ProviderErrorBanner rows={providerErrorRows} onRetry={handleRetryProvider} />

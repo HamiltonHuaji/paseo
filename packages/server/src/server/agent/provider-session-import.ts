@@ -18,6 +18,7 @@ export async function importSessionFromPersistence(input: {
   config?: Partial<AgentSessionConfig>;
   persistence?: AgentPersistenceHandle;
 }): Promise<ImportedProviderSession> {
+  if (input.request.fork) throw new Error("This provider does not support importing a copy");
   const config = {
     ...input.context.config,
     ...input.config,
@@ -33,7 +34,13 @@ export async function importSessionFromPersistence(input: {
   const persistence =
     input.persistence ?? buildImportPersistenceHandle(input.provider, input.request, storedConfig);
   const session = await input.resumeSession(persistence, config, input.context.launchContext);
-  const history = await collectImportedHistory(session.streamHistory());
+  let history: Awaited<ReturnType<typeof collectImportedHistory>>;
+  try {
+    history = await collectImportedHistory(session.streamHistory());
+  } catch (error) {
+    await session.close().catch(() => undefined);
+    throw error;
+  }
 
   return {
     session,
@@ -61,7 +68,7 @@ function buildImportPersistenceHandle(
   };
 }
 
-async function collectImportedHistory(events: AsyncGenerator<AgentStreamEvent>): Promise<{
+export async function collectImportedHistory(events: AsyncGenerator<AgentStreamEvent>): Promise<{
   timeline: ImportedTimelineEntry[];
   providerSubagentEvents: Extract<AgentStreamEvent, { type: "provider_subagent" }>[];
 }> {

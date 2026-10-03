@@ -24,7 +24,9 @@ import {
   discardSkillRepositoryChange,
   rememberSkillRepositorySubscriptions,
   removeSkillRepositoryMember,
+  retrySkillRepositoryChange,
   saveSkillRepositoryMember,
+  subscriptionFromPlan,
   type SkillRepositoryLocalState,
 } from "@/skill-repositories/plan";
 import { settingsStyles } from "@/styles/settings";
@@ -90,12 +92,14 @@ function SubscriptionSheet({
   serverId,
   initial,
   actual,
+  connected,
   local,
   onClose,
 }: {
   serverId: string;
   initial?: SkillRepositorySubscription;
   actual: SkillRepositoryState | null;
+  connected: boolean;
   local: SkillRepositoryLocalState;
   onClose(): void;
 }) {
@@ -104,6 +108,13 @@ function SubscriptionSheet({
   const size = useIsCompactFormFactor() ? "md" : "sm";
   const [showDetails, setShowDetails] = useState(false);
   const [snapshot] = useState(actual);
+  const [expected] = useState(() => {
+    const queued = local.pending.find(
+      (p) => p.serverId === serverId && p.repositoryId === initial?.repositoryId,
+    );
+    if (queued && !queued.error) return queued.expected;
+    return connected ? (actual?.subscription ?? null) : (initial ?? null);
+  });
   const [model] = useState(() => openSubscriptionForm(initial));
   const form = useSyncExternalStore(model.subscribe, model.getState);
   useEffect(() => () => model.close(), [model]);
@@ -113,12 +124,8 @@ function SubscriptionSheet({
     setPending(true);
     setError("");
     try {
-      if (remove && snapshot)
-        await removeSkillRepositoryMember(
-          serverId,
-          snapshot.subscription.repositoryId,
-          snapshot.subscription,
-        );
+      if (remove && initial)
+        await removeSkillRepositoryMember(serverId, initial.repositoryId, expected);
       else
         await saveSkillRepositoryMember(
           {
@@ -127,7 +134,7 @@ function SubscriptionSheet({
             autoReceive: form.autoReceive,
             agentPublishAllowed: form.agentPublishAllowed,
           },
-          snapshot?.subscription ?? null,
+          expected,
         );
       onClose();
     } catch (cause) {
@@ -153,7 +160,7 @@ function SubscriptionSheet({
           <Button disabled={pending || !form.repositoryId} onPress={() => void act()}>
             {t(pending ? "settings.skillRepos.saving" : "settings.skillRepos.save")}
           </Button>
-          {snapshot ? (
+          {initial ? (
             <Button variant="outline" disabled={pending} onPress={() => void act(true)}>
               {t("settings.skillRepos.unsubscribe")}
             </Button>
@@ -328,8 +335,9 @@ function RepositoryRow({
   const pending = local.pending.find(
     (p) => p.serverId === serverId && p.repositoryId === subscription.repositoryId,
   );
-  const waitingForConfiguration = Boolean(pending && !pending.error);
-  const canEdit = Boolean(actual || pending?.error);
+  const removing = Boolean(
+    pending && !subscriptionFromPlan(local.plan, serverId, subscription.repositoryId),
+  );
   const label = repositoryStatusLabel(actual, connected, running, pending);
   const sync = async () => {
     if (!client) return;
@@ -355,10 +363,12 @@ function RepositoryRow({
         label={subscription.label}
         labelAccessory={
           <StatusBadge
-            label={t(`settings.skillRepos.status_${label}`)}
-            variant={
-              label === "needsResolution" || label === "configConflict" ? "warning" : "muted"
-            }
+            label={t(
+              removing && !pending?.error
+                ? "settings.skillRepos.pendingRemoval"
+                : `settings.skillRepos.status_${label}`,
+            )}
+            variant={["needsResolution", "configConflict"].includes(label) ? "warning" : "muted"}
           />
         }
         hint={
@@ -372,34 +382,73 @@ function RepositoryRow({
         error={repositoryRowError(error, actual, pending)}
       >
         <View style={styles.actions}>
-          <Button
-            size="sm"
-            variant="outline"
-            onPress={sync}
-            disabled={!ready || !actual || running || actual.busy || Boolean(pending)}
-          >
-            {t(running ? "settings.skillRepos.syncing" : syncLabel)}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onPress={onConfigure}
-            disabled={!ready || waitingForConfiguration || !canEdit}
-          >
-            {t("settings.skillRepos.configure")}
-          </Button>
-          {pending?.error ? (
+          {!removing ? (
             <Button
               size="sm"
-              variant="ghost"
-              onPress={() =>
-                void discardSkillRepositoryChange(serverId, subscription.repositoryId)
-                  .then(onRefresh)
-                  .catch((cause) => setError(repositoryError(cause)))
-              }
+              variant="outline"
+              onPress={sync}
+              disabled={!ready || !actual || running || actual.busy || Boolean(pending)}
             >
-              {t("settings.skillRepos.useHostSettings")}
+              {t(running ? "settings.skillRepos.syncing" : syncLabel)}
             </Button>
+          ) : null}
+          {!local.plan.repositories.find((r) => r.repositoryId === subscription.repositoryId)
+            ?.deleted ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onPress={onConfigure}
+              disabled={connected && !ready}
+            >
+              {t("settings.skillRepos.configure")}
+            </Button>
+          ) : null}
+          {pending?.error ? (
+            <>
+              {removing && actual ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!ready}
+                  onPress={() =>
+                    void removeSkillRepositoryMember(
+                      serverId,
+                      subscription.repositoryId,
+                      actual.subscription,
+                    ).catch((cause) => setError(repositoryError(cause)))
+                  }
+                >
+                  {t("settings.skillRepos.unsubscribe")}
+                </Button>
+              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() =>
+                  void retrySkillRepositoryChange(serverId, subscription.repositoryId).catch(
+                    (cause) => setError(repositoryError(cause)),
+                  )
+                }
+              >
+                {t("settings.skillRepos.retry")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() =>
+                  void discardSkillRepositoryChange(
+                    serverId,
+                    subscription.repositoryId,
+                    actual?.subscription ?? null,
+                  )
+                    .then(onRefresh)
+                    .catch((cause) => setError(repositoryError(cause)))
+                }
+                disabled={!ready}
+              >
+                {t("settings.skillRepos.useHostSettings")}
+              </Button>
+            </>
           ) : null}
         </View>
       </SettingsRow>
@@ -465,7 +514,7 @@ export function HostSkillRepositoriesPage({ serverId }: { serverId: string }) {
   const actual = state.data ?? [];
   const subscriptions = visibleSubscriptions(serverId, actual, plan.data);
   const current = actual.find((r) => r.subscription.repositoryId === editing) ?? null;
-  const canConfigure = connected && supported && Boolean(state.data) && Boolean(plan.data);
+  const canConfigure = Boolean(plan.data) && (!connected || (supported && Boolean(state.data)));
   return (
     <SettingsSection
       title={t("settings.skillRepos.subscriptions")}
@@ -502,7 +551,7 @@ export function HostSkillRepositoriesPage({ serverId }: { serverId: string }) {
             subscription={subscription}
             local={plan.data!}
             connected={connected}
-            ready={canConfigure}
+            ready={connected && canConfigure}
             onConfigure={() => setEditing(subscription.repositoryId)}
             onRefresh={state.refetch}
           />
@@ -521,6 +570,7 @@ export function HostSkillRepositoriesPage({ serverId }: { serverId: string }) {
           serverId={serverId}
           initial={subscriptions.get(editing)}
           actual={current}
+          connected={connected}
           local={plan.data}
           onClose={() => {
             setEditing(null);

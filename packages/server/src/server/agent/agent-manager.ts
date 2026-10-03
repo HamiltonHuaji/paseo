@@ -1479,6 +1479,7 @@ export class AgentManager {
   importProviderSession(input: {
     provider: AgentProvider;
     providerHandleId: string;
+    fork?: boolean;
     cwd: string;
     workspaceId: string;
     labels?: Record<string, string>;
@@ -1489,6 +1490,7 @@ export class AgentManager {
   private async importProviderSessionInternal(input: {
     provider: AgentProvider;
     providerHandleId: string;
+    fork?: boolean;
     cwd: string;
     workspaceId: string;
     labels?: Record<string, string>;
@@ -1522,6 +1524,7 @@ export class AgentManager {
     const imported = await client.importSession(
       {
         providerHandleId: input.providerHandleId,
+        fork: input.fork,
         cwd: input.cwd,
       },
       { config: providerLaunchConfig, storedConfig, launchContext },

@@ -410,6 +410,10 @@ export const ar: TranslationResources = {
       noProviders: "لم يتم تمكين أي موفري خدمات قابلين للاستيراد.",
       loading: "جارٍ تحميل الجلسات الأخيرة...",
       failedProvider: "تعذر تحميل جلسات {{provider}}",
+      writerLocked: en.importSession.status.writerLocked,
+      retryImport: en.importSession.status.retryImport,
+      importCopy: en.importSession.status.importCopy,
+      updateForCopy: en.importSession.status.updateForCopy,
       failedImport: "تعذر استيراد الجلسة المحددة.",
     },
     actions: {

@@ -92,7 +92,13 @@ export function mountSkillRepositoryExecutor(client: DaemonClient, serverId: str
                 subscription: desired,
               });
             }
-            await recordSkillRepositoryApply(serverId, pending.repositoryId, pending.revision);
+            await recordSkillRepositoryApply(
+              serverId,
+              pending.repositoryId,
+              pending.revision,
+              undefined,
+              desired,
+            );
           } catch (error) {
             if (!isLive()) throw error;
             await recordSkillRepositoryApply(

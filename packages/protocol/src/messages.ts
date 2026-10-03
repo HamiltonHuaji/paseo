@@ -1855,6 +1855,7 @@ export const ResumeAgentRequestMessageSchema = z.object({
 });
 
 export const ImportAgentRequestMessageSchema = z.object({
+  fork: z.boolean().optional(),
   type: z.literal("import_agent_request"),
   provider: AgentProviderSchema.optional(),
   providerId: z.string().optional(),
@@ -3772,6 +3773,7 @@ export const ServerInfoStatusPayloadSchema = z
         providerRemoval: z.boolean().optional(),
         // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
         importSessionWorkspaceTarget: z.boolean().optional(),
+        importSessionFork: z.boolean().optional(),
         // COMPAT(importSessionSearch): added in v0.8.0, remove gate after 2027-03-02.
         importSessionSearch: z.boolean().optional(),
         // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after

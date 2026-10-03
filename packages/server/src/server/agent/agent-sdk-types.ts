@@ -581,6 +581,7 @@ export interface ImportableProviderSession {
 }
 
 export interface ImportProviderSessionInput {
+  fork?: boolean;
   providerHandleId: string;
   cwd: string;
 }

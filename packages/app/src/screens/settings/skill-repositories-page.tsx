@@ -3,6 +3,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import * as Clipboard from "expo-clipboard";
+import { useRouter } from "expo-router";
+import { confirmDialog } from "@/utils/confirm-dialog";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { SettingsCard, SettingsRow, SettingsSection, SettingsSelect } from "@/components/settings";
 import { Button } from "@/components/ui/button";
@@ -19,8 +21,10 @@ import {
   previewSkillRepositoryPlan,
   importSkillRepositoryPlan,
   removeSkillRepository,
+  retrySkillRepositoryChange,
   type PlanConflict,
 } from "@/skill-repositories/plan";
+import { buildSettingsHostSectionRoute } from "@/utils/host-routes";
 import {
   RepositoryFormSheet,
   repositoryError,
@@ -181,6 +185,7 @@ function PlanImportSheet({ onClose }: { onClose(): void }) {
 
 export function SkillRepositoriesPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const plan = useSkillRepositoryPlan();
   const hosts = useHosts();
   const desktop = Boolean(getDesktopHost()?.skillRepositories);
@@ -259,16 +264,32 @@ export function SkillRepositoriesPage() {
                     >
                       {t("settings.skillRepos.configure")}
                     </Button>
-                    {members.length === 0 ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onPress={() =>
-                          void act(() => removeSkillRepository(repository.repositoryId))
-                        }
-                      >
-                        {t("settings.skillRepos.remove")}
-                      </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onPress={() =>
+                        void act(async () => {
+                          if (
+                            await confirmDialog({
+                              title: t("settings.skillRepos.removeRepository", {
+                                name: repository.label,
+                              }),
+                              message: t("settings.skillRepos.removeInfo"),
+                              confirmLabel: t("settings.skillRepos.remove"),
+                              cancelLabel: t("common.cancel"),
+                              destructive: true,
+                            })
+                          )
+                            await removeSkillRepository(repository.repositoryId);
+                        })
+                      }
+                    >
+                      {t("settings.skillRepos.remove")}
+                    </Button>
+                    {members.length ? (
+                      <Text style={styles.metadata}>
+                        {t("settings.skillRepos.hostCount", { count: members.length })}
+                      </Text>
                     ) : null}
                   </View>
                 </SettingsRow>
@@ -287,6 +308,60 @@ export function SkillRepositoriesPage() {
         {!desktop ? (
           <Text style={styles.metadata}>{t("settings.skillRepos.desktopRequired")}</Text>
         ) : null}
+        {plan.data?.pending
+          .filter((p) =>
+            plan.data?.plan.repositories.some(
+              (r) => r.repositoryId === p.repositoryId && r.deleted,
+            ),
+          )
+          .map((pending) => {
+            const repository = plan.data?.plan.repositories.find(
+              (r) => r.repositoryId === pending.repositoryId,
+            );
+            const host = hosts.find((h) => h.serverId === pending.serverId);
+            return (
+              <SettingsCard key={`${pending.serverId}:${pending.repositoryId}`}>
+                <SettingsRow
+                  label={`${repository?.label ?? pending.repositoryId} · ${host?.label ?? pending.serverId}`}
+                  hint={t("settings.skillRepos.pendingRemoval")}
+                  error={pending.error}
+                >
+                  <View style={styles.actions}>
+                    {pending.error ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onPress={() =>
+                          void act(() =>
+                            retrySkillRepositoryChange(pending.serverId, pending.repositoryId),
+                          )
+                        }
+                      >
+                        {t("settings.skillRepos.retry")}
+                      </Button>
+                    ) : null}
+                    {host ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onPress={() =>
+                          router.push(
+                            buildSettingsHostSectionRoute(pending.serverId, "skill-repositories"),
+                          )
+                        }
+                      >
+                        {t("settings.skillRepos.hostSettings")}
+                      </Button>
+                    ) : (
+                      <Text style={styles.metadata}>
+                        {t("settings.skillRepos.unknownHosts", { count: 1 })}
+                      </Text>
+                    )}
+                  </View>
+                </SettingsRow>
+              </SettingsCard>
+            );
+          })}
       </SettingsSection>
       <SettingsSection
         title={t("settings.skillRepos.syncPlan")}
