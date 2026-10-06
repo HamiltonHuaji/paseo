@@ -2027,7 +2027,9 @@ export async function resolveCodexForkBeforeTurnId(input: {
     throw new Error("Wait for the current turn to finish before forking this conversation");
   }
   if (input.activeTurnId) return input.activeTurnId;
-  throw new Error("The selected response is no longer followed by a persisted Codex turn");
+  // The projected timeline's latest-turn hint can disagree with native history.
+  // Finding the boundary in the final inactive turn means fork through the tail.
+  return undefined;
 }
 
 async function loadCodexThreadHistoryTimeline(params: {
