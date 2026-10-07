@@ -9,6 +9,14 @@
   ],
   "type": "module",
   "exports": {
+    "./internal/viewer-http-proxy": {
+      "types": "./dist/viewer-http-proxy.d.ts",
+      "default": "./dist/viewer-http-proxy.js"
+    },
+    "./internal/viewer-http-upstream": {
+      "types": "./dist/viewer-http-upstream.d.ts",
+      "default": "./dist/viewer-http-upstream.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

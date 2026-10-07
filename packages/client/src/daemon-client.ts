@@ -145,12 +145,10 @@ import {
   decodeFileTransferFrame,
   decodeTunnelStreamFrame,
   decodeViewerHttpFrame,
-  encodeViewerHttpFrame,
   encodeFileTransferFrame,
   decodeTerminalStreamFrame,
   FileTransferOpcode,
   TerminalStreamOpcode,
-  ViewerHttpOpcode,
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import type { TunnelTarget } from "@getpaseo/protocol/tunnels";
@@ -1359,11 +1357,21 @@ export class DaemonClient {
     }
     if (input.signal?.aborted) throw new Error("Viewer request cancelled");
     const requestId = this.createRequestId();
+    // Install before sending: HEAD/304 can deliver End in the same transport turn as headers.
+    const stream = new ViewerHttpStream(
+      requestId,
+      (frame) => this.sendBinaryFrame(frame),
+      () => this.viewerHttpStreams.delete(requestId),
+      // COMPAT(viewerHttpFlowControl): added after v0.9.5; old daemons use pause/resume.
+      this.getLastServerInfoMessage()?.features?.viewerHttpFlowControl === true,
+    );
+    this.viewerHttpStreams.set(requestId, stream);
     const onAbort = () => {
       try {
-        this.sendBinaryFrame(encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.Reset, requestId }));
+        stream.cancel();
       } catch {
         // A disconnected transport has already ended the upstream request.
+        stream.abort();
       }
     };
     input.signal?.addEventListener("abort", onAbort, { once: true });
@@ -1384,15 +1392,10 @@ export class DaemonClient {
           },
         });
       if (input.signal?.aborted) throw new Error("Viewer request cancelled");
-      const stream = new ViewerHttpStream(
-        requestId,
-        (frame) => this.sendBinaryFrame(frame),
-        () => this.viewerHttpStreams.delete(requestId),
-        // COMPAT(viewerHttpFlowControl): added after v0.9.5; old daemons use pause/resume.
-        this.getLastServerInfoMessage()?.features?.viewerHttpFlowControl === true,
-      );
-      this.viewerHttpStreams.set(requestId, stream);
       return { status: payload.status, headers: payload.headers, stream };
+    } catch (error) {
+      onAbort();
+      throw error;
     } finally {
       input.signal?.removeEventListener("abort", onAbort);
     }
@@ -1584,6 +1587,7 @@ export class DaemonClient {
       return;
     }
     this.shouldReconnect = false;
+    this.connectReject?.(new Error("Daemon client closed"));
     this.connectPromise = null;
     this.connectResolve = null;
     this.connectReject = null;
@@ -1630,7 +1634,9 @@ export class DaemonClient {
       this.attemptConnect();
       return;
     }
-    void this.connect();
+    void this.connect().catch((error) => {
+      this.logger.debug({ error }, "Background connection attempt ended");
+    });
   }
 
   private verifyConnection(): void {

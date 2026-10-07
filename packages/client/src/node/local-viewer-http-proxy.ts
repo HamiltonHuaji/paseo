@@ -1,6 +1,8 @@
 import { createServer, type ServerResponse } from "node:http";
 import type { DaemonClient } from "../daemon-client.js";
 import type { ViewerHttpStream } from "../viewer-http-stream.js";
+import { VIEWER_REQUEST_HEADERS } from "../viewer-http-proxy.js";
+import { listenWithPortFallback } from "./listen.js";
 
 export interface LocalViewerHttpProxy {
   readonly origin: string;
@@ -10,15 +12,6 @@ export interface LocalViewerHttpProxy {
 type ViewerResponse = Awaited<ReturnType<DaemonClient["fetchViewerHttp"]>> & {
   onData?: (bytes: number) => void;
 };
-
-const REQUEST_HEADERS = [
-  "accept",
-  "cache-control",
-  "if-modified-since",
-  "if-none-match",
-  "if-range",
-  "range",
-] as const;
 
 function errorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
@@ -48,6 +41,7 @@ export async function createLocalViewerHttpProxy(input: {
   onRequestError?: (error: unknown) => void;
   host?: string;
   port?: number;
+  ports?: readonly number[];
 }): Promise<LocalViewerHttpProxy> {
   const host = input.host ?? "127.0.0.1";
   const server = createServer((req, res) => {
@@ -64,7 +58,7 @@ export async function createLocalViewerHttpProxy(input: {
       return;
     }
     const headers: Record<string, string> = {};
-    for (const name of REQUEST_HEADERS) {
+    for (const name of VIEWER_REQUEST_HEADERS) {
       const value = req.headers[name];
       if (typeof value === "string") headers[name] = value;
     }
@@ -171,13 +165,7 @@ export async function createLocalViewerHttpProxy(input: {
     })();
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(input.port ?? 0, host, () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
+  await listenWithPortFallback({ server, host, ports: input.ports ?? [input.port ?? 0] });
   const address = server.address();
   if (!address || typeof address === "string") {
     server.close();

@@ -11,7 +11,12 @@ import {
   createLocalViewerHttpProxy,
   type LocalViewerHttpProxy,
 } from "@getpaseo/client/node/local-viewer-http-proxy";
-import { VIEWER_HTTP_DATA_FRAME_BYTES } from "@getpaseo/protocol/binary-frames/index";
+import {
+  ViewerConnectionSchema,
+  viewerPortCandidates,
+} from "@getpaseo/client/internal/viewer-http-proxy";
+import { createViewerHttpUpstream } from "@getpaseo/client/internal/viewer-http-upstream";
+import { loadViewerPorts, saveViewerPorts } from "./viewer-ports.js";
 import {
   buildDaemonWebSocketUrl,
   buildRelayWebSocketUrl,
@@ -21,20 +26,7 @@ import { TunnelTargetSchema, type TunnelTarget } from "@getpaseo/protocol/tunnel
 import { WebSocket } from "ws";
 import { z } from "zod";
 
-const ConnectionSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("relay"),
-    relayEndpoint: z.string().min(1),
-    useTls: z.boolean().optional(),
-    daemonPublicKeyB64: z.string().min(1),
-  }),
-  z.object({
-    type: z.literal("directTcp"),
-    endpoint: z.string().min(1),
-    useTls: z.boolean().optional(),
-    password: z.string().optional(),
-  }),
-]);
+const ConnectionSchema = ViewerConnectionSchema;
 
 const EnsureTunnelInputSchema = z.object({
   serverId: z.string().min(1),
@@ -52,30 +44,6 @@ interface UpstreamGeneration {
   retiring: boolean;
 }
 
-interface ViewerUpstream extends UpstreamGeneration {
-  primary: boolean;
-  requests: Set<ViewerRequestLoad>;
-  idleTimer: ReturnType<typeof setTimeout> | null;
-}
-
-interface ViewerRequestLoad {
-  remainingBytes: number;
-}
-
-interface ViewerRoute {
-  connection: TunnelConnection;
-  routeKey: string;
-  upstreams: Set<ViewerUpstream>;
-  opening: Promise<ViewerUpstream | null> | null;
-  expansionFailed: boolean;
-}
-
-// A nearly finished response is cheaper to share than another relay handshake.
-// This compares remaining HTTP body bytes, not elapsed time or socket age.
-const VIEWER_REUSE_TAIL_FRAMES = 4;
-const VIEWER_REUSE_TAIL_BYTES = VIEWER_REUSE_TAIL_FRAMES * VIEWER_HTTP_DATA_FRAME_BYTES;
-const VIEWER_IDLE_CONNECTION_MS = 60_000;
-
 interface ManagedTunnel {
   forwarder: LocalTunnelForwarder;
   updateRoute(connection: TunnelConnection): Promise<void>;
@@ -84,12 +52,59 @@ interface ManagedTunnel {
 
 interface ManagedViewerProxy {
   proxy: LocalViewerHttpProxy;
-  updateRoute(connection: TunnelConnection): Promise<void>;
+  updateRoute(connection: TunnelConnection): void;
   close(): Promise<void>;
 }
 
 const tunnels = new Map<string, Promise<ManagedTunnel>>();
-const viewerProxies = new Map<string, Promise<ManagedViewerProxy>>();
+const viewerProxies = new Map<string, ManagedViewerProxy>();
+let viewerMutation = Promise.resolve();
+
+function mutateViewers<Result>(operation: () => Promise<Result>): Promise<Result> {
+  const pending = viewerMutation.then(operation);
+  viewerMutation = pending.then(
+    () => undefined,
+    () => undefined,
+  );
+  return pending;
+}
+
+async function ensureViewerProxy(serverId: string): Promise<ManagedViewerProxy> {
+  const existing = viewerProxies.get(serverId);
+  if (existing) return existing;
+  const state = await loadViewerPorts();
+  const upstream = createViewerHttpUpstream({
+    createClient: (connection) => createTunnelClient(serverId, connection),
+    onError: (error) => log.warn("[viewer-http] Upstream failed", { serverId, error }),
+  });
+  const proxy = await createLocalViewerHttpProxy({
+    fetch: upstream.fetch,
+    ports: viewerPortCandidates({ serverId, state }),
+    onRequestError: (error) => log.debug("[viewer-http] Resource failed", { serverId, error }),
+  });
+  const previous = state[serverId];
+  state[serverId] = { port: Number(new URL(proxy.origin).port), enabled: true };
+  try {
+    await saveViewerPorts(state);
+  } catch (error) {
+    if (previous) state[serverId] = previous;
+    else delete state[serverId];
+    await proxy.close();
+    await upstream.close();
+    throw error;
+  }
+  const managed: ManagedViewerProxy = {
+    proxy,
+    updateRoute: upstream.updateRoute,
+    close: async () => {
+      await proxy.close();
+      await upstream.close();
+    },
+  };
+  viewerProxies.set(serverId, managed);
+  log.info("[viewer-http] Listening", { serverId, origin: proxy.origin });
+  return managed;
+}
 
 export function registerTunnelHandlers(): void {
   ipcMain.handle("paseo:tunnel:ensure", async (_event, rawInput: unknown) => {
@@ -117,270 +132,49 @@ export function registerTunnelHandlers(): void {
   });
   ipcMain.handle("paseo:viewerHttp:ensure", async (_event, rawInput: unknown) => {
     const input = EnsureTunnelInputSchema.omit({ target: true }).parse(rawInput);
-    let pending = viewerProxies.get(input.serverId);
-    if (!pending) {
-      pending = createManagedViewerProxy(input).catch((error) => {
-        viewerProxies.delete(input.serverId);
-        throw error;
-      });
-      viewerProxies.set(input.serverId, pending);
-    }
-    const managed = await pending;
-    await managed.updateRoute(input.connection);
-    return { origin: managed.proxy.origin };
+    return mutateViewers(async () => {
+      const managed = await ensureViewerProxy(input.serverId);
+      managed.updateRoute(input.connection);
+      return { origin: managed.proxy.origin };
+    });
   });
   ipcMain.handle("paseo:viewerHttp:updateRoute", async (_event, rawInput: unknown) => {
     const input = EnsureTunnelInputSchema.omit({ target: true }).parse(rawInput);
-    const pending = viewerProxies.get(input.serverId);
-    if (!pending) return { updated: false };
-    await (await pending).updateRoute(input.connection);
-    return { updated: true };
+    return mutateViewers(async () => {
+      const state = await loadViewerPorts();
+      if (!state[input.serverId]?.enabled) return { updated: false };
+      const managed = await ensureViewerProxy(input.serverId);
+      managed.updateRoute(input.connection);
+      return { updated: true };
+    });
+  });
+  ipcMain.handle("paseo:viewerHttp:syncHosts", async (_event, rawInput: unknown) => {
+    const serverIds = new Set(z.array(z.string().min(1)).parse(rawInput));
+    return mutateViewers(async () => {
+      const state = await loadViewerPorts();
+      for (const [serverId, assignment] of Object.entries(state)) {
+        if (!serverIds.has(serverId)) {
+          assignment.enabled = false;
+          const managed = viewerProxies.get(serverId);
+          viewerProxies.delete(serverId);
+          await managed?.close();
+        } else if (assignment.enabled) {
+          await ensureViewerProxy(serverId);
+        }
+      }
+      await saveViewerPorts(state);
+    });
   });
 }
 
 export async function closeAllTunnelForwarders(): Promise<void> {
   const active = [...tunnels.values()];
+  await viewerMutation;
   const viewers = [...viewerProxies.values()];
   tunnels.clear();
   viewerProxies.clear();
   await Promise.allSettled(active.map(async (pending) => (await pending).close()));
-  await Promise.allSettled(viewers.map(async (pending) => (await pending).close()));
-}
-
-async function createManagedViewerProxy(input: {
-  serverId: string;
-  connection: TunnelConnection;
-}): Promise<ManagedViewerProxy> {
-  const first = await createUpstream(input.serverId, input.connection);
-  if (first.client.getLastServerInfoMessage()?.features?.viewerHttpProxy !== true) {
-    await first.client.close();
-    throw new Error("Update the host to use the viewer HTTP proxy");
-  }
-  const firstUpstream: ViewerUpstream = {
-    ...first,
-    primary: true,
-    requests: new Set(),
-    idleTimer: null,
-  };
-  let currentRoute: ViewerRoute = {
-    connection: input.connection,
-    routeKey: first.routeKey,
-    upstreams: new Set([firstUpstream]),
-    opening: null,
-    expansionFailed: false,
-  };
-  const generations = new Set<ViewerUpstream>([firstUpstream]);
-  const pendingOpenings = new Set<Promise<ViewerUpstream | null>>();
-  let routeUpdate = Promise.resolve();
-  let closing = false;
-
-  const closeUpstream = async (route: ViewerRoute, upstream: ViewerUpstream): Promise<void> => {
-    if (!generations.delete(upstream)) return;
-    if (upstream.idleTimer) clearTimeout(upstream.idleTimer);
-    upstream.idleTimer = null;
-    route.upstreams.delete(upstream);
-    try {
-      await upstream.client.close();
-    } catch (error) {
-      log.debug("[viewer-http] Could not close idle upstream", error);
-    }
-  };
-  const retireIfDrained = (route: ViewerRoute, upstream: ViewerUpstream): void => {
-    if (upstream.retiring && upstream.activeStreams === 0) {
-      void closeUpstream(route, upstream);
-    }
-  };
-  const release = (route: ViewerRoute, upstream: ViewerUpstream, load: ViewerRequestLoad): void => {
-    upstream.requests.delete(load);
-    upstream.activeStreams -= 1;
-    if (upstream.retiring) {
-      retireIfDrained(route, upstream);
-    } else if (!upstream.primary && upstream.activeStreams === 0) {
-      // Retain a warm socket for subsequent assets and Range requests, then give
-      // the relay its resources back when the page becomes quiet.
-      upstream.idleTimer = setTimeout(() => {
-        if (upstream.activeStreams === 0) void closeUpstream(route, upstream);
-      }, VIEWER_IDLE_CONNECTION_MS);
-      upstream.idleTimer.unref();
-    }
-  };
-  const reserve = (upstream: ViewerUpstream): ViewerRequestLoad => {
-    if (upstream.idleTimer) clearTimeout(upstream.idleTimer);
-    upstream.idleTimer = null;
-    upstream.activeStreams += 1;
-    const load = { remainingBytes: 0 };
-    upstream.requests.add(load);
-    return load;
-  };
-  const remainingBytes = (upstream: ViewerUpstream): number => {
-    let total = 0;
-    for (const load of upstream.requests) total += load.remainingBytes;
-    return total;
-  };
-  const leastBusy = (route: ViewerRoute): ViewerUpstream => {
-    let selected: ViewerUpstream | undefined;
-    for (const upstream of route.upstreams) {
-      if (
-        !selected ||
-        remainingBytes(upstream) < remainingBytes(selected) ||
-        (remainingBytes(upstream) === remainingBytes(selected) &&
-          upstream.activeStreams < selected.activeStreams)
-      ) {
-        selected = upstream;
-      }
-    }
-    if (!selected) throw new Error("Viewer proxy has no upstream connection");
-    return selected;
-  };
-  const openAdditional = (route: ViewerRoute): Promise<ViewerUpstream | null> => {
-    const opening = (async () => {
-      const next = await createUpstream(input.serverId, route.connection);
-      if (next.client.getLastServerInfoMessage()?.features?.viewerHttpProxy !== true) {
-        await next.client.close();
-        throw new Error("Update the host to use the viewer HTTP proxy");
-      }
-      if (closing || route !== currentRoute) {
-        await next.client.close();
-        return null;
-      }
-      const upstream: ViewerUpstream = {
-        ...next,
-        primary: false,
-        requests: new Set(),
-        idleTimer: null,
-      };
-      route.upstreams.add(upstream);
-      generations.add(upstream);
-      // The request that prompted this handshake may already have been
-      // cancelled. Do not leave an unused extra connection alive indefinitely.
-      upstream.idleTimer = setTimeout(() => {
-        if (upstream.activeStreams === 0) void closeUpstream(route, upstream);
-      }, VIEWER_IDLE_CONNECTION_MS);
-      upstream.idleTimer.unref();
-      log.debug("[viewer-http] Added relay connection", {
-        serverId: input.serverId,
-        connections: route.upstreams.size,
-      });
-      return upstream;
-    })().catch((error) => {
-      route.expansionFailed = true;
-      log.debug("[viewer-http] Could not expand upstream pool", error);
-      return null;
-    });
-    route.opening = opening;
-    pendingOpenings.add(opening);
-    void opening
-      .finally(() => {
-        if (route.opening === opening) route.opening = null;
-        pendingOpenings.delete(opening);
-      })
-      .catch(() => undefined);
-    return opening;
-  };
-  const acquire = (
-    signal: AbortSignal,
-  ): { route: ViewerRoute; upstream: ViewerUpstream; load: ViewerRequestLoad } => {
-    if (closing || signal.aborted) throw new Error("Viewer request cancelled");
-    const route = currentRoute;
-    const available = leastBusy(route);
-    if (
-      route.connection.type === "relay" &&
-      remainingBytes(available) > VIEWER_REUSE_TAIL_BYTES &&
-      !route.expansionFailed &&
-      !route.opening
-    ) {
-      // Do not hold this browser resource behind a relay handshake. It can
-      // share the current socket while the new one becomes available to later
-      // resources; concurrent arrivals still share one opening attempt.
-      void openAdditional(route);
-    }
-    return { route, upstream: available, load: reserve(available) };
-  };
-  const proxy = await createLocalViewerHttpProxy({
-    fetch: async (request) => {
-      const { route, upstream, load } = acquire(request.signal);
-      try {
-        const response = await upstream.client.fetchViewerHttp(request);
-        const contentLength = Number(response.headers["content-length"]);
-        if (request.method === "HEAD" || response.status === 204 || response.status === 304) {
-          load.remainingBytes = 0;
-        } else if (Number.isSafeInteger(contentLength) && contentLength >= 0) {
-          load.remainingBytes = contentLength;
-        } else {
-          load.remainingBytes = Number.POSITIVE_INFINITY;
-        }
-        route.expansionFailed = false;
-        void response.stream.whenClosed().then(
-          () => release(route, upstream, load),
-          () => release(route, upstream, load),
-        );
-        return {
-          ...response,
-          onData: (bytes: number) => {
-            load.remainingBytes = Math.max(0, load.remainingBytes - bytes);
-          },
-        };
-      } catch (error) {
-        release(route, upstream, load);
-        throw error;
-      }
-    },
-    onRequestError: (error) => log.debug("[viewer-http] Upstream resource failed", error),
-  });
-  const updateRoute = (connection: TunnelConnection): Promise<void> => {
-    routeUpdate = routeUpdate
-      .catch(() => undefined)
-      .then(async () => {
-        const nextRouteKey = JSON.stringify(connection);
-        if (currentRoute.routeKey === nextRouteKey) return undefined;
-        const replacement = await createUpstream(input.serverId, connection);
-        if (replacement.client.getLastServerInfoMessage()?.features?.viewerHttpProxy !== true) {
-          await replacement.client.close();
-          throw new Error("Update the host to use the viewer HTTP proxy");
-        }
-        if (closing) {
-          await replacement.client.close();
-          return undefined;
-        }
-        const upstream: ViewerUpstream = {
-          ...replacement,
-          primary: true,
-          requests: new Set(),
-          idleTimer: null,
-        };
-        const nextRoute: ViewerRoute = {
-          connection,
-          routeKey: nextRouteKey,
-          upstreams: new Set([upstream]),
-          opening: null,
-          expansionFailed: false,
-        };
-        generations.add(upstream);
-        const previous = currentRoute;
-        currentRoute = nextRoute;
-        for (const old of previous.upstreams) {
-          old.retiring = true;
-          retireIfDrained(previous, old);
-        }
-        return undefined;
-      });
-    return routeUpdate;
-  };
-  return {
-    proxy,
-    updateRoute,
-    close: async () => {
-      closing = true;
-      await routeUpdate.catch(() => undefined);
-      await proxy.close();
-      await Promise.allSettled(pendingOpenings);
-      await Promise.allSettled([...generations].map((upstream) => upstream.client.close()));
-      for (const upstream of generations) {
-        if (upstream.idleTimer) clearTimeout(upstream.idleTimer);
-      }
-      generations.clear();
-    },
-  };
+  await Promise.allSettled(viewers.map((managed) => managed.close()));
 }
 
 async function createManagedTunnel(
@@ -449,10 +243,7 @@ async function createManagedTunnel(
   };
 }
 
-async function createUpstream(
-  serverId: string,
-  connection: TunnelConnection,
-): Promise<UpstreamGeneration> {
+function createTunnelClient(serverId: string, connection: TunnelConnection): DaemonClient {
   const isRelay = connection.type === "relay";
   const useTls = isRelay
     ? (connection.useTls ?? shouldUseTlsForDefaultHostedRelay(connection.relayEndpoint))
@@ -481,6 +272,14 @@ async function createUpstream(
       : undefined,
     reconnect: { enabled: true },
   });
+  return client;
+}
+
+async function createUpstream(
+  serverId: string,
+  connection: TunnelConnection,
+): Promise<UpstreamGeneration> {
+  const client = createTunnelClient(serverId, connection);
   try {
     await client.connect();
     return {

@@ -131,6 +131,8 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
     }) => ipcRenderer.invoke("paseo:tunnel:updateRoute", input) as Promise<{ updated: boolean }>,
   },
   viewerHttp: {
+    syncHosts: (serverIds: string[]) =>
+      ipcRenderer.invoke("paseo:viewerHttp:syncHosts", serverIds) as Promise<void>,
     ensure: (input: {
       serverId: string;
       connection:

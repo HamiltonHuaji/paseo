@@ -97,6 +97,7 @@ export interface DesktopTunnelBridge {
 }
 
 export interface DesktopViewerHttpBridge {
+  syncHosts?: (serverIds: string[]) => Promise<void>;
   ensure?: (input: {
     serverId: string;
     connection: DesktopTunnelConnection;

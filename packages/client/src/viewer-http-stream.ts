@@ -15,6 +15,7 @@ export interface ViewerHttpHandlers {
 export class ViewerHttpStream {
   private handlers: ViewerHttpHandlers | null = null;
   private closed = false;
+  private terminal: "end" | "reset" | null = null;
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
 
@@ -34,7 +35,12 @@ export class ViewerHttpStream {
   }
 
   setHandlers(handlers: ViewerHttpHandlers): void {
-    if (this.closed) return;
+    // Empty responses can end before the HTTP adapter installs its handlers.
+    if (this.closed) {
+      if (this.terminal === "end") handlers.onEnd();
+      else if (this.terminal === "reset") handlers.onReset();
+      return;
+    }
     this.handlers = handlers;
     if (this.flowControlled) this.grant(VIEWER_HTTP_WINDOW_BYTES);
     else this.resume();
@@ -65,6 +71,7 @@ export class ViewerHttpStream {
 
   abort(): void {
     if (this.closed) return;
+    this.terminal = "reset";
     this.finish();
     this.handlers?.onReset();
   }
@@ -74,6 +81,7 @@ export class ViewerHttpStream {
     if (frame.opcode === ViewerHttpOpcode.Data) {
       this.handlers?.onData(frame.payload);
     } else if (frame.opcode === ViewerHttpOpcode.End) {
+      this.terminal = "end";
       this.finish();
       this.handlers?.onEnd();
     } else if (frame.opcode === ViewerHttpOpcode.Reset) {

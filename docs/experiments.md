@@ -531,9 +531,10 @@ five idle minutes; an expired cursor returns HTTP 410 with `{"error":"cursor_exp
 `limit` to request a page size from 1 through 1000; the default is 200. Listings never expose host
 filesystem paths.
 
-A direct client opens the path on the daemon viewer HTTP origin. A relay-connected desktop client
-opens one loopback HTTP proxy per Host, initially backed by one dedicated daemon connection for
-viewer traffic. Every GET or HEAD resource is an independent logical stream. Reuse a connection
+A client with a local proxy opens viewers on that proxy, including when it can connect directly.
+Desktop and Android each own one loopback HTTP proxy per Host, backed by dedicated daemon connections
+for viewer traffic. Clients without a proxy can use the reachable daemon viewer HTTP origin.
+Every GET or HEAD resource is an independent logical stream. Reuse a connection
 when its active responses have only a short tail left; otherwise the pool may add another physical
 connection. Select by outstanding work, not elapsed time. Close idle extra connections. Within
 each physical connection, send bounded frames fairly across ready resources, with per-resource
@@ -542,8 +543,20 @@ Pool expansion is relay-only and must not create a physical connection for every
 
 Viewer bytes do not ride on the control connection, and the viewer does not pre-open generic TCP
 tunnels. The system browser uses an ordinary `http://127.0.0.1:<port>/view/...` URL. The loopback
-listener and URL remain stable while the desktop process lives, including across browser tab
-closes and route changes. Preserve upstream HTTP status, `Range` and `If-Range` requests, and
+listener and URL survive browser tab closes and route changes. Persist port assignments within each
+client installation. Try the remembered port first, then up to 64 deterministic candidates in
+`20000–29999`, then an OS-assigned port. Resolve address-in-use conflicts without a prompt, remember
+the actual port, and reserve other Hosts' assignments even while they are inactive. Restore previously
+enabled listeners when the Host registry loads; a browser bookmark must not require clicking the
+viewer again. A conflicting listener can still force an origin change after a restart.
+
+Android starts a foreground service before opening the external browser. A retained Headless JS task
+owns dedicated viewer connections independently of screen mounts; the native listener returns credit
+after socket writes. The service notification can stop all viewer proxies. After an explicit stop,
+opening a viewer enables its proxy again. A stopped app cannot be started by a browser localhost
+request; relaunch Paseo to restore listeners after process termination.
+
+Preserve upstream HTTP status, `Range` and `If-Range` requests, and
 `206`/`416` response headers. A failure before response headers returns 502 or 504; after headers,
 end only that browser resource. Relay transit has no per-resource deadline: browser cancellation
 resets its resource stream, and a disconnected transport cancels outstanding streams.

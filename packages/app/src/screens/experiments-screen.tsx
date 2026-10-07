@@ -45,7 +45,7 @@ import {
   useHostRuntimeSnapshot,
   useHosts,
 } from "@/runtime/host-runtime";
-import { getDesktopHost } from "@/desktop/host";
+import { canProxyViewers, ensureViewerProxy } from "@/viewers/proxy";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { useSessionStore, type Agent } from "@/stores/session-store";
 import { buildHostAgentDetailRoute } from "@/utils/host-routes";
@@ -555,6 +555,9 @@ function ExperimentDetailPanel({
   independentScroll: boolean;
 }) {
   const client = useHostRuntimeClient(serverId);
+  const proxySupported = useSessionStore(
+    (state) => state.sessions[serverId]?.serverInfo?.features?.viewerHttpProxy === true,
+  );
   const detailQuery = useFetchQuery({
     queryKey: ["experiment", serverId, projectId, experiment],
     queryFn: async () => {
@@ -652,6 +655,7 @@ function ExperimentDetailPanel({
           <View style={styles.attemptList}>
             {attempts.map((attempt, index) => (
               <AttemptPanel
+                proxySupported={proxySupported}
                 key={attempt.id}
                 serverId={serverId}
                 projectId={projectId}
@@ -716,6 +720,7 @@ function InvolvedAgentButton({
 }
 
 function AttemptPanel({
+  proxySupported,
   serverId,
   projectId,
   attempt,
@@ -725,6 +730,7 @@ function AttemptPanel({
   onExpandedChange,
   screenActive,
 }: {
+  proxySupported: boolean;
   serverId: string;
   projectId: string;
   attempt: ExperimentAttempt;
@@ -885,6 +891,7 @@ function AttemptPanel({
         ) : null}
       </View>
       <AttemptExpandedContent
+        proxySupported={proxySupported}
         hidden={collapsed}
         attempt={attempt}
         progressContent={progressContent}
@@ -948,6 +955,7 @@ function AttemptCollapseActions({
 }
 
 function AttemptExpandedContent({
+  proxySupported,
   hidden,
   attempt,
   progressContent,
@@ -959,6 +967,7 @@ function AttemptExpandedContent({
   serverId,
   tunnelConnection,
 }: {
+  proxySupported: boolean;
   hidden: boolean;
   attempt: ExperimentAttempt;
   progressContent: ReactNode;
@@ -989,6 +998,7 @@ function AttemptExpandedContent({
           <Text style={styles.sectionTitle}>Viewers</Text>
           {viewerEntries.map((entry) => (
             <ViewerEntry
+              proxySupported={proxySupported}
               key={entry.name}
               entry={entry}
               directUrl={resolveDirectUrl(entry.url)}
@@ -1002,53 +1012,67 @@ function AttemptExpandedContent({
   );
 }
 
+type ViewerOpenState =
+  | { status: "idle" }
+  | { status: "opening" }
+  | { status: "error"; message: string };
+
 function ViewerEntry({
+  proxySupported,
   entry,
   directUrl,
   serverId,
   tunnelConnection,
 }: {
+  proxySupported: boolean;
   entry: ResolvedViewerEntry;
   directUrl: string | null;
   serverId: string;
   tunnelConnection: ViewerTunnelConnection | null;
 }) {
-  const [error, setError] = useState<string | null>(null);
-  const canProxy = Boolean(getDesktopHost()?.viewerHttp?.ensure && tunnelConnection);
+  const [openState, setOpenState] = useState<ViewerOpenState>({ status: "idle" });
+  const opening = openState.status === "opening";
+  const proxyAvailable = canProxyViewers() && tunnelConnection !== null;
+  const canProxy = proxyAvailable && proxySupported;
   const usable = entry.available && (directUrl !== null || canProxy);
   const onPress = useCallback(() => {
     void (async () => {
-      setError(null);
+      setOpenState({ status: "opening" });
       try {
-        if (directUrl) {
-          await openExternalUrl(directUrl);
+        if (canProxy && tunnelConnection) {
+          const { origin } = await ensureViewerProxy({ serverId, connection: tunnelConnection });
+          await openExternalUrl(`${origin}${entry.url}`);
+          setOpenState({ status: "idle" });
           return;
         }
-        const viewerHttp = getDesktopHost()?.viewerHttp?.ensure;
-        if (viewerHttp && tunnelConnection) {
-          const { origin } = await viewerHttp({
-            serverId,
-            connection: tunnelConnection,
-          });
-          await openExternalUrl(`${origin}${entry.url}`);
+        if (directUrl) {
+          await openExternalUrl(directUrl);
+          setOpenState({ status: "idle" });
           return;
         }
       } catch (cause) {
-        setError(errorMessage(cause));
+        setOpenState({ status: "error", message: errorMessage(cause) });
       }
     })();
-  }, [directUrl, entry.url, serverId, tunnelConnection]);
+  }, [canProxy, directUrl, entry.url, serverId, tunnelConnection]);
   return (
-    <Pressable disabled={!usable} onPress={onPress} style={styles.viewerRow}>
+    <Pressable disabled={!usable || opening} onPress={onPress} style={styles.viewerRow}>
       <ThemedExternalLink size={14} />
       <Text style={usable ? styles.viewerName : styles.meta}>{entry.name}</Text>
+      {opening ? <Text style={styles.meta}>Opening…</Text> : null}
       {!entry.available && entry.unavailableReason ? (
         <Text style={styles.meta}>{entry.unavailableReason}</Text>
       ) : null}
       {!directUrl && !canProxy ? (
-        <Text style={styles.meta}>open from desktop or connect directly</Text>
+        <Text style={styles.meta}>
+          {proxyAvailable
+            ? "Update the host to open viewers"
+            : "open from desktop or connect directly"}
+        </Text>
       ) : null}
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+      {openState.status === "error" ? (
+        <Text style={styles.errorText}>{openState.message}</Text>
+      ) : null}
     </Pressable>
   );
 }

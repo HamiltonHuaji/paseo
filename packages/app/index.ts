@@ -2,6 +2,9 @@
 import { polyfillCrypto } from "./src/polyfills/crypto";
 polyfillCrypto();
 
+import { registerViewerProxyTask } from "./src/viewers/proxy-task";
+registerViewerProxyTask();
+
 // Polyfill screen.orientation for WebKitGTK desktop runtimes that lack the API.
 import { polyfillScreenOrientation } from "./src/polyfills/screen-orientation";
 polyfillScreenOrientation();

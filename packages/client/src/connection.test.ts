@@ -1,6 +1,16 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
 import { DaemonClient, type DaemonTransport } from "./daemon-client";
+import { createServer } from "node:net";
+import { createLocalViewerHttpProxy } from "./node/local-viewer-http-proxy";
+import { viewerPortCandidates, ViewerProxyStateSchema } from "./viewer-http-proxy";
+import { ViewerHttpStream } from "./viewer-http-stream";
+import { createViewerHttpUpstream } from "./viewer-http-upstream";
+import {
+  decodeViewerHttpFrame,
+  encodeViewerHttpFrame,
+  ViewerHttpOpcode,
+} from "@getpaseo/protocol/binary-frames/index";
 
 function connection(
   options: {
@@ -11,6 +21,7 @@ function connection(
     broadcasts?: boolean;
     browserHost?: { hostKind: string; supportedCommands: string[] };
     acknowledgeTimelineReads?: boolean;
+    viewerHttpProxy?: boolean;
   } = {},
 ) {
   const sent: Array<{
@@ -27,6 +38,7 @@ function connection(
   let receive = (_data: unknown) => {};
   let open = () => {};
   let closed = (_event?: unknown) => {};
+  let closeCount = 0;
   const transport: DaemonTransport = {
     send(data) {
       const frame = JSON.parse(String(data));
@@ -47,6 +59,7 @@ function connection(
                   workspaceMultiplicity: options.workspaceMultiplicity ?? true,
                   selectiveAgentTimeline: !options.broadcasts,
                   explicitEventSubscriptions: !options.broadcasts,
+                  viewerHttpProxy: options.viewerHttpProxy,
                 },
               },
             },
@@ -97,7 +110,9 @@ function connection(
         );
       }
     },
-    close() {},
+    close() {
+      closeCount += 1;
+    },
     onMessage(handler) {
       receive = (data) => handler(data, typeof data !== "string");
       return () => {};
@@ -132,8 +147,208 @@ function connection(
     open: () => open(),
     disconnect: () => closed(),
     receive: (message: unknown) => receive(JSON.stringify({ type: "session", message })),
+    receiveBinary: (bytes: Uint8Array) => receive(bytes),
+    closeCount: () => closeCount,
   };
 }
+
+test("viewer proxy silently resolves port conflicts and restores remembered origins", async () => {
+  const occupied = createServer();
+  await new Promise<void>((resolve) => occupied.listen(0, "127.0.0.1", resolve));
+  const address = occupied.address();
+  if (!address || typeof address === "string") throw new Error("Missing test listener");
+  const state = ViewerProxyStateSchema.parse({ first: { port: address.port, enabled: true } });
+  const unavailable = async () => {
+    throw new Error("Host offline");
+  };
+  let proxy = await createLocalViewerHttpProxy({
+    ports: viewerPortCandidates({ serverId: "first", state }),
+    fetch: unavailable,
+  });
+  try {
+    expect(Number(new URL(proxy.origin).port)).not.toBe(address.port);
+    expect((await fetch(`${proxy.origin}/view/report`)).status).toBe(502);
+    state.first.port = Number(new URL(proxy.origin).port);
+    const origin = proxy.origin;
+    await proxy.close();
+    // The second Host is opened first after restart. It cannot take the first's reservation.
+    const restored = ViewerProxyStateSchema.parse(JSON.parse(JSON.stringify(state)));
+    const second = await createLocalViewerHttpProxy({
+      ports: viewerPortCandidates({ serverId: "second", state: restored }),
+      fetch: unavailable,
+    });
+    try {
+      proxy = await createLocalViewerHttpProxy({
+        ports: viewerPortCandidates({ serverId: "first", state: restored }),
+        fetch: unavailable,
+      });
+      expect(proxy.origin).toBe(origin);
+      expect(second.origin).not.toBe(origin);
+    } finally {
+      await second.close();
+    }
+  } finally {
+    await proxy.close();
+    await new Promise<void>((resolve, reject) =>
+      occupied.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      }),
+    );
+  }
+});
+
+test("viewer proxy preserves Range responses and streams binary bytes to a real HTTP browser", async () => {
+  const body = new Uint8Array([0, 255, 42]);
+  const proxy = await createLocalViewerHttpProxy({
+    fetch: async (request) => {
+      expect(request.method).toBe("GET");
+      expect(request.path).toBe("/view/report/video.bin?part=1");
+      expect(request.headers).toMatchObject({
+        accept: "*/*",
+        range: "bytes=0-2",
+        "if-range": "etag",
+      });
+      let started = false;
+      const stream = new ViewerHttpStream(
+        "range",
+        (bytes) => {
+          const frame = decodeViewerHttpFrame(bytes);
+          if (frame?.opcode !== ViewerHttpOpcode.Credit || started) return;
+          started = true;
+          queueMicrotask(() => {
+            stream.handleFrame({
+              opcode: ViewerHttpOpcode.Data,
+              requestId: "range",
+              payload: body,
+            });
+            stream.handleFrame({
+              opcode: ViewerHttpOpcode.End,
+              requestId: "range",
+              payload: new Uint8Array(),
+            });
+          });
+        },
+        () => {},
+        true,
+      );
+      return {
+        status: 206,
+        headers: { "content-length": "3", "content-range": "bytes 0-2/10", etag: "etag" },
+        stream,
+      };
+    },
+  });
+  try {
+    const response = await fetch(`${proxy.origin}/view/report/video.bin?part=1`, {
+      headers: { Range: "bytes=0-2", "If-Range": "etag" },
+    });
+    expect(response.status).toBe(206);
+    expect(response.headers.get("content-range")).toBe("bytes 0-2/10");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(body);
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("viewer upstream closes both current and draining generations on shutdown", async () => {
+  const opened: ReturnType<typeof connection>[] = [];
+  const upstream = createViewerHttpUpstream({
+    createClient: () => {
+      const h = connection({ viewerHttpProxy: true });
+      opened.push(h);
+      queueMicrotask(h.open);
+      return h.client;
+    },
+    onError: (error) => {
+      throw error;
+    },
+  });
+  const request = {
+    method: "GET" as const,
+    path: "/view/report",
+    headers: {},
+    signal: new AbortController().signal,
+  };
+  async function openResource(endpoint: string) {
+    upstream.updateRoute({ type: "directTcp", endpoint });
+    const pending = upstream.fetch(request);
+    await vi.waitFor(() =>
+      expect(opened.at(-1)?.sent.at(-1)?.message?.type).toBe("viewer.http.fetch.request"),
+    );
+    const h = opened.at(-1)!;
+    h.receive({
+      type: "viewer.http.fetch.response",
+      payload: {
+        requestId: h.sent.at(-1)!.message!.requestId,
+        status: 200,
+        headers: { "content-length": "10" },
+      },
+    });
+    return pending;
+  }
+  try {
+    const first = await openResource("first:6767");
+    const second = await openResource("second:6767");
+    expect(opened.map((h) => h.closeCount())).toEqual([0, 0]);
+    await upstream.close();
+    expect(opened.map((h) => h.closeCount())).toEqual([1, 1]);
+    await Promise.all([first.stream.whenClosed(), second.stream.whenClosed()]);
+  } finally {
+    await upstream.close();
+  }
+});
+
+test("viewer HEAD completes when End arrives before the response adapter attaches", async () => {
+  const h = connection({ viewerHttpProxy: true });
+  try {
+    const connecting = h.client.connect();
+    h.open();
+    await connecting;
+    const pending = h.client.fetchViewerHttp({ method: "HEAD", path: "/view/report", headers: {} });
+    const requestId = h.sent.at(-1)?.message?.requestId;
+    if (!requestId) throw new Error("Missing viewer request");
+    h.receive({
+      type: "viewer.http.fetch.response",
+      payload: { requestId, status: 200, headers: { "content-length": "10" } },
+    });
+    h.receiveBinary(encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.End, requestId }));
+    const response = await pending;
+    const events: string[] = [];
+    response.stream.setHandlers({
+      onData: () => events.push("data"),
+      onEnd: () => events.push("end"),
+      onReset: () => events.push("reset"),
+    });
+    expect(events).toEqual(["end"]);
+    await response.stream.whenClosed();
+  } finally {
+    await h.client.close();
+  }
+});
+
+test("viewer shutdown cancels a connection still being established", async () => {
+  const h = connection({ viewerHttpProxy: true });
+  const errors: unknown[] = [];
+  const upstream = createViewerHttpUpstream({
+    createClient: () => h.client,
+    onError: (error) => {
+      errors.push(error);
+    },
+  });
+  upstream.updateRoute({ type: "directTcp", endpoint: "pending:6767" });
+  const pending = upstream.fetch({
+    method: "GET",
+    path: "/view/report",
+    headers: {},
+    signal: new AbortController().signal,
+  });
+  const rejected = expect(pending).rejects.toThrow("Daemon client closed");
+  await upstream.close();
+  await rejected;
+  expect(h.closeCount()).toBe(1);
+  expect(errors).toEqual([]);
+});
 
 test("a plain client advertises every protocol capability and no browser host", async () => {
   const h = connection();

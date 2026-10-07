@@ -80,6 +80,7 @@ import { legacyFavoriteProfileMigration } from "@/agent-profiles/migration";
 import { listenToDesktopEvent } from "@/desktop/electron/events";
 import { updateDesktopWindowChrome } from "@/desktop/electron/window";
 import { getDesktopHost } from "@/desktop/host";
+import { syncViewerProxyHosts, updateViewerProxyRoute } from "@/viewers/proxy";
 import { loadDesktopSettings } from "@/desktop/settings/desktop-settings";
 import { RosettaCalloutSource } from "@/desktop/updates/rosetta-callout-source";
 import { UpdateCalloutSource } from "@/desktop/updates/update-callout-source";
@@ -106,6 +107,7 @@ import {
   getHostRuntimeStore,
   hasConfiguredLocalDaemonOverride,
   useHostRegistryLoaded,
+  useHostRegistryStatus,
   useHostMutations,
   useHostRuntimeClient,
   useHostRuntimeIsConnected,
@@ -305,6 +307,14 @@ function LegacyFavoriteProfileMigrationBootstrap({
 
 function HostSessionManager() {
   const hosts = useHosts();
+  const registryStatus = useHostRegistryStatus();
+
+  useEffect(() => {
+    if (registryStatus !== "ready") return;
+    void syncViewerProxyHosts(hosts.map((host) => host.serverId)).catch((error) => {
+      console.warn("[viewer-http] Failed to restore viewer proxies", error);
+    });
+  }, [hosts, registryStatus]);
 
   if (hosts.length === 0) {
     return null;
@@ -330,12 +340,10 @@ function ViewerHttpRouteSync({ host }: { host: HostProfile }) {
 
   useEffect(() => {
     if (activeConnection?.type !== "relay" && activeConnection?.type !== "directTcp") return;
-    void getDesktopHost()
-      ?.viewerHttp?.updateRoute?.({
-        serverId: host.serverId,
-        connection: activeConnection,
-      })
-      .catch(() => undefined);
+    void updateViewerProxyRoute({
+      serverId: host.serverId,
+      connection: activeConnection,
+    }).catch((error) => console.warn("[viewer-http] Failed to update viewer route", error));
   }, [activeConnection, host.serverId]);
 
   return null;
