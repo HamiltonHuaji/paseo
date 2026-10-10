@@ -94,6 +94,12 @@ import {
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { asInternals as castInternals, createStub } from "../../test-utils/class-mocks.js";
 import { buildProviderRegistry } from "../provider-registry.js";
+import type { CodexServiceTier } from "./codex-feature-definitions.js";
+
+interface CatalogModel {
+  id: string;
+  serviceTiers: CodexServiceTier[];
+}
 
 interface CollaborationModeRecord {
   name: string;
@@ -113,7 +119,8 @@ interface CodexSessionTestAccess {
   handleNotification(method: string, params: unknown): void;
   loadPersistedHistory(client: CodexClientLike | null): Promise<void>;
   refreshResolvedCollaborationMode(): void;
-  serviceTier: "fast" | null;
+  serviceTier: string | null;
+  models: CatalogModel[];
   planModeEnabled: boolean;
   collaborationModes: CollaborationModeRecord[];
   config: AgentSessionConfig;
@@ -166,6 +173,12 @@ function createSession(
     options.autoReviewEnabled === true,
   ) as CodexTestSession;
   session.connectionState = "connected";
+  asInternals(session).models = [
+    {
+      id: "gpt-5.4",
+      serviceTiers: [{ id: "fast", name: "Fast", description: "Test Fast tier" }],
+    },
+  ];
   session.currentThreadId = "test-thread";
   session.activeForegroundTurnId = "test-turn";
   return session;
@@ -1872,7 +1885,12 @@ describe("Codex app-server provider", () => {
       throw new Error(`resumeSession timed out; thread requests: ${threadRequests.join(", ")}`);
     }
 
-    expect(threadRequests).toEqual(["config/read", "thread/loaded/list", "thread/resume"]);
+    expect(threadRequests).toEqual([
+      "config/read",
+      "model/list",
+      "thread/loaded/list",
+      "thread/resume",
+    ]);
     expect(outcome).toBe("rejected");
     appServer.assertNoErrors();
   });

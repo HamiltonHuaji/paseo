@@ -145,7 +145,7 @@ jobs:
         if: env.SHOULD_PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --clobber --repo "${{ github.repository }}"
+        run: gh release upload "$RELEASE_TAG" "${{ steps.artifact.outputs.asset_path }}" --repo "${{ github.repository }}"
 
       - name: Upload APK to workflow
         if: env.SHOULD_PUBLISH != 'true'

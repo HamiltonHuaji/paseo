@@ -77,7 +77,11 @@ import {
 import { createPathEquivalenceMatcher } from "../../../utils/path.js";
 import { spawnProcess } from "../../../utils/spawn.js";
 import { extractCodexTerminalSessionId, nonEmptyString } from "./tool-call-mapper-utils.js";
-import { buildCodexFeatures, codexModelSupportsFastMode } from "./codex-feature-definitions.js";
+import {
+  buildCodexFeatures,
+  CodexServiceTierSchema,
+  type CodexServiceTier,
+} from "./codex-feature-definitions.js";
 import {
   CodexAppServerClient,
   CodexAppServerRpcError,
@@ -346,7 +350,7 @@ function normalizeCodexThinkingOptionId(
   return normalized;
 }
 
-function normalizeCodexModelId(modelId: string | null | undefined): string | undefined {
+function normalizeCodexModelId(modelId: unknown): string | undefined {
   if (typeof modelId !== "string") {
     return undefined;
   }
@@ -886,16 +890,6 @@ interface CodexReasoningEffortEntry {
   description?: string;
 }
 
-interface CodexModel {
-  id: string;
-  displayName?: string;
-  description?: string;
-  isDefault?: boolean;
-  model?: string;
-  defaultReasoningEffort?: string;
-  supportedReasoningEfforts?: CodexReasoningEffortEntry[];
-}
-
 const CodexModelListResponseSchema = z.object({
   data: z
     .array(
@@ -905,6 +899,8 @@ const CodexModelListResponseSchema = z.object({
         description: z.string().optional(),
         isDefault: z.boolean().optional(),
         model: z.string().optional(),
+        hidden: z.boolean().default(false),
+        serviceTiers: z.array(CodexServiceTierSchema).default([]),
         defaultReasoningEffort: z.string().optional(),
         supportedReasoningEfforts: z
           .array(
@@ -916,8 +912,24 @@ const CodexModelListResponseSchema = z.object({
           .optional(),
       }),
     )
-    .optional(),
+    .default([]),
+  nextCursor: z.string().nullable().default(null),
 });
+
+type CodexModel = z.infer<typeof CodexModelListResponseSchema>["data"][number];
+
+async function readCodexModels(client: CodexAppServerClient): Promise<CodexModel[]> {
+  const models: CodexModel[] = [];
+  let cursor: string | null = null;
+  do {
+    const response = CodexModelListResponseSchema.parse(
+      await client.request("model/list", { includeHidden: true, cursor }),
+    );
+    models.push(...response.data);
+    cursor = response.nextCursor;
+  } while (cursor !== null);
+  return models;
+}
 
 function filterCodexThreadsByCwd(
   threads: Array<Record<string, unknown>>,
@@ -3395,7 +3407,8 @@ export class CodexAppServerAgentSession implements AgentSession {
   private activeForegroundTurnId: string | null = null;
   private activeClientMessageId: string | null = null;
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
-  private serviceTier: "fast" | null = null;
+  private models: CodexModel[] = [];
+  private configuredDefaultModelId: string | undefined;
   private planModeEnabled = false;
   private historyPending = false;
   private persistedHistory: PersistedTimelineEntry[] = [];
@@ -3484,9 +3497,6 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.config = config;
     this.asyncQuestions = new CodexAsyncQuestions(resumeHandle?.metadata?.asyncQuestions);
     this.config.thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
-    if (this.config.featureValues?.fast_mode && codexModelSupportsFastMode(this.config.model)) {
-      this.serviceTier = "fast";
-    }
     if (this.config.featureValues?.plan_mode) {
       this.planModeEnabled = true;
     }
@@ -3503,11 +3513,25 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   get features(): AgentFeature[] {
     return buildCodexFeatures({
-      modelId: this.config.model,
-      fastModeEnabled: this.serviceTier === "fast",
+      fastServiceTier: this.fastServiceTier,
+      fastModeEnabled: this.serviceTier !== null,
       planModeEnabled: this.planModeEnabled,
       planModeAvailable: this.hasPlanCollaborationMode(),
     });
+  }
+
+  private get fastServiceTier(): CodexServiceTier | null {
+    const modelId = normalizeCodexModelId(this.config.model) ?? this.configuredDefaultModelId;
+    const model = modelId
+      ? this.models.find((candidate) => candidate.id === modelId || candidate.model === modelId)
+      : (this.models.find((candidate) => candidate.isDefault) ?? this.models[0]);
+    return model?.serviceTiers.find((tier) => tier.id === "priority" || tier.id === "fast") ?? null;
+  }
+
+  private get serviceTier(): string | null {
+    return this.config.featureValues?.fast_mode === true
+      ? (this.fastServiceTier?.id ?? null)
+      : null;
   }
 
   async connect(): Promise<void> {
@@ -3561,6 +3585,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       client.notify("initialized", {});
 
       await this.loadResolvedWorkspaceWrite();
+      this.models = await readCodexModels(client);
       await this.loadCollaborationModes();
       await this.loadSkills();
 
@@ -3597,6 +3622,7 @@ export class CodexAppServerAgentSession implements AgentSession {
         await this.client.request("config/read", { cwd: this.config.cwd ?? null }),
       );
       const config = toObjectRecord(response?.config);
+      this.configuredDefaultModelId = normalizeCodexModelId(config?.model);
       this.resolvedWorkspaceWrite = readSandboxWorkspaceWrite(config?.sandbox_workspace_write);
     } catch (error) {
       this.logger.debug({ error }, "Failed to read resolved Codex workspace-write config");
@@ -3770,7 +3796,6 @@ export class CodexAppServerAgentSession implements AgentSession {
     };
 
     if (featureId === "fast_mode") {
-      this.serviceTier = value ? "fast" : null;
       this.cachedRuntimeInfo = null;
       return;
     }
@@ -4526,8 +4551,8 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   async setModel(modelId: string | null): Promise<void> {
     this.config.model = modelId ?? undefined;
-    if (!codexModelSupportsFastMode(this.config.model)) {
-      this.serviceTier = null;
+    if (!this.fastServiceTier) {
+      this.applyFeatureValue("fast_mode", false);
     }
     this.refreshResolvedCollaborationMode();
     this.cachedRuntimeInfo = null;
@@ -4544,7 +4569,7 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   async setFeature(featureId: string, value: unknown): Promise<void> {
     if (featureId === "fast_mode") {
-      if (Boolean(value) && !codexModelSupportsFastMode(this.config.model)) {
+      if (Boolean(value) && !this.fastServiceTier) {
         throw new Error(
           `Codex fast mode is not available for model '${this.config.model ?? "default"}'`,
         );
@@ -4878,11 +4903,6 @@ export class CodexAppServerAgentSession implements AgentSession {
       targetConfig.systemPrompt,
       targetConfig.daemonAppendSystemPrompt,
     );
-    const serviceTier =
-      targetConfig.featureValues?.fast_mode === true &&
-      codexModelSupportsFastMode(targetConfig.model)
-        ? "fast"
-        : null;
     const beforeTurnId = await resolveCodexForkBeforeTurnId({
       threadId: source.currentThreadId,
       boundaryMessageId: input.boundaryMessageId,
@@ -4895,7 +4915,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       ...(beforeTurnId ? { beforeTurnId } : {}),
       cwd: targetConfig.cwd,
       model: targetConfig.model ?? null,
-      serviceTier,
+      serviceTier: this.serviceTier,
       ...(codexConfig ? { config: codexConfig } : {}),
       ...(developerInstructions ? { developerInstructions } : {}),
       excludeTurns: false,
@@ -5203,27 +5223,13 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
 
     if (!model || !thinkingOptionId) {
-      const modelResponse = toObjectRecord(await this.client.request("model/list", {}));
-      const modelData = Array.isArray(modelResponse?.data) ? modelResponse.data : [];
-      const models = modelData
-        .map((m) => {
-          const record = toObjectRecord(m);
-          return {
-            id: typeof record?.id === "string" ? record.id : "",
-            isDefault: !!record?.isDefault,
-            defaultReasoningEffort:
-              typeof record?.defaultReasoningEffort === "string"
-                ? record.defaultReasoningEffort
-                : undefined,
-          };
-        })
-        .filter((m) => m.id);
-      const defaultModel = models.find((m) => m.isDefault) ?? models[0];
+      const defaultModel = this.models.find((candidate) => candidate.isDefault) ?? this.models[0];
       if (!defaultModel) {
         throw new Error("No models available from Codex app-server");
       }
       const selectedModel =
-        (model ? models.find((candidate) => candidate.id === model) : undefined) ?? defaultModel;
+        (model ? this.models.find((candidate) => candidate.id === model) : undefined) ??
+        defaultModel;
       if (!model) {
         model = selectedModel.id;
       }
@@ -7437,11 +7443,10 @@ export class CodexAppServerAgentClient implements AgentClient {
       );
       client.notify("initialized", {});
 
-      const rawResponse = await runProviderRefreshActivity(context, "model/list", () =>
-        client!.request("model/list", {}),
+      const catalogModels = await runProviderRefreshActivity(context, "model/list", () =>
+        readCodexModels(client!),
       );
-      const parsedResponse = CodexModelListResponseSchema.safeParse(rawResponse);
-      const models = parsedResponse.success ? (parsedResponse.data.data ?? []) : [];
+      const models = catalogModels.filter((model) => !model.hidden);
       const configuredDefaults = await runProviderRefreshActivity(context, "config/read", () =>
         readCodexConfiguredDefaults(client!, this.logger),
       );
@@ -7579,6 +7584,7 @@ function buildCodexModelDefinition(
       model: model.model,
       defaultReasoningEffort: model.defaultReasoningEffort,
       supportedReasoningEfforts: model.supportedReasoningEfforts,
+      serviceTiers: model.serviceTiers,
     },
   };
 }

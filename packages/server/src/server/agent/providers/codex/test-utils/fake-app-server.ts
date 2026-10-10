@@ -147,6 +147,7 @@ export function createFakeCodexAppServer(
           id: "gpt-5.4",
           isDefault: true,
           defaultReasoningEffort: "medium",
+          serviceTiers: [{ id: "fast", name: "Fast", description: "Test Fast tier" }],
         },
       ],
     }),
