@@ -228,6 +228,8 @@ import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
 import { SkillRepositoryService } from "./skill-repositories/service.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
+import { createWorkViewerRouter } from "./work-objects/viewer-http.js";
+import { WorkService } from "./work-objects/service.js";
 import { ExperimentService } from "./experiments/service.js";
 import { ViewerDirectoryCursorError } from "./experiments/viewer-directory.js";
 import { createGitHubService } from "../services/github-service.js";
@@ -593,6 +595,7 @@ export interface PaseoDaemon {
 }
 
 export interface PaseoDaemonDependencies {
+  resolveSkillTargets?: Parameters<typeof createOrchestrationSkills>[1];
   hubRelationshipRemote?: HubRelationshipRemote;
   hubRelationshipClock?: HubRelationshipClock;
   hubRelationshipRetryPolicy?: HubRelationshipRetryPolicy;
@@ -720,7 +723,10 @@ export async function createPaseoDaemon(
       },
     },
   });
-  const orchestrationSkills = createOrchestrationSkills(daemonConfigStore);
+  const orchestrationSkills = createOrchestrationSkills(
+    daemonConfigStore,
+    dependencies.resolveSkillTargets,
+  );
   void orchestrationSkills.autoUpdate().catch((error) => {
     logger.error({ err: error }, "Failed to maintain orchestration skills at startup");
   });
@@ -1037,6 +1043,10 @@ export async function createPaseoDaemon(
   };
 
   const experimentViewerApp = express();
+  experimentViewerApp.use(
+    "/view/v2",
+    createWorkViewerRouter({ service: () => workService, projects: () => projectRegistry }),
+  );
   experimentViewerApp.get("/", (_req, res) => {
     void (async () => {
       if (!experimentService) {
@@ -1088,6 +1098,7 @@ export async function createPaseoDaemon(
     workspaceRegistry,
   });
   experimentService = new ExperimentService(projectRegistry);
+  const workService = new WorkService(projectRegistry);
   const skillRepositoryService = await SkillRepositoryService.open(config.paseoHome);
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({
@@ -1608,6 +1619,7 @@ export async function createPaseoDaemon(
     workspaceRegistry,
     projectRegistry,
     experimentService,
+    workService,
     skillRepositoryService,
     createDirectoryWorkspace: async (cwd, title, projectId) => {
       const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
@@ -2080,6 +2092,7 @@ export async function createPaseoDaemon(
               workspaceLabelService,
               experimentService,
               skillRepositoryService,
+              workService,
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
@@ -2157,6 +2170,7 @@ export async function createPaseoDaemon(
     await speechService.stop();
     await scheduleService.stop().catch(() => undefined);
     await experimentService.close().catch(() => undefined);
+    await workService.close().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();

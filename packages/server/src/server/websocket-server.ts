@@ -102,6 +102,7 @@ import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
 import { currentDaemonDistribution } from "./session/daemon/distribution.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
+import { resolveWorkService, type WorkService } from "./work-objects/service.js";
 import { ExperimentService } from "./experiments/service.js";
 import type { WorkspaceLabelService } from "./workspace-labels/index.js";
 import {
@@ -541,6 +542,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly workspaceLabelService: WorkspaceLabelService | null;
   private readonly experimentService: ExperimentService;
+  private readonly workService: WorkService;
   private readonly skillRepositoryService?: SkillRepositoryService;
   private readonly scheduleService: ScheduleService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
@@ -661,6 +663,7 @@ export class VoiceAssistantWebSocketServer {
     workspaceLabelService?: WorkspaceLabelService,
     experimentService?: ExperimentService,
     skillRepositoryService?: SkillRepositoryService,
+    workService?: WorkService,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.workspaceSetupRuntime = workspaceSetupRuntime;
@@ -690,6 +693,7 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
     this.workspaceLabelService = workspaceLabelService ?? null;
     this.experimentService = experimentService ?? new ExperimentService(this.projectRegistry);
+    this.workService = resolveWorkService(this.projectRegistry, workService);
     this.skillRepositoryService = skillRepositoryService;
     const requiredServices = requireWebSocketServices({
       scheduleService,
@@ -1474,6 +1478,7 @@ export class VoiceAssistantWebSocketServer {
       workspaceRegistry: this.workspaceRegistry,
       workspaceLabelService: this.workspaceLabelService ?? undefined,
       experimentService: this.experimentService,
+      workService: this.workService,
       skillRepositoryService: this.skillRepositoryService,
       directorySync: this.directorySync,
       scheduleService: this.scheduleService,
@@ -1725,6 +1730,7 @@ export class VoiceAssistantWebSocketServer {
         workspaceSetupRun: true,
         // COMPAT(experiments): remove after supported clients all include Experiments.
         experiments: true,
+        works: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.

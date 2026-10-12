@@ -1,21 +1,14 @@
 import { requireNativeModule, NativeModule } from "expo-modules-core";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Buffer } from "buffer";
-import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { createViewerHttpUpstream } from "@getpaseo/client/internal/viewer-http-upstream";
 import {
   ViewerProxyStateSchema,
   VIEWER_REQUEST_HEADERS,
   viewerPortCandidates,
-  type ViewerConnection,
   type ViewerProxyInput,
 } from "@getpaseo/client/internal/viewer-http-proxy";
-import {
-  buildDaemonWebSocketUrl,
-  buildRelayWebSocketUrl,
-  shouldUseTlsForDefaultHostedRelay,
-} from "@getpaseo/protocol/daemon-endpoints";
-import { createAppWebSocketFactory } from "@/runtime/websocket-factory";
+import { createViewerClient } from "./client";
 import { readValidatedJson } from "@/storage/validated-storage";
 import { z } from "zod";
 
@@ -64,36 +57,6 @@ function mutate<Result>(operation: () => Promise<Result>): Promise<Result> {
 
 function reportError(error: unknown): void {
   console.warn("[viewer-http]", error instanceof Error ? error.message : String(error));
-}
-
-function createViewerClient(serverId: string, connection: ViewerConnection): DaemonClient {
-  let url: string;
-  if (connection.type === "relay") {
-    url = buildRelayWebSocketUrl({
-      endpoint: connection.relayEndpoint,
-      useTls: connection.useTls ?? shouldUseTlsForDefaultHostedRelay(connection.relayEndpoint),
-      serverId,
-      role: "client",
-    });
-  } else {
-    url = buildDaemonWebSocketUrl(connection.endpoint, { useTls: connection.useTls ?? false });
-  }
-  const client = new DaemonClient({
-    url,
-    clientId: `android-viewer-${globalThis.crypto.randomUUID()}`,
-    clientType: "mobile",
-    webSocketFactory: createAppWebSocketFactory(),
-    password: connection.type === "directTcp" ? connection.password : undefined,
-    e2ee:
-      connection.type === "relay"
-        ? {
-            enabled: true,
-            daemonPublicKeyB64: connection.daemonPublicKeyB64,
-          }
-        : undefined,
-    reconnect: { enabled: true },
-  });
-  return client;
 }
 
 function getUpstream(serverId: string) {

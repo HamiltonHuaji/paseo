@@ -40,6 +40,8 @@ import { RetainedPanel } from "@/components/retained-panel";
 import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
+import { WorksScreen } from "@/screens/works-screen";
+import { WorkspaceWorksButton } from "./workspace-works-button";
 import { WorkspaceExperimentsButton } from "@/screens/workspace/workspace-experiments-button";
 import { ExperimentsScreen } from "@/screens/experiments-screen";
 import { ImportSessionSheet } from "@/components/import-session-sheet";
@@ -230,21 +232,35 @@ function getWorkspaceProjectId(
   return workspaceDescriptor?.projectId;
 }
 
-function useWorkspaceExperimentsSurface(serverId: string, projectId: string | undefined) {
-  const supported = useHostFeature(serverId, "experiments");
-  const available = Boolean(supported && projectId);
-  const [active, setActive] = useState(false);
-  const [hasOpened, setHasOpened] = useState(false);
+function useWorkspaceWorkSurfaces(serverId: string, projectId: string | undefined) {
+  const experiments = useHostFeature(serverId, "experiments");
+  const works = useHostFeature(serverId, "works");
+  const [active, setActive] = useState<"workspace" | "experiments" | "works">("workspace");
+  const [opened, setOpened] = useState({ experiments: false, works: false });
   useEffect(() => {
-    if (available) return;
-    setActive(false);
-    setHasOpened(false);
-  }, [available]);
-  const toggle = useCallback(() => {
-    setHasOpened(true);
-    setActive((current) => !current);
+    setActive("workspace");
+    setOpened({ experiments: false, works: false });
+  }, [serverId, projectId]);
+  const toggle = useCallback((surface: "experiments" | "works") => {
+    setOpened((current) => ({ ...current, [surface]: true }));
+    setActive((current) => (current === surface ? "workspace" : surface));
   }, []);
-  return { active, available, hasOpened, toggle };
+  const toggleExperiments = useCallback(() => toggle("experiments"), [toggle]);
+  const toggleWorks = useCallback(() => toggle("works"), [toggle]);
+  return {
+    experiments: {
+      active: active === "experiments" && experiments && Boolean(projectId),
+      available: experiments && Boolean(projectId),
+      hasOpened: opened.experiments,
+      toggle: toggleExperiments,
+    },
+    works: {
+      active: active === "works" && works && Boolean(projectId),
+      available: works && Boolean(projectId),
+      hasOpened: opened.works,
+      toggle: toggleWorks,
+    },
+  };
 }
 
 function WorkspaceExperimentsSurface({
@@ -254,7 +270,9 @@ function WorkspaceExperimentsSurface({
   projectId,
   header,
   routeFocused,
+  works = false,
 }: {
+  works?: boolean;
   active: boolean;
   mounted: boolean;
   serverId: string;
@@ -263,11 +281,12 @@ function WorkspaceExperimentsSurface({
   routeFocused: boolean;
 }) {
   if (!mounted || !projectId) return null;
+  const Screen = works ? WorksScreen : ExperimentsScreen;
   return (
     <RetainedPanel active={active}>
       {header}
       <View style={styles.centerContent}>
-        <ExperimentsScreen
+        <Screen
           serverId={serverId}
           projectId={projectId}
           embedded
@@ -1058,6 +1077,7 @@ interface WorkspaceHeaderTitleBarProps {
   workspaceScripts: WorkspaceDescriptor["scripts"];
   liveTerminalIds: string[];
   showExperiments: boolean;
+  showWorks: boolean;
   showWorkspaceSetup: boolean;
   showCreateBrowserTab: boolean;
   isMobile: boolean;
@@ -1076,6 +1096,7 @@ interface WorkspaceHeaderTitleBarProps {
   onViewScriptTerminal: (terminalId: string) => void;
   onOpenUrlInBrowserTab: (url: string) => void;
   onOpenExperiments: () => void;
+  onOpenWorks: () => void;
 }
 
 function WorkspaceHeaderTitleBar({
@@ -1089,6 +1110,7 @@ function WorkspaceHeaderTitleBar({
   workspaceScripts,
   liveTerminalIds,
   showExperiments,
+  showWorks,
   showWorkspaceSetup,
   showCreateBrowserTab,
   isMobile,
@@ -1107,6 +1129,7 @@ function WorkspaceHeaderTitleBar({
   onViewScriptTerminal,
   onOpenUrlInBrowserTab,
   onOpenExperiments,
+  onOpenWorks,
 }: WorkspaceHeaderTitleBarProps) {
   return (
     <View style={styles.headerTitleContainer}>
@@ -1171,6 +1194,7 @@ function WorkspaceHeaderTitleBar({
         {isMobile && showExperiments ? (
           <WorkspaceExperimentsButton onPress={onOpenExperiments} mobile />
         ) : null}
+        {isMobile && showWorks ? <WorkspaceWorksButton onPress={onOpenWorks} mobile /> : null}
       </View>
     </View>
   );
@@ -1674,13 +1698,16 @@ function WorkspaceScreenContent({
   }, [normalizedServerId, normalizedWorkspaceId, workspaceDescriptor]);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
   const experimentProjectId = getWorkspaceProjectId(workspaceDescriptor);
-  const experimentsSurface = useWorkspaceExperimentsSurface(
+  const { experiments: experimentsSurface, works: worksSurface } = useWorkspaceWorkSurfaces(
     normalizedServerId,
     experimentProjectId,
   );
   const handleOpenExperiments = experimentsSurface.toggle;
   const showExperiments = experimentsSurface.available;
-  const tabDeckFocused = isWorkspaceTabDeckFocused(isRouteFocused, experimentsSurface.active);
+  const handleOpenWorks = worksSurface.toggle;
+  const showWorks = worksSurface.available;
+  const workSurfaceActive = [experimentsSurface.active, worksSurface.active].some(Boolean);
+  const tabDeckFocused = isWorkspaceTabDeckFocused(isRouteFocused, workSurfaceActive);
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
 
@@ -3895,6 +3922,7 @@ function WorkspaceScreenContent({
           visible={showExperiments}
           hidden={isMobile}
         />
+        <WorkspaceWorksButton onPress={handleOpenWorks} visible={showWorks} hidden={isMobile} />
         {!isMobile && workspaceDirectory ? (
           <WorkspaceOpenInEditorButton
             serverId={normalizedServerId}
@@ -3941,11 +3969,13 @@ function WorkspaceScreenContent({
       handleViewScriptTerminal,
       handleOpenUrlInBrowserTab,
       handleOpenExperiments,
+      handleOpenWorks,
       handleToggleExplorerSidebar,
       explorerSidebarToggleLabel,
       explorerSidebarToggleAccessibilityState,
       explorerToggleOwner,
       showExperiments,
+      showWorks,
       t,
     ],
   );
@@ -4021,6 +4051,7 @@ function WorkspaceScreenContent({
                 normalizedWorkspaceId={normalizedWorkspaceId}
                 workspaceScripts={workspaceScripts}
                 liveTerminalIds={liveTerminalIds}
+                showWorks={showWorks}
                 showExperiments={showExperiments}
                 showWorkspaceSetup={showWorkspaceSetup}
                 showCreateBrowserTab={showCreateBrowserTab}
@@ -4039,6 +4070,7 @@ function WorkspaceScreenContent({
                 onScriptTerminalStarted={handleScriptTerminalStarted}
                 onViewScriptTerminal={handleViewScriptTerminal}
                 onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
+                onOpenWorks={handleOpenWorks}
                 onOpenExperiments={handleOpenExperiments}
               />
             </>
@@ -4059,6 +4091,7 @@ function WorkspaceScreenContent({
       handleOpenSetupTab,
       handleOpenUrlInBrowserTab,
       handleOpenExperiments,
+      handleOpenWorks,
       handleScriptTerminalStarted,
       handleViewScriptTerminal,
       headerRight,
@@ -4070,6 +4103,7 @@ function WorkspaceScreenContent({
       openImportSheet,
       showCreateBrowserTab,
       showExperiments,
+      showWorks,
       showScreenHeader,
       showWorkspaceSetup,
       workspaceDirectory,
@@ -4167,7 +4201,7 @@ function WorkspaceScreenContent({
 
   const workspaceCenterColumn = (
     <View style={styles.centerColumn}>
-      <RetainedPanel active={!experimentsSurface.active}>
+      <RetainedPanel active={!workSurfaceActive}>
         {rendersDesktopSplitContent ? null : renderWorkspaceScreenHeader()}
 
         {isMobile ? (
@@ -4232,6 +4266,15 @@ function WorkspaceScreenContent({
       <WorkspaceExperimentsSurface
         active={experimentsSurface.active}
         mounted={experimentsSurface.hasOpened}
+        serverId={normalizedServerId}
+        projectId={experimentProjectId}
+        header={renderWorkspaceScreenHeader()}
+        routeFocused={isRouteFocused}
+      />
+      <WorkspaceExperimentsSurface
+        works
+        active={worksSurface.active}
+        mounted={worksSurface.hasOpened}
         serverId={normalizedServerId}
         projectId={experimentProjectId}
         header={renderWorkspaceScreenHeader()}

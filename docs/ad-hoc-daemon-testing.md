@@ -15,6 +15,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import pino from "pino";
 import { createPaseoDaemon } from "./bootstrap.js";
 import { DaemonClient } from "./test-utils/daemon-client.js";
+import { resolveSkillTargets } from "./orchestration-skills/internal/paths.js";
 
 const logger = pino({ level: "warn" });
 const paseoHomeRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-test-"));
@@ -40,6 +41,7 @@ const daemon = await createPaseoDaemon(
     // providerOverrides: { ... },
   },
   logger,
+  { resolveSkillTargets: () => resolveSkillTargets(paseoHomeRoot) },
 );
 
 await daemon.start();
@@ -70,6 +72,11 @@ npx tsx packages/server/src/server/your-script.ts
 ## Using the test helper
 
 For simpler cases, `createTestPaseoDaemon` + `DaemonClient` handles temp dirs and port selection:
+
+The helper also redirects bundled skill installation into its temporary provider home.
+`PASEO_HOME` alone does not isolate skills: their production targets use the user's home directory.
+If you call `createPaseoDaemon` directly, inject `resolveSkillTargets` in its dependencies before
+exercising startup or skill settings. Otherwise the test can install development skills globally.
 
 ```typescript
 import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";

@@ -29,6 +29,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/data-model.md](docs/data-model.md)                             | File-based JSON persistence, Zod schemas, atomic writes, no migrations                                                         |
 | [docs/skill-repository-sync.md](docs/skill-repository-sync.md)       | Fork requirement for Git-backed skill repositories, client credential mediation, and daemon subscriptions                      |
 | [docs/experiments.md](docs/experiments.md)                           | Project-local Experiment/Attempt coordination, progress, static viewers, and agent interfaces                                  |
+| [Paseo Works v2 requirements](docs/refactors/work-objects-v2.md)     | Independent Card/Item system, component contracts, shared viewer host, local W&B data, MCP, client, and delivery modules       |
 | [Viewer transport spec][viewer-transport-spec]                       | Target daemon viewer host, stable ports, direct access, client forwarding, and tunnel stream lifecycle                         |
 | [docs/glossary.md](docs/glossary.md)                                 | Authoritative terminology — UI label wins, no synonyms                                                                         |
 | [docs/coding-standards.md](docs/coding-standards.md)                 | Type hygiene, error handling, state design, React patterns, file organization                                                  |

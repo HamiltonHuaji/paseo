@@ -13,6 +13,7 @@ import type { AgentClient, AgentProvider } from "../agent/agent-sdk-types.js";
 import { createTestAgentClients } from "./fake-agent-client.js";
 import type { PushNotificationSender } from "../push/index.js";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
+import { resolveSkillTargets } from "../orchestration-skills/internal/paths.js";
 
 interface TestPaseoDaemonOptions {
   daemonVersion?: string;
@@ -100,6 +101,7 @@ export async function createTestPaseoDaemon(
     const { config, paseoHomeRoot, paseoHome, staticDir } = await prepareTestDaemonConfig(options);
     const logger = options.logger ?? pino({ level: "silent" });
     const daemon = await createPaseoDaemon(config, logger, {
+      resolveSkillTargets: () => resolveSkillTargets(path.join(paseoHomeRoot, "provider-home")),
       serverFeatureOverrides: {
         daemonStatusRpc: options.daemonStatusRpcCapability,
         relayConfig: options.relayConfigCapability,

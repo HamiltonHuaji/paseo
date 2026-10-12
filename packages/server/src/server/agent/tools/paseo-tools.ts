@@ -85,6 +85,8 @@ import {
 } from "../../worktree/commands.js";
 import { registerBrowserTools } from "../../browser-tools/tools.js";
 import type { BrowserToolsBroker } from "../../browser-tools/broker.js";
+import type { WorkService } from "../../work-objects/service.js";
+import { createWorkTools } from "../../work-objects/tools.js";
 import type { ExperimentService } from "../../experiments/service.js";
 import type { SkillRepositoryService } from "../../skill-repositories/service.js";
 import {
@@ -124,6 +126,7 @@ export interface PaseoToolHostDependencies {
   workspaceRegistry?: Pick<WorkspaceRegistry, "get" | "list" | "upsert">;
   projectRegistry?: Pick<ProjectRegistry, "get" | "list">;
   experimentService?: ExperimentService;
+  workService?: WorkService;
   skillRepositoryService?: SkillRepositoryService;
   createDirectoryWorkspace?: (
     cwd: string,
@@ -3297,6 +3300,16 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       };
     },
   );
+
+  if (callerAgentId && options.workService) {
+    for (const tool of createWorkTools({
+      service: options.workService,
+      projectId: resolveCallerProjectId,
+      callerAgentId,
+    })) {
+      registerTool(tool.name, tool, tool.handler);
+    }
+  }
 
   if (callerAgentId && experimentService) {
     registerTool(

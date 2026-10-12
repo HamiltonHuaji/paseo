@@ -3,6 +3,8 @@
 Status: initial v1 implementation. Goal catalog management, doctor/repair, and post-turn reporting
 forks remain follow-up work.
 
+The separate [Paseo Works v2 requirements](refactors/work-objects-v2.md) define the independent Card/Item system and its shared viewer-host infrastructure; v1 data, entry points, and this contract remain unchanged.
+
 Experiments give a project durable coordination state for work that spans agent sessions, attempts,
 and long-running external processes. The model is domain-neutral. The first stored fields support
 machine-learning experiments directly because that is the first target workflow.

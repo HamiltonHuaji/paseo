@@ -95,6 +95,8 @@ import {
   WorkspaceLabelStorageUncertainError,
   type WorkspaceLabelService,
 } from "./workspace-labels/index.js";
+import type { WorkService } from "./work-objects/service.js";
+import { createWorkSession, type WorkSession } from "./work-objects/session.js";
 import type { ExperimentService } from "./experiments/service.js";
 import type { SkillRepositoryService } from "./skill-repositories/service.js";
 
@@ -464,6 +466,7 @@ export interface SessionOptions {
   directorySync?: DirectorySyncService;
   workspaceLabelService?: WorkspaceLabelService;
   experimentService: ExperimentService;
+  workService?: WorkService;
   skillRepositoryService?: SkillRepositoryService;
   filesystem?: SessionFileSystem;
   scheduleService: ScheduleService;
@@ -792,6 +795,7 @@ export class Session {
   private readonly workspaceScripts: WorkspaceScriptsService;
   private readonly messageReceipts: Pick<MessageReceipts, "send">;
   private readonly experimentService: ExperimentService;
+  private readonly workSession: WorkSession | null;
   private readonly skillRepositoryService?: SkillRepositoryService;
   private readonly tunnelController: TunnelController;
   private readonly viewerHttpController: ViewerHttpController;
@@ -897,6 +901,11 @@ export class Session {
     this.projectRegistry = projectRegistry;
     this.workspaceRegistry = workspaceRegistry;
     this.experimentService = experimentService;
+    this.workSession = createWorkSession(
+      options.workService,
+      (message) => this.emit(message),
+      this.delivery,
+    );
     this.skillRepositoryService = options.skillRepositoryService;
     this.directorySync = resolveDirectorySync(directorySync);
     this.workspaceLabelService = resolveWorkspaceLabelService(workspaceLabelService);
@@ -3216,7 +3225,11 @@ export class Session {
     source?: object,
   ): Promise<void> | undefined {
     if (msg.type === "viewer.http.fetch.request") return this.handleViewerHttpFetch(msg, source);
-    return this.dispatchTunnelMessage(msg, source) ?? this.dispatchExperimentMessage(msg);
+    return (
+      this.workSession?.dispatch(msg) ??
+      this.dispatchTunnelMessage(msg, source) ??
+      this.dispatchExperimentMessage(msg)
+    );
   }
 
   private async handleViewerHttpFetch(
@@ -8979,6 +8992,7 @@ export class Session {
     this.terminalController.dispose();
     this.tunnelController.dispose();
     this.viewerHttpController.dispose();
+    this.workSession?.close();
 
     this.checkoutSession.cleanup();
 

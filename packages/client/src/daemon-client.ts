@@ -277,6 +277,10 @@ export type ConnectionState =
 
 export type DaemonEvent =
   | {
+      type: "work.project.changed";
+      payload: Extract<SessionOutboundMessage, { type: "work.project.changed" }>["payload"];
+    }
+  | {
       type: "agent_update";
       agentId: string;
       payload: Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
@@ -2785,6 +2789,209 @@ export class DaemonClient {
         type: "workspace.label.delete.inspect.request",
         name: options.name,
       },
+    });
+  }
+
+  listWorkCards(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.list.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.list.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.list.request", ...input },
+    });
+  }
+
+  getWorkCard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.get.request", ...input },
+    });
+  }
+
+  createWorkCard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.create.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.create.request", ...input },
+    });
+  }
+
+  updateWorkCard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.update.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.update.request", ...input },
+    });
+  }
+
+  listWorkItems(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.list.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.list.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.list.request", ...input },
+    });
+  }
+
+  getWorkItem(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.get.request", ...input },
+    });
+  }
+
+  createWorkItem(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.create.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.create.request", ...input },
+    });
+  }
+
+  updateWorkItem(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.update.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.update.request", ...input },
+    });
+  }
+
+  getWorkBoard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.board.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.board.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.board.get.request", ...input },
+    });
+  }
+
+  updateWorkBoard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.board.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.board.update.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.board.update.request", ...input },
+    });
+  }
+
+  getWorkStorage(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.storage.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.storage.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.storage.get.request", ...input },
+    });
+  }
+
+  resolveWorkViewers(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.viewers.resolve.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.viewers.resolve.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.viewers.resolve.request", ...input },
+    });
+  }
+
+  refreshWorkProgress(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.progress.refresh.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.progress.refresh.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.progress.refresh.request", ...input },
+    });
+  }
+
+  subscribeWorkProject(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.project.subscribe.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.project.subscribe.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.project.subscribe.request", ...input },
+    });
+  }
+
+  unsubscribeWorkProject(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.project.unsubscribe.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.project.unsubscribe.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.project.unsubscribe.request", ...input },
     });
   }
 
@@ -7102,6 +7309,8 @@ export class DaemonClient {
           workspaceId: msg.payload.kind === "upsert" ? msg.payload.workspace.id : msg.payload.id,
           payload: msg.payload,
         };
+      case "work.project.changed":
+        return { type: "work.project.changed", payload: msg.payload };
       case "project.update":
         return { type: "project.update", payload: msg.payload };
       case "workspace_setup_progress":
