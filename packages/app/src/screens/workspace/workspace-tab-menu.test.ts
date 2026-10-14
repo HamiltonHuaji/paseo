@@ -48,10 +48,10 @@ describe("buildWorkspaceTabMenuEntries", () => {
       "Copy resume command",
       "Copy agent id",
       "Rename",
+      "Reload agent",
       "Close to the left",
       "Close to the right",
       "Close other tabs",
-      "Reload agent",
       "Close",
     ]);
   });
@@ -79,10 +79,10 @@ describe("buildWorkspaceTabMenuEntries", () => {
       "Copy resume command",
       "Copy agent id",
       "Rename",
+      "Reload agent",
       "Close tabs above",
       "Close tabs below",
       "Close other tabs",
-      "Reload agent",
       "Close",
     ]);
   });
@@ -362,7 +362,38 @@ describe("buildWorkspaceTabMenuEntries", () => {
     const terminalSeparator = terminalEntries
       .slice(terminalEntries.indexOf(terminalRename) + 1)
       .find((entry) => entry.kind === "separator");
-    expect(agentSeparator?.key).toBe("rename-separator");
-    expect(terminalSeparator?.key).toBe("rename-separator");
+    expect(agentSeparator?.key).toBe("actions-separator");
+    expect(terminalSeparator?.key).toBe("actions-separator");
   });
+});
+
+describe("heartbeat session entry", () => {
+  it.each(["desktop", "desktop-rail", "mobile"] as const)(
+    "opens the selected agent from the %s menu",
+    (surface) => {
+      const onOpenHeartbeats = vi.fn();
+      const entries = buildWorkspaceTabMenuEntries({
+        surface,
+        tab: createAgentTab(),
+        index: 0,
+        tabCount: 1,
+        menuTestIDBase: "agent-menu",
+        onCopyResumeCommand: vi.fn(),
+        onCopyAgentId: vi.fn(),
+        onCopyTerminalId: vi.fn(),
+        onCopyFilePath: vi.fn(),
+        onReloadAgent: vi.fn(),
+        onRenameTab: vi.fn(),
+        onCloseTab: vi.fn(),
+        onCloseTabsBefore: vi.fn(),
+        onCloseTabsAfter: vi.fn(),
+        onCloseOtherTabs: vi.fn(),
+        onOpenHeartbeats,
+      });
+      const action = entries.find((entry) => entry.kind === "item" && entry.key === "heartbeats");
+      if (!action || action.kind !== "item") throw new Error("Heartbeat action missing");
+      action.onSelect();
+      expect(onOpenHeartbeats).toHaveBeenCalledWith("agent-123");
+    },
+  );
 });

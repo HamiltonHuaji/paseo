@@ -2,6 +2,7 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
+  heartbeats: heartbeatSettings["zh-CN"],
   paneFind: {
     searchFailed: "无法搜索此聊天。请检查主机连接后重试。",
     searching: "搜索中…",
@@ -331,7 +332,7 @@ export const zhCN: TranslationResources = {
       forkInNewTab: "分叉到新标签页",
       forkInNewWorkspace: "分叉到新工作区",
       forkUnavailable: "请更新主机以使用此功能。",
-      forkNativeUnavailable: "请同时更新 Paseo 客户端和主机，以原生分叉 Codex 会话。",
+      forkNativeUnavailable: "此主机尚不支持原生会话分叉，请更新主机。",
       forkWaitForTurn: "请等待当前 turn 完成后再分叉。",
       forkSameHost: "Codex 原生分叉必须在源主机上创建。",
       forkMissingWorkspace: "此 Agent 不在工作区中。",
@@ -2819,3 +2820,4 @@ export const zhCN: TranslationResources = {
     },
   },
 };
+import { heartbeatSettings } from "./heartbeat-settings";

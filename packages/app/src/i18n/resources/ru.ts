@@ -2,6 +2,7 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
+  heartbeats: heartbeatSettings["ru"],
   paneFind: {
     searchFailed:
       "Не удалось выполнить поиск в чате. Проверьте подключение к хосту и повторите попытку.",
@@ -336,7 +337,7 @@ export const ru: TranslationResources = {
       forkInNewWorkspace: "Создать форк в новом рабочем пространстве",
       forkUnavailable: "Обновите хост, чтобы использовать эту функцию.",
       forkNativeUnavailable:
-        "Обновите клиент Paseo и хост, чтобы создавать нативные форки диалогов Codex.",
+        "Этот хост не поддерживает нативное ветвление диалогов. Обновите хост.",
       forkWaitForTurn: "Дождитесь завершения текущего хода перед созданием форка.",
       forkSameHost: "Нативный форк Codex должен оставаться на исходном хосте.",
       forkMissingWorkspace: "Этот агент не связан с рабочим пространством.",
@@ -2796,3 +2797,4 @@ export const ru: TranslationResources = {
     },
   },
 };
+import { heartbeatSettings } from "./heartbeat-settings";

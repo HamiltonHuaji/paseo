@@ -47,3 +47,38 @@ describe("getWorkspaceNamingAttachments", () => {
     expect(getWorkspaceNamingAttachments([chatHistory, prContext])).toEqual([prContext]);
   });
 });
+
+import { resolveForkPreparation } from "@/agent-stream/fork-preparation";
+
+describe("native fork capability gating", () => {
+  it("allows Codex on a capable host even when a stored source projection lacks the optional flag", () => {
+    expect(
+      resolveForkPreparation({
+        provider: "codex",
+        sourceSupportsNative: false,
+        daemonSupportsNative: true,
+        daemonSupportsContext: true,
+      }),
+    ).toEqual({ mode: "native" });
+  });
+  it("keeps a host without the native fork RPC unavailable", () => {
+    expect(
+      resolveForkPreparation({
+        provider: "codex",
+        sourceSupportsNative: true,
+        daemonSupportsNative: false,
+        daemonSupportsContext: true,
+      }),
+    ).toEqual({ errorKey: "message.actions.forkNativeUnavailable" });
+  });
+  it("retains context forks for providers without native support", () => {
+    expect(
+      resolveForkPreparation({
+        provider: "claude",
+        sourceSupportsNative: false,
+        daemonSupportsNative: true,
+        daemonSupportsContext: true,
+      }),
+    ).toEqual({ mode: "context_attachment" });
+  });
+});

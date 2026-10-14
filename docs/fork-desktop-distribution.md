@@ -32,6 +32,12 @@ creates the requested installer tag with that commit as its target. Keep `rollou
 personal fork releases unless a staged rollout was explicitly requested. See
 [release.md](release.md) for the complete command sequence and artifact checklist.
 
+## Daemon lifecycle
+
+Starting Desktop attaches to an already-running daemon without restarting it because its version
+differs from the app. Clients and daemons update independently; feature capabilities decide what
+you can use. Restart or update the daemon through an explicit lifecycle action.
+
 ## Official release visibility
 
 Fork builds check `getpaseo/paseo` as read-only release metadata. Settings can download and verify

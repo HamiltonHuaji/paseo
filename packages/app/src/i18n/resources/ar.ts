@@ -2,6 +2,7 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ar: TranslationResources = {
+  heartbeats: heartbeatSettings["ar"],
   paneFind: {
     searchFailed: "تعذر البحث في هذه المحادثة. تحقق من الاتصال بالمضيف وأعد المحاولة.",
     searching: "جارٍ البحث…",
@@ -331,7 +332,7 @@ export const ar: TranslationResources = {
       forkInNewTab: "تفريع في تبويب جديد",
       forkInNewWorkspace: "تفريع في مساحة عمل جديدة",
       forkUnavailable: "حدّث المضيف لاستخدام هذا.",
-      forkNativeUnavailable: "حدّث عميل Paseo والمضيف لتفريع محادثات Codex أصليًا.",
+      forkNativeUnavailable: "هذا المضيف لا يدعم تفريع المحادثات الأصلي. حدّث المضيف.",
       forkWaitForTurn: "انتظر حتى تنتهي الجولة الحالية قبل التفريع.",
       forkSameHost: "يجب أن يبقى تفريع Codex الأصلي على المضيف المصدر.",
       forkMissingWorkspace: "هذا الوكيل ليس في مساحة عمل.",
@@ -2743,3 +2744,4 @@ export const ar: TranslationResources = {
     },
   },
 };
+import { heartbeatSettings } from "./heartbeat-settings";

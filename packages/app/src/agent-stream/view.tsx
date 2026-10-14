@@ -82,7 +82,6 @@ import {
 import { resolveBottomOverlayTailInset } from "./bottom-overlay-inset";
 import { layoutStream, type StreamLayoutItem } from "./layout";
 import {
-  CLIENT_SUPPORTS_NATIVE_CONVERSATION_FORK,
   resolveAssistantForkImplementation,
   resolveForkPreparation,
   type AssistantForkImplementation,
@@ -425,7 +424,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     );
     const forkPreparation = resolveForkPreparation({
       provider: context.provider,
-      clientSupportsNative: CLIENT_SUPPORTS_NATIVE_CONVERSATION_FORK,
       sourceSupportsNative: sourceSupportsNativeConversationFork(context.capabilities),
       daemonSupportsNative: supportsNativeConversationFork,
       daemonSupportsContext: supportsAgentForkContext,

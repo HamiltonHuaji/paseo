@@ -2,6 +2,7 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ko: TranslationResources = {
+  heartbeats: heartbeatSettings["ko"],
   paneFind: {
     searchFailed: "이 채팅을 검색할 수 없습니다. 호스트 연결을 확인하고 다시 시도하세요.",
     searching: "검색 중…",
@@ -333,7 +334,7 @@ export const ko: TranslationResources = {
       forkInNewWorkspace: "새 워크스페이스로 분기",
       forkUnavailable: "이를 사용하려면 호스트를 업데이트하세요.",
       forkNativeUnavailable:
-        "Codex 대화를 네이티브로 분기하려면 Paseo 클라이언트와 호스트를 업데이트하세요.",
+        "이 호스트는 대화의 네이티브 분기를 지원하지 않습니다. 호스트를 업데이트하세요.",
       forkWaitForTurn: "현재 턴이 끝날 때까지 기다린 후 분기하세요.",
       forkSameHost: "Codex 네이티브 분기는 원본 호스트에 있어야 합니다.",
       forkMissingWorkspace: "이 에이전트는 워크스페이스에 속해 있지 않습니다.",
@@ -2758,3 +2759,4 @@ export const ko: TranslationResources = {
     },
   },
 };
+import { heartbeatSettings } from "./heartbeat-settings";

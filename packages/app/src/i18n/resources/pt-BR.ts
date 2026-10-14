@@ -2,6 +2,7 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ptBR: TranslationResources = {
+  heartbeats: heartbeatSettings["pt-BR"],
   paneFind: {
     searchFailed:
       "Não foi possível pesquisar nesta conversa. Verifique a conexão com o host e tente novamente.",
@@ -336,7 +337,7 @@ export const ptBR: TranslationResources = {
       forkInNewWorkspace: "Bifurcar em um novo workspace",
       forkUnavailable: "Atualize o host para usar isto.",
       forkNativeUnavailable:
-        "Atualize o cliente e o host do Paseo para bifurcar conversas do Codex.",
+        "Este host não suporta bifurcações nativas de conversas. Atualize o host.",
       forkWaitForTurn: "Aguarde o turno atual terminar antes de bifurcar.",
       forkSameHost: "Uma bifurcação nativa do Codex deve permanecer no host de origem.",
       forkMissingWorkspace: "Este agente não está em um workspace.",
@@ -2787,3 +2788,4 @@ export const ptBR: TranslationResources = {
     },
   },
 };
+import { heartbeatSettings } from "./heartbeat-settings";

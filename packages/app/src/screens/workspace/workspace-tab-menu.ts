@@ -80,6 +80,7 @@ interface BuildWorkspaceTabMenuEntriesInput {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
+  onOpenHeartbeats?: (agentId: string) => void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onMoveTabToStart?: (tabId: string) => Promise<void> | void;
   onMoveTabToEnd?: (tabId: string) => Promise<void> | void;
@@ -100,6 +101,7 @@ interface BuildWorkspaceDesktopTabActionsInput {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
+  onOpenHeartbeats?: (agentId: string) => void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onMoveTabToStart?: (tabId: string) => Promise<void> | void;
   onMoveTabToEnd?: (tabId: string) => Promise<void> | void;
@@ -225,6 +227,7 @@ export function buildWorkspaceTabMenuEntries(
     onCopyTerminalId,
     onCopyFilePath,
     onReloadAgent,
+    onOpenHeartbeats,
     onRenameTab,
     onMoveTabToStart,
     onMoveTabToEnd,
@@ -241,6 +244,16 @@ export function buildWorkspaceTabMenuEntries(
 
   if (tab.target.kind === "agent") {
     const { agentId } = tab.target;
+    if (onOpenHeartbeats) {
+      entries.push({
+        kind: "item",
+        key: "heartbeats",
+        label: i18n.t("heartbeats.title"),
+        icon: "rotate-cw",
+        testID: `${menuTestIDBase}-heartbeats`,
+        onSelect: () => onOpenHeartbeats(agentId),
+      });
+    }
     entries.push({
       kind: "item",
       key: "copy-resume-command",
@@ -428,6 +441,7 @@ export function buildWorkspaceDesktopTabActions(
       onCopyTerminalId: input.onCopyTerminalId,
       onCopyFilePath: input.onCopyFilePath,
       onReloadAgent: input.onReloadAgent,
+      onOpenHeartbeats: input.onOpenHeartbeats,
       onRenameTab: input.onRenameTab,
       onMoveTabToStart: input.onMoveTabToStart,
       onMoveTabToEnd: input.onMoveTabToEnd,

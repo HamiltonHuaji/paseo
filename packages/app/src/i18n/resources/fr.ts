@@ -2,6 +2,7 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
+  heartbeats: heartbeatSettings["fr"],
   paneFind: {
     searchFailed:
       "Impossible de rechercher dans cette conversation. Vérifiez la connexion à l’hôte et réessayez.",
@@ -338,7 +339,7 @@ export const fr: TranslationResources = {
       forkInNewWorkspace: "Dupliquer dans un nouvel espace de travail",
       forkUnavailable: "Mettez l'hôte à jour pour utiliser ceci.",
       forkNativeUnavailable:
-        "Mettez à jour le client Paseo et l'hôte pour dupliquer les conversations Codex.",
+        "Cet hôte ne prend pas en charge les branches natives de conversation. Mettez l’hôte à jour.",
       forkWaitForTurn: "Attendez la fin du tour actuel avant de dupliquer.",
       forkSameHost: "Une duplication native Codex doit rester sur l'hôte source.",
       forkMissingWorkspace: "Cet agent n'est pas dans un espace de travail.",
@@ -2812,3 +2813,4 @@ export const fr: TranslationResources = {
     },
   },
 };
+import { heartbeatSettings } from "./heartbeat-settings";

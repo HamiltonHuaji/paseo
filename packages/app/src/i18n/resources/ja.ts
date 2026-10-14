@@ -2,6 +2,7 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ja: TranslationResources = {
+  heartbeats: heartbeatSettings["ja"],
   paneFind: {
     searchFailed:
       "このチャットを検索できませんでした。ホストへの接続を確認して再試行してください。",
@@ -337,7 +338,7 @@ export const ja: TranslationResources = {
       forkInNewWorkspace: "新しいワークスペースにフォーク",
       forkUnavailable: "これを使用するにはホストを更新してください。",
       forkNativeUnavailable:
-        "Codex 会話をネイティブにフォークするには、Paseo クライアントとホストを更新してください。",
+        "このホストは会話のネイティブ分岐に対応していません。ホストを更新してください。",
       forkWaitForTurn: "現在のターンが完了してからフォークしてください。",
       forkSameHost: "Codex のネイティブフォークは元のホスト上に作成する必要があります。",
       forkMissingWorkspace: "このエージェントはワークスペース内にありません。",
@@ -2773,3 +2774,4 @@ export const ja: TranslationResources = {
     },
   },
 } as const;
+import { heartbeatSettings } from "./heartbeat-settings";

@@ -21,10 +21,7 @@ import { useWorkspaceDraftSubmissionStore } from "@/stores/workspace-draft-submi
 import { toErrorMessage } from "@/utils/error-messages";
 import { buildNewWorkspaceRoute } from "@/utils/host-routes";
 import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/workspace-tabs/model";
-import {
-  CLIENT_SUPPORTS_NATIVE_CONVERSATION_FORK,
-  resolveForkPreparation,
-} from "@/agent-stream/fork-preparation";
+import { resolveForkPreparation } from "@/agent-stream/fork-preparation";
 import {
   buildNativeConversationForkCreateOptions,
   type NativeConversationForkHandoff,
@@ -260,7 +257,6 @@ export function useForkAgent(
     try {
       const preparation = resolveForkPreparation({
         provider: agent.provider,
-        clientSupportsNative: CLIENT_SUPPORTS_NATIVE_CONVERSATION_FORK,
         sourceSupportsNative: agent.capabilities?.supportsNativeConversationFork === true,
         daemonSupportsNative: supportsNativeConversationFork,
         daemonSupportsContext: supportsAgentForkContext,

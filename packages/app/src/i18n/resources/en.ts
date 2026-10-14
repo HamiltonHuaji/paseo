@@ -1,4 +1,5 @@
 export const en = {
+  heartbeats: heartbeatSettings["en"],
   paneFind: {
     searchFailed: "Could not search this chat. Check the host connection and retry.",
     searching: "Searching…",
@@ -328,7 +329,8 @@ export const en = {
       forkInNewTab: "Fork in a new tab",
       forkInNewWorkspace: "Fork in a new workspace",
       forkUnavailable: "Update the host to use this.",
-      forkNativeUnavailable: "Update both the Paseo client and host to fork Codex conversations.",
+      forkNativeUnavailable:
+        "This host does not support native conversation forks. Update the host.",
       forkWaitForTurn: "Wait for the current turn to finish before forking.",
       forkSameHost: "A native Codex fork must stay on the source host.",
       forkMissingWorkspace: "This agent is not in a workspace.",
@@ -2993,3 +2995,4 @@ type WidenStringLeaves<T> = {
 };
 
 export type TranslationResources = WidenStringLeaves<typeof en>;
+import { heartbeatSettings } from "./heartbeat-settings";

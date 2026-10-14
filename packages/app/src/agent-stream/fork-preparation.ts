@@ -7,21 +7,16 @@ export type ForkPreparation =
       errorKey: "message.actions.forkNativeUnavailable" | "message.actions.forkUnavailable";
     };
 
-/** This app build advertises CLIENT_CAPS.agentConversationFork in its hello. */
-export const CLIENT_SUPPORTS_NATIVE_CONVERSATION_FORK = true;
-
 export function resolveForkPreparation(input: {
   provider: string | undefined;
-  clientSupportsNative: boolean;
   sourceSupportsNative: boolean;
   daemonSupportsNative: boolean;
   daemonSupportsContext: boolean;
 }): ForkPreparation {
+  // Codex summaries from persisted/older projections may omit the optional source flag.
+  // The host advertises the native RPC; it validates the live provider again when executing.
   const requiresNative = input.provider === "codex" || input.sourceSupportsNative;
-  if (
-    requiresNative &&
-    (!input.clientSupportsNative || !input.daemonSupportsNative || !input.sourceSupportsNative)
-  ) {
+  if (requiresNative && !input.daemonSupportsNative) {
     return { errorKey: "message.actions.forkNativeUnavailable" };
   }
   if (!requiresNative && !input.daemonSupportsContext) {

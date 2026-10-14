@@ -602,6 +602,7 @@ interface WorkspaceDesktopTabsRowProps {
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
+  onOpenHeartbeats?: (agentId: string) => void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
@@ -1142,6 +1143,7 @@ function ResolvedWorkspaceDesktopTabsRow({
   onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
+  onOpenHeartbeats,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -1449,6 +1451,7 @@ function ResolvedWorkspaceDesktopTabsRow({
           onCopyTerminalId={onCopyTerminalId}
           onCopyFilePath={onCopyFilePath}
           onReloadAgent={onReloadAgent}
+          onOpenHeartbeats={onOpenHeartbeats}
           onRenameTab={onRenameTab}
           onMoveTabToStart={handleMoveTabToStart}
           onMoveTabToEnd={handleMoveTabToEnd}
@@ -1484,6 +1487,7 @@ function ResolvedWorkspaceDesktopTabsRow({
       onCopyResumeCommand,
       onNavigateTab,
       onReloadAgent,
+      onOpenHeartbeats,
       onRenameTab,
       handleMoveTabToStart,
       handleMoveTabToEnd,
@@ -1660,6 +1664,7 @@ function ResolvedWorkspaceDesktopTabsRail({
   onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
+  onOpenHeartbeats,
   onRenameTab,
   onCloseTabsToLeft,
   onCloseTabsToRight,
@@ -1912,6 +1917,7 @@ function ResolvedWorkspaceDesktopTabsRail({
           onCopyTerminalId={onCopyTerminalId}
           onCopyFilePath={onCopyFilePath}
           onReloadAgent={onReloadAgent}
+          onOpenHeartbeats={onOpenHeartbeats}
           onRenameTab={onRenameTab}
           onMoveTabToStart={handleMoveTabToStart}
           onMoveTabToEnd={handleMoveTabToEnd}
@@ -1952,6 +1958,7 @@ function ResolvedWorkspaceDesktopTabsRail({
       onCopyTerminalId,
       onNavigateTab,
       onReloadAgent,
+      onOpenHeartbeats,
       onRenameTab,
       setHoveredCloseTabKey,
       tabDropPreviewIndex,
@@ -2033,6 +2040,7 @@ function ResolvedDesktopTabChip({
   onCopyTerminalId,
   onCopyFilePath,
   onReloadAgent,
+  onOpenHeartbeats,
   onRenameTab,
   onMoveTabToStart,
   onMoveTabToEnd,
@@ -2064,6 +2072,7 @@ function ResolvedDesktopTabChip({
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
+  onOpenHeartbeats?: (agentId: string) => void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onMoveTabToStart: (tabId: string) => Promise<void> | void;
   onMoveTabToEnd: (tabId: string) => Promise<void> | void;
@@ -2097,6 +2106,7 @@ function ResolvedDesktopTabChip({
         onCopyTerminalId,
         onCopyFilePath,
         onReloadAgent,
+        onOpenHeartbeats,
         onRenameTab,
         onMoveTabToStart,
         onMoveTabToEnd,
@@ -2121,6 +2131,7 @@ function ResolvedDesktopTabChip({
       labels,
       orientation,
       onReloadAgent,
+      onOpenHeartbeats,
       onRenameTab,
       onMoveTabToStart,
       onMoveTabToEnd,
