@@ -173,3 +173,20 @@ describe("heartbeat cadence editing", () => {
     expect(form.buildUpdate()).toEqual({ id: "heartbeat-test", maxRuns: null, expiresAt: null });
   });
 });
+
+describe("heartbeat timezone clearing", () => {
+  it("sends UTC explicitly when clearing an existing timezone rather than asking the host to preserve it", () => {
+    const form = openHeartbeatForm(
+      heartbeat({
+        type: "cron",
+        expression: "0 9 * * *",
+        timezone: "Asia/Shanghai",
+      }),
+    );
+    form.setTimezone("");
+    expect(form.buildUpdate()).toEqual({
+      id: "heartbeat-test",
+      cadence: { type: "cron", expression: "0 9 * * *", timezone: "UTC" },
+    });
+  });
+});

@@ -153,7 +153,7 @@ function deriveState(state: HeartbeatFormState): HeartbeatFormState {
           );
         }
         const timezone = state.calendar.timezone.trim();
-        cadence = { type: "cron", expression, ...(timezone ? { timezone } : {}) };
+        cadence = { type: "cron", expression, timezone: timezone || "UTC" };
       } catch {
         cadenceError = "timezone";
       }
