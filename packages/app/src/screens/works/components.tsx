@@ -1,11 +1,14 @@
 import { useState, useCallback, useMemo, useContext, type ComponentType } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View, type ViewStyle } from "react-native";
 import { router } from "expo-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, RefreshCw } from "lucide-react-native";
+import { CheckCircle2, Square, ExternalLink, RefreshCw } from "lucide-react-native";
 import type { WorkCard, WorkView, WorkProgress } from "@getpaseo/protocol/work-objects";
 import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Button } from "@/components/ui/button";
+import { SettingsSection } from "@/components/settings/headings/settings-section";
+import { settingsStyles } from "@/styles/settings";
+import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { useFetchQuery } from "@/data/query";
 import { buildHostAgentDetailRoute } from "@/utils/host-routes";
 import { useSessionStore } from "@/stores/session-store";
@@ -27,19 +30,24 @@ interface ComponentProps {
   compact?: boolean;
 }
 const renderers: Record<string, ComponentType<ComponentProps>> = {
-  result: Result,
-  metrics: ({ object }) => (object.metrics ? <Metrics value={object.metrics} /> : null),
   progress: Progress,
+  metrics: ({ object }) =>
+    object.metrics ? (
+      <SettingsSection title="Metrics" flush>
+        <Metrics value={object.metrics} />
+      </SettingsSection>
+    ) : null,
+  result: Result,
   viewers: Viewers,
   sessions: Sessions,
   config: Config,
 };
-export function ObjectComponents({ object, compact }: ComponentProps) {
+export function ObjectComponents({ object }: ComponentProps) {
   return (
-    <View style={styles.stack}>
-      {Object.entries(renderers).map(([name, Renderer]) => (
-        <Renderer key={name} object={object} compact={compact} />
-      ))}
+    <View style={styles.components}>
+      {Object.entries(renderers).map(([name, Renderer]) => {
+        return <Renderer key={name} object={object} />;
+      })}
     </View>
   );
 }
@@ -67,26 +75,27 @@ function Result({ object, compact }: ComponentProps) {
   );
   if (!object.result) return null;
   return (
-    <View style={styles.section}>
-      <Pressable
+    <SettingsSection title="Result" flush>
+      <Button
+        variant="ghost"
+        size="sm"
+        leftIcon={object.result.completed ? CheckCircle2 : Square}
         accessibilityRole="checkbox"
         accessibilityLabel="Completed"
         accessibilityState={checkboxState}
         disabled={!connected || update.isPending}
-        style={styles.checkbox}
+        style={styles.link}
         onPress={handleComplete}
       >
-        <Text style={styles.text}>
-          {object.result.completed ? "☑ Completed" : "☐ Mark complete"}
-        </Text>
-      </Pressable>
+        {object.result.completed ? "Completed" : "Mark complete"}
+      </Button>
       {update.error ? <Text style={styles.error}>{errorMessage(update.error)}</Text> : null}
       {object.result.text && !compact ? <MarkdownRenderer text={object.result.text} /> : null}
-    </View>
+    </SettingsSection>
   );
 }
 
-function Progress({ object }: ComponentProps) {
+export function Progress({ object, compact = false }: ComponentProps) {
   const { client, serverId, projectId, active, connected } = useWorks();
   const progress = object.progress;
   const query = useFetchQuery({
@@ -108,25 +117,37 @@ function Progress({ object }: ComponentProps) {
   const refresh = useCallback(() => {
     void query.refetch();
   }, [query]);
+  const refreshButton = useMemo(
+    () =>
+      progress?.configured.source ? (
+        <Button
+          variant="ghost"
+          size="xs"
+          leftIcon={RefreshCw}
+          disabled={!connected || query.isFetching}
+          onPress={refresh}
+        >
+          Refresh
+        </Button>
+      ) : null,
+    [progress?.configured.source, connected, query.isFetching, refresh],
+  );
   if (!progress) return null;
   const state = query.data ?? progress.state;
   const observation = state.observation;
-  return (
-    <View style={styles.section}>
-      <View style={styles.row}>
-        <Text style={styles.title}>Progress</Text>
-        {progress.configured.source ? (
-          <Button
-            variant="ghost"
-            size="xs"
-            leftIcon={RefreshCw}
-            disabled={!connected || query.isFetching}
-            onPress={refresh}
-          >
-            Refresh
-          </Button>
+  if (compact)
+    return (
+      <View style={styles.stack}>
+        <ProgressSummary observation={observation} compact />
+        {state.error || query.error ? (
+          <Text style={styles.error} numberOfLines={1}>
+            {state.error ?? errorMessage(query.error)}
+          </Text>
         ) : null}
       </View>
+    );
+  return (
+    <SettingsSection title="Progress" flush trailing={refreshButton}>
       <ProgressDisplay configured={progress.configured} observation={observation} />
       {observation ? (
         <Text style={styles.meta}>Observed {formatTime(observation.observedAt)}</Text>
@@ -135,7 +156,7 @@ function Progress({ object }: ComponentProps) {
       {state.error || query.error ? (
         <Text style={styles.error}>{state.error ?? errorMessage(query.error)}</Text>
       ) : null}
-    </View>
+    </SettingsSection>
   );
 }
 function ProgressDisplay({
@@ -151,16 +172,48 @@ function ProgressDisplay({
   );
   if (configured.plan)
     return <ExperimentProgressSchedule plan={configured.plan} observation={projected} />;
+  return <ProgressSummary observation={observation} />;
+}
+
+function ProgressSummary({
+  observation,
+  compact = false,
+}: {
+  observation: NonNullable<WorkView["progress"]>["state"]["observation"];
+  compact?: boolean;
+}) {
+  if (!observation) return <Text style={styles.meta}>Waiting for progress</Text>;
+  const fraction = observation.total
+    ? Math.min(1, Math.max(0, observation.current / observation.total))
+    : null;
   return (
-    <Text style={styles.meta}>
-      {observation
-        ? `${observation.current} / ${observation.total ?? "?"}${observation.ended ? " · ended" : ""}${observation.message ? ` · ${observation.message}` : ""}`
-        : "Waiting for the first observation"}
-    </Text>
+    <View style={styles.stack}>
+      <View style={styles.between}>
+        <Text style={styles.meta} numberOfLines={1}>
+          {observation.current.toLocaleString()} / {observation.total?.toLocaleString() ?? "?"}
+        </Text>
+        <Text style={styles.meta} numberOfLines={1}>
+          {observation.ended ? "Ended" : observation.phase}
+        </Text>
+      </View>
+      {fraction !== null ? (
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              inlineUnistylesStyle({ width: `${fraction * 100}%` } satisfies ViewStyle),
+            ]}
+          />
+        </View>
+      ) : null}
+      {!compact && observation.message ? (
+        <Text style={styles.meta}>{observation.message}</Text>
+      ) : null}
+    </View>
   );
 }
 
-function Viewers({ object, compact }: ComponentProps) {
+function Viewers({ object }: ComponentProps) {
   const { client, projectId, serverId, active, connected } = useWorks();
   const query = useFetchQuery({
     queryKey: ["works", serverId, projectId, "viewers", object.id],
@@ -168,30 +221,52 @@ function Viewers({ object, compact }: ComponentProps) {
       if (!client) throw new Error("Host is disconnected");
       return client.resolveWorkViewers({ projectId, objectId: object.id });
     },
-    enabled: active && connected,
+    enabled: active && connected && !object.viewerEntries,
     retry: false,
     dataShape: "value",
     staleTimeMs: 5_000,
   });
-  const value = query.data ?? object.viewerEntries;
+  const value = object.viewerEntries ?? query.data;
   if (!value?.entries.length && !value?.sources.length && !query.error) return null;
   return (
-    <View style={styles.section}>
-      <Text style={styles.title}>
-        Viewers{value?.inheritedFrom ? ` · from ${value.inheritedFrom}` : ""}
-      </Text>
+    <SettingsSection title={`Viewers · ${value?.entries.length ?? 0}`} flush>
+      {value?.inheritedFrom ? (
+        <Text style={styles.meta}>Inherited from {value.inheritedFrom}</Text>
+      ) : null}
       {query.error ? <Text style={styles.error}>{errorMessage(query.error)}</Text> : null}
-      {value?.entries.map((entry) => (
-        <ViewerLink
-          key={entry.name}
-          title={entry.name}
-          path={entry.path}
-          unavailable={entry.unavailableReason}
-          available={entry.available}
-        />
-      ))}
-      {!compact
-        ? value?.sources.map((source) => (
+      {value?.entries.length ? (
+        <View>
+          {value?.entries.map((entry) => (
+            <ViewerLink
+              key={entry.name}
+              title={entry.name}
+              path={entry.path}
+              unavailable={entry.unavailableReason}
+              available={entry.available}
+            />
+          ))}
+        </View>
+      ) : null}
+      {value?.sources.length ? <ConfigSources sources={value.sources} /> : null}
+    </SettingsSection>
+  );
+}
+
+function ConfigSources({
+  sources,
+}: {
+  sources: NonNullable<WorkView["viewerEntries"]>["sources"];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded((value) => !value), []);
+  return (
+    <View>
+      <Button variant="ghost" size="sm" style={styles.link} onPress={toggle}>
+        {expanded ? "Hide data sources" : `Data sources · ${sources.length}`}
+      </Button>
+      {expanded ? (
+        <View style={settingsStyles.card}>
+          {sources.map((source) => (
             <ViewerLink
               key={source.source.source}
               title={`${source.source.source} · data`}
@@ -199,8 +274,9 @@ function Viewers({ object, compact }: ComponentProps) {
               available={source.available}
               unavailable={source.unavailableReason}
             />
-          ))
-        : null}
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -219,10 +295,12 @@ function ViewerLink({
   const open = useMutation({ mutationFn: () => openViewer(path) });
   const openLink = useCallback(() => open.mutate(), [open]);
   return (
-    <View style={styles.stack}>
+    <View style={styles.viewerRow}>
       <Button
         variant="ghost"
-        size="xs"
+        size="sm"
+        style={styles.link}
+        textStyle={styles.linkText}
         leftIcon={ExternalLink}
         disabled={!available || !connected || open.isPending}
         onPress={openLink}
@@ -238,12 +316,13 @@ function ViewerLink({
 function Sessions({ object, compact }: ComponentProps) {
   if (!object.sessions?.agentIds.length) return null;
   return (
-    <View style={styles.section}>
-      <Text style={styles.title}>Sessions</Text>
-      {object.sessions.agentIds.map((id) => (
-        <SessionLink key={id} id={id} compact={compact} />
-      ))}
-    </View>
+    <SettingsSection title="Sessions" flush>
+      <View style={settingsStyles.card}>
+        {object.sessions.agentIds.map((id) => (
+          <SessionLink key={id} id={id} compact={compact} />
+        ))}
+      </View>
+    </SettingsSection>
   );
 }
 function SessionLink({
@@ -264,7 +343,14 @@ function SessionLink({
   );
   const executing = current && agent?.status === "running";
   return (
-    <Button variant="ghost" size="xs" disabled={!agent} onPress={openSession}>
+    <Button
+      variant="ghost"
+      size="sm"
+      style={styles.link}
+      textStyle={styles.linkText}
+      disabled={!agent}
+      onPress={openSession}
+    >
       {agent?.title ?? id} · {agent?.status ?? "unavailable"}
       {executing ? " · working here" : ""}
       {suffix ? ` · ${suffix}` : ""}
@@ -277,7 +363,7 @@ function Config({ object, compact }: ComponentProps) {
   if (!object.config || compact) return null;
   return (
     <View style={styles.section}>
-      <Button variant="ghost" size="xs" onPress={toggle}>
+      <Button variant="ghost" size="sm" style={styles.link} onPress={toggle}>
         {expanded ? "Hide configuration" : "Configuration"}
       </Button>
       {expanded

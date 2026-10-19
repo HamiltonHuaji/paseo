@@ -14,6 +14,8 @@ A get returns the identity, label, title, body and componentNames. Request detai
 { "cardId": "card_1234abcd", "select": ["sessions", "touches", "viewers", "metrics", "storage"] }
 ```
 
+For a clickable chat link, copy `viewerEntries.entries[].href` verbatim into `[title](href)`. This explicit `paseo://h/<host>/view/...` URI opens through the client’s Viewer transport. `path` and `apiPath` are HTTP resource paths for pages and data access; do not publish them as chat links or prepend a daemon hostname, localhost, or port. A bare `/view/...` can also name a real daemon file.
+
 Other select values: timestamps, progress, result, config, viewerEntries. A missing selected component returns null. `viewers` distinguishes configured, resolved and inheritedFrom. `progress` includes configured and cached state; reading does not execute a command. `storage` creates missing directories and returns path/sharedPath. Writes use `returning` with the same selectors. Do not copy read-only timestamps, touches or cached observations back into updates.
 
 ## Create and update
@@ -62,6 +64,14 @@ Database writes commit before directory creation. If the receipt says committed 
 
 ## Viewers and local metrics
 
+Choose user-facing entries using the skill's [delivery guidance](../SKILL.md#deliver-an-accessible-result). The three Viewers maps are independent:
+
+| Field     | Purpose                                                                                      |
+| --------- | -------------------------------------------------------------------------------------------- |
+| `mounts`  | URL prefixes for directory trees, including supporting files a page fetches or links.        |
+| `sources` | Structured data providers consumed by Metrics, Progress, or a frontend.                      |
+| `entries` | Names and paths shown in the user's Viewer list. Optional even when mounts or sources exist. |
+
 Mount an entire directory once. Paths are project-relative or absolute strings; available substitutions are `${project.root}`, `${project.blobDir}`, `${storage.path}`, `${storage.sharedPath}`, `${card.id}`, `${card.blobDir}`, `${item.id}`, `${item.blobDir}`, and scalar `${config.KEY}`. Item variables exist only for Items. A viewer entry is a relative path in the mount namespace. The longest matching mount prefix wins.
 
 ```json
@@ -75,9 +85,13 @@ Mount an entire directory once. Paths are project-relative or absolute strings; 
 }
 ```
 
+Here the report can fetch `report/scores.json` and link supporting logs or configs under that mount without giving those files their own entries. Updating the report or adding supporting files does not require another entry. A diagnostic check with only raw outputs can instead record its outcome and paths in Result/Config, with no Viewers configuration.
+
+When consolidating an existing direct configuration, remove obsolete entry keys with null, e.g. `{"viewers":{"entries":{"Old check":null}}}`. Omitted keys and `entries:{}` leave existing entries unchanged. Keep mounts/sources still used by pages or metrics; removing an entry does not delete its files.
+
 No own Viewers means inherit: Item from Card; Card from viewerSource, otherwise basedOn, recursively. An own empty object disables inheritance; viewers:null restores inheritance. Inherited variables resolve in the target object's context. SourceRef always resolves in its named object's context.
 
-A W&B source belongs to Viewers, independently of its consumers:
+A W&B source belongs to Viewers, independently of its consumers. This example needs neither an HTML page nor a Viewer entry:
 
 ```json
 {

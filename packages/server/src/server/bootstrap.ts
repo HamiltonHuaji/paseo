@@ -1098,7 +1098,7 @@ export async function createPaseoDaemon(
     workspaceRegistry,
   });
   experimentService = new ExperimentService(projectRegistry);
-  const workService = new WorkService(projectRegistry);
+  const workService = new WorkService(projectRegistry, serverId);
   const skillRepositoryService = await SkillRepositoryService.open(config.paseoHome);
   const github = createGitHubService();
   const workspaceGitService = new WorkspaceGitServiceImpl({

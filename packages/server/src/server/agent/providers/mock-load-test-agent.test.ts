@@ -449,7 +449,16 @@ describe("MockLoadTestAgentClient", () => {
     unsubscribe();
   });
 
-  test("emits a settled assistant Markdown image path selected by prompt", async () => {
+  test.each([
+    {
+      prefix: "Emit settled assistant image Markdown",
+      markdown: "![Fixture image](screenshots/fixture.png)",
+    },
+    {
+      prefix: "Emit settled assistant Markdown",
+      markdown: "[View report](paseo://h/host/view/v2/project/card/files/report.html)",
+    },
+  ])("emits settled assistant Markdown selected by $prefix", async ({ prefix, markdown }) => {
     vi.useFakeTimers();
     const client = new MockLoadTestAgentClient();
     const session = await client.createSession({
@@ -459,9 +468,7 @@ describe("MockLoadTestAgentClient", () => {
     });
     const events: AgentStreamEvent[] = [];
     const unsubscribe = session.subscribe((event) => events.push(event));
-    const markdown = "![Fixture image](screenshots/fixture.png)";
-
-    const resultPromise = session.run(`Emit settled assistant image Markdown: ${markdown}`);
+    const resultPromise = session.run(`${prefix}: ${markdown}`);
     await vi.advanceTimersByTimeAsync(0);
 
     expect(

@@ -1,13 +1,13 @@
 ---
 name: paseo-works
-description: Record progress, link related sessions, and organize outputs in Paseo when developing or maintaining software, running training or evaluations, processing data, or producing reports, charts, pages, or creative assets. Also apply this skill when asked to organize collected, analyzed, or accumulated materials and results for the user to consult and use. Give outputs a clear home and viewing entry point, even for one-off delivery or a specified output path. Research or analysis solely to answer questions or offer advice does not trigger use; organizing the materials or results for the user does. Chat-based creation and routine file operations do not trigger use merely because they produce files. Apply it to find or continue earlier work; keep follow-up work under the same topic or experiment. Do not wait for the user to request tracking. Long runs and multiple sessions are not required.
+description: Record progress, link related sessions, and organize outputs in Paseo when developing or maintaining software, running training or evaluations, processing data, or producing reports, charts, pages, or creative assets. Also apply this skill when asked to organize collected, analyzed, or accumulated materials and results for the user to consult and use. Give outputs a clear home and make them findable from the work record, even for one-off delivery or a specified output path. Research or analysis solely to answer questions or offer advice does not trigger use; organizing the materials or results for the user does. Chat-based creation and routine file operations do not trigger use merely because they produce files. Apply it to find or continue earlier work; keep follow-up work under the same topic or experiment. Do not wait for the user to request tracking. Long runs and multiple sessions are not required.
 ---
 
 # Paseo works
 
 Keep work and its results accessible from Paseo. Record what you are doing, associate
-useful sessions, save outputs with the work, and give the user an entry point to
-inspect them. Handle this as part of the requested work without making the user
+useful sessions, save outputs with the work, and make results findable from its
+record. Handle this as part of the requested work without making the user
 maintain tickets or remember where you put files.
 
 Use the Works MCP tools and [tool reference](references/tools.md). If this host
@@ -89,24 +89,41 @@ monitoring unless it is configured.
 
 ## Deliver an accessible result
 
-Register retained materials and their locations with the work. Provide a focused
-entry point for the user to inspect the result and related materials. For a library,
-keep its entries and index together; for a report, make the report and supporting
-results accessible from its entry point. A specified output path or a single-file
-deliverable does not remove this step.
+Keep retained materials and their locations findable from the owning work record,
+including one-off deliveries and user-specified paths. A code fix or diagnostic
+check can be delivered through its Result and recorded code/output locations.
+Using this skill does not require a Viewer entry or a new HTML page.
 
-Create a viewer when it helps inspect results. Mount only the files it needs and
-organize related content under one entry point instead of creating a separate page
-for every artifact. Reuse viewer configuration through inheritance when output
-layouts match. For local W&B viewing, mount the records and content needed for
-metrics and artifacts; do not assume one .wandb file contains everything. Verify
-that the entry point opens the intended result.
+Separate resources from viewing destinations: `Viewers.mounts` serves directories;
+`sources` publishes data for Metrics, Progress, or a frontend; `entries` puts named
+links in the user's Viewer list. Mount a directory tree once when needed. Its
+files and subdirectories do not each need an entry. A Metrics or Progress source
+can have no entries at all.
 
-Report what was completed, the outcome, the viewing entry point, and any remaining
+Choose entries by what the user will deliberately open to understand or use the
+result. A report, comparison dashboard, library index, or image/PDF deliverable can
+be such a destination. Retain raw JSON, configs, logs, and intermediate check
+outputs in storage; put relevant settings/paths in Config and summarize outcomes
+in Result. Publishing a file does not make it a useful Viewer entry. A raw file can be an entry when the user specifically
+wants to open it. Do not generate HTML wrappers solely to justify more entries.
+
+For related materials, prefer one useful report or index that organizes the result
+and links supporting files. A report should present conclusions, comparisons, or
+visualizations directly. Update that entry as the same work progresses instead
+of appending one for every check. Add multiple entries only for distinct viewing
+destinations the user needs. Put execution-specific entries on their Item; use Card
+entries for shared overviews or reusable viewer templates, not a copy of every
+Item's links. Reuse configuration through inheritance when output layouts match.
+For local W&B viewing, mount the records and content needed for metrics and
+artifacts; do not assume one .wandb file contains everything.
+
+Report what was completed, the outcome, where to find it, and any remaining
 work. When Result is attached, keep its text and completed state accurate; an
 ended attempt can have a negative or failed result. Completion does not archive
 the record or complete its parent module, feature, or other continuing work.
 Do not attach Result merely to give every item a completion checkbox.
+
+Use the [returned Viewer URI](references/tools.md) when linking a Viewer in chat.
 
 ## Release worktrees when execution ends
 
@@ -135,8 +152,10 @@ when work resumes.
 1. Find a relevant Card with list_cards; read it and search only that Card's Items.
 2. Create or update the appropriate record; request storage or selected components
    in the same receipt. See [tool reference](references/tools.md) for patch rules.
-3. Save outputs in returned storage or register their established location. Attach
-   Viewers for entry points; attach Metrics directly to the Card for Canvas curves.
+3. Save outputs in returned storage or record their established location. Configure
+   Viewers resources and user-facing entries only as needed under the delivery
+   guidance above; attach Metrics directly to the Card for Canvas curves.
 4. Keep Result current. Its timestamps fill automatically; supply explicit known
    times for earlier executions. Preserve useful results before releasing worktrees.
-5. Verify the registered entry point and include it in the delivery.
+5. Verify any Viewer entry you publish opens the intended result. Point the user to
+   the work record and relevant results; do not create an entry just to finish this step.

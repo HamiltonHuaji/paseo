@@ -52,6 +52,34 @@ const unavailableSuggestions: GetDirectorySuggestions = async () => {
 };
 
 describe("classifyForResolution", () => {
+  it("recognizes an explicit viewer URI and preserves its Host, encoded path, query and fragment", () => {
+    const path =
+      "/view/v2/remote%3Agithub.com%2Forg%2Frepo/item_ab12/files/report/index.html?run=a%2Fb#L12";
+    const href = `paseo://h/OtherHost${path}`;
+    expect(classifyForResolution({ href }, CONTEXT)).toEqual({
+      kind: "resolved",
+      value: { kind: "viewer", target: { serverId: "OtherHost", path }, href },
+    });
+  });
+
+  it.each([
+    "/view/v2/project/card/files/report.html",
+    "file:///view/v2/project/card/files/report.html",
+  ])("keeps a real daemon file addressable even when it looks like a viewer route: %s", (href) => {
+    expect(classifyForResolution({ href }, CONTEXT)).toEqual({
+      kind: "resolved",
+      value: {
+        kind: "file",
+        target: {
+          raw: href,
+          path: "/view/v2/project/card/files/report.html",
+          lineStart: undefined,
+          lineEnd: undefined,
+        },
+      },
+    });
+  });
+
   it("returns the directFile target synchronously", () => {
     const result = classifyForResolution({ href: "src/components/message.tsx#L33" }, CONTEXT);
 

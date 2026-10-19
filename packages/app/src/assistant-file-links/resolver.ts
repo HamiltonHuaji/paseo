@@ -5,6 +5,10 @@ import {
   type InlinePathTarget,
 } from "./parse";
 import { i18n } from "@/i18n/i18next";
+import {
+  parseViewerDeepLink,
+  type ViewerDeepLinkTarget,
+} from "@getpaseo/protocol/viewer-deep-link";
 
 export interface AssistantFileLinkSource {
   href: string;
@@ -40,6 +44,7 @@ export type GetDirectorySuggestions = (input: {
 
 export type ResolvedAssistantFileLink =
   | { kind: "external"; url: string }
+  | { kind: "viewer"; target: ViewerDeepLinkTarget; href: string }
   | { kind: "file"; target: InlinePathTarget }
   | { kind: "ignored" };
 
@@ -112,6 +117,8 @@ export function classifyForResolution(
   if (!token) {
     return { kind: "resolved", value: { kind: "ignored" } };
   }
+  const viewer = parseViewerDeepLink(token);
+  if (viewer) return { kind: "resolved", value: { kind: "viewer", target: viewer, href: token } };
 
   const classification = classifyAssistantFileLink(token, {
     workspaceRoot: context.workspaceRoot,

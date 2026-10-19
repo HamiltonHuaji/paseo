@@ -9,6 +9,7 @@ import { WorkService } from "./service.js";
 import { createWorkTools } from "./tools.js";
 import { WorkObjectResultSchema, WorkListResultSchema } from "@getpaseo/protocol/work-objects";
 import { resolveViewerConfig, resolveViewerPath, resolveWorkSource } from "./viewers.js";
+import { parseViewerDeepLink } from "@getpaseo/protocol/viewer-deep-link";
 
 const resources: Array<{ root: string; service: WorkService }> = [];
 afterEach(async () => {
@@ -29,7 +30,7 @@ async function setup() {
     displayName: "Works test",
     timestamp: new Date().toISOString(),
   });
-  const service = new WorkService(projects);
+  const service = new WorkService(projects, "test-host");
   resources.push({ root, service });
   return { root, projectId: project.projectId, projects, service };
 }
@@ -99,6 +100,37 @@ it("commits before mkdir failure and repairs storage without duplicate records",
   expect((await stat(storage.path)).isDirectory()).toBe(true);
   await rm(storage.path, { recursive: true });
   expect(await service.storage(projectId, result.object.id)).toEqual(storage);
+});
+
+it("returns an unambiguous chat link for a published viewer through MCP", async () => {
+  const { projectId, service, root } = await setup();
+  await writeFile(path.join(root, "report.html"), "<h1>Training report</h1>");
+  const tools = createWorkTools({
+    service,
+    projectId: async () => projectId,
+    callerAgentId: "executor",
+  });
+  const result = await tools
+    .find((tool) => tool.name === "create_card")!
+    .handler({
+      preset: "topic",
+      title: "Report",
+      body: "Training results",
+      viewers: { mounts: { report: root }, entries: { Report: "report/report.html" } },
+    });
+  const content = result.content[0]!;
+  if (content.type !== "text") throw new Error("Expected JSON text");
+  const created = WorkObjectResultSchema.parse(JSON.parse(content.text));
+  const entry = created.object.viewerEntries!.entries[0]!;
+  const expectedPath = `/view/v2/${encodeURIComponent(projectId)}/${created.object.id}/files/report/report.html`;
+  expect(entry).toEqual({
+    name: "Report",
+    path: expectedPath,
+    href: `paseo://h/test-host${expectedPath}`,
+    available: true,
+    unavailableReason: null,
+  });
+  expect(parseViewerDeepLink(entry.href!)).toEqual({ serverId: "test-host", path: expectedPath });
 });
 
 it("inherits in target context while preserving an explicit source across attempts", async () => {

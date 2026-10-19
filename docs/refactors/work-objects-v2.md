@@ -469,7 +469,7 @@ sessionId 通过 sessionRelation 选择 Sessions（linked）、自动 touches（
 
 select 选择额外内容：timestamps、touches、sessions、viewers、progress、metrics、result、config、storage、viewerEntries。timestamps 包含创建、最近活动和起止时间。返回所选字段的完整值，不切正文、不切数组，也不返回全部指标历史。请求不存在的组件返回 null，未请求的字段不出现。returning 使用同样规则，使写入后需要的信息能随回执取得。
 
-viewerEntries 返回页面路径、来源 API 路径和可用状态；viewers 返回直接配置 configured、解析后的 resolved 和 inheritedFrom，便于区别自己配置与继承所得。progress 返回配置和缓存观测。componentNames 表示可展示的组件，包括有效继承的 Viewers；自动 touches 是内置信息，不因此出现 Sessions 组件。
+viewerEntries 返回页面的 HTTP path、用于聊天的 href、来源 API 路径和可用状态。href 使用 `paseo://h/<serverId>/view/...`，携带 Host 身份，由客户端通过已有 Viewer 通道打开；裸 `/view/...` 与 daemon 真实文件路径可能冲突，不能靠前缀识别为 Viewer。viewers 返回直接配置 configured、解析后的 resolved 和 inheritedFrom，便于区别自己配置与继承所得。progress 返回配置和缓存观测。componentNames 表示可展示的组件，包括有效继承的 Viewers；自动 touches 是内置信息，不因此出现 Sessions 组件。
 
 节省 token 依靠限定查询范围、对象分页、按需选择组件、组合创建与写入回执，以及不重复输出同一份工具结果。只向模型呈现一份紧凑 JSON，不同时注入等价的文本和 structured payload。不设 24 KiB 内容上限，不新增字段分片协议，不截短 ID、标题、正文或结果。需要少读时减少对象或字段，而不是丢弃所选内容。
 
@@ -630,13 +630,15 @@ Card 容器由 kind 决定，基础展示由 label 决定：Experiment 使用实
 | Result   | 完成状态控件、结果内容与产物链接；组件不存在时不显示完成控件 |
 | Config   | JSON 配置的键值表、可展开的嵌套内容与原始 JSON               |
 
-内置区域显示最近活动时间、已知起止时间，以及 touches 中当前或过去执行过操作的会话，和 Sessions 区域分开。组件不存在时不绘制其区域；Viewers 可展示有效继承配置并标明来源。父 Card 展示某 Item 的组件时标出 Item 来源，不把并行 Item 的进度相加。Item 展开沿用列表行层级，不为 Issue 再创建 Attempt 容器。
+内置区域显示最近活动时间、已知起止时间，以及 touches 中当前或过去执行过操作的会话，和 Sessions 区域分开。组件不存在时不绘制其区域；Viewers 可展示有效继承配置并标明来源。父 Card 展示某 Item 的组件时标出 Item 来源，不把并行 Item 的进度相加。详情沿用 v1 的连续条目列表：共用列表容器，以分隔线区分 Item；序号、时间与展开动作同排，标题和简述在折叠时仍可读。进度、结果、Viewer 留在所属 Item 的展开区，不按组件类型集中到跨条目的页签。不为 Issue 再创建 Attempt 容器。
 
 Canvas 与列表模式都能浏览 Card。列表按 Goal 分组，保留未分组区域；Card 详情展示 basedOn 来源与派生项。Canvas 保留 v1 的来源连线、按来源树整理与撤销，以及 Goal 分块、创建顺序和来源深度参与的默认布局。位置与大小属于 board 状态，筛选与刷新不重新排列已有手动位置；新 Card 参照现有实际布局放置，不挤走原有 Card。
 
 沿用 v1 的完整 board 和 Card 内列表体验。所选 Card 的 Item 按创建时间从旧到新全部呈现，显示序号、时间、标题和内容；每项独立展开，最新项默认展开，保留用户的展开选择。不把 MCP 的分页变成 UI 的“加载更多”。底层可按需取得详情或分批传输，但不改变用户能看到的记录范围、来源连线和排序。
 
-Metrics 在客户端绘制曲线或数值，按需要读取历史或 summary；不设首版 512 点上限，也不要求客户端通过完整 W&B 页面展示。普通 HTML viewer 使用同一数据 API 并可读取 artifact 内容。
+Canvas 默认显示摘要与简短进度，不展开 Viewer、会话列表或全部 Metrics。用户可按 Card 选择直接显示的指标面板，也可全部隐藏；选中的曲线同时可见，无需轮播或悬停。选择按客户端、host、project、Card 保存，与 Metrics 配置分开。默认尺寸只随所选面板调整，不因登记了更多 Viewer 或指标自动膨胀；保留手动调整与重置尺寸。
+
+Metrics 在客户端绘制曲线或数值，按需要读取历史或 summary；不设首版 512 点上限，也不要求客户端通过完整 W&B 页面展示。曲线面板标明指标、run 与刻度类型，提供自适应刻度、网格、图例和读数。光标读数使用实际采样点并保留各序列的采样位置，与 latest/min/max/mean 摘要明确区分；支持固定读数及单独隐藏序列。对数轴跳过非正值并断开相应线段。普通 HTML viewer 使用同一数据 API 并可读取 artifact 内容。
 
 首版客户端提供查找、浏览、打开会话／成果、Result 完成状态切换、手动刷新、进度单位选择、调整布局和归档／恢复。其他组件配置通过对象工具完成，不要求实现通用 JSON 编辑器或传统 issue 管理表单。无关联会话、无可选组件的 Card 仍是可用对象。
 

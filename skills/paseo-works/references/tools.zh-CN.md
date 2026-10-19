@@ -16,6 +16,8 @@ get 默认返回身份、label、标题、正文和 componentNames。按需选�
 { "cardId": "card_1234abcd", "select": ["sessions", "touches", "viewers", "metrics", "storage"] }
 ```
 
+在聊天里提供可点击链接时，把 `viewerEntries.entries[].href` 原样放入 `[标题](href)`。这个 `paseo://h/<host>/view/...` URI 会通过客户端的 Viewer 通道打开。`path` 和 `apiPath` 是供页面和数据访问使用的 HTTP 资源路径，不要直接当作聊天链接，也不要自己拼接 daemon 主机名、localhost 或端口。裸 `/view/...` 也可能指向 daemon 上的真实文件。
+
 其他 select 值为 timestamps、progress、result、config、viewerEntries。选中的组件不存在时返回 null；未选中的字段不返回。viewers 区分直接配置 configured、有效配置 resolved、继承来源 inheritedFrom。progress 包含配置与缓存观测，普通 get 不执行进度命令。
 
 storage 返回 path 和 sharedPath，并补建缺失目录。写入的 returning 使用同样选择规则。不要把只读时间、touches 或缓存观测抄回更新请求。
@@ -63,6 +65,14 @@ Card 的 goal、basedOn、viewerSource 可以填值或 null；Item 始终属于�
 
 ## Viewer 与本地指标
 
+按 skill 的[交付指引](../SKILL.zh-CN.md#交付可查看的成果)选择用户入口。Viewers 的三个集合相互独立：
+
+| 字段      | 用途                                                                           |
+| --------- | ------------------------------------------------------------------------------ |
+| `mounts`  | 目录树的 URL 前缀，包含页面读取或链接的支撑文件。                              |
+| `sources` | 供 Metrics、Progress 或前端消费的结构化数据源。                                |
+| `entries` | 用户 Viewer 列表中显示的名称和路径。即使有 mounts 或 sources，也可以没有入口。 |
+
 一次挂载整个目录。路径可以是项目相对路径或绝对路径，可使用 `${project.root}`、`${project.blobDir}`、`${storage.path}`、`${storage.sharedPath}`、`${card.id}`、`${card.blobDir}`、`${item.id}`、`${item.blobDir}` 和标量 `${config.KEY}`。Item 变量只在 Item 上存在。entry 指向挂载命名空间内的相对路径；嵌套挂载取最长匹配前缀。
 
 ```json
@@ -76,9 +86,13 @@ Card 的 goal、basedOn、viewerSource 可以填值或 null；Item 始终属于�
 }
 ```
 
+上例中的报告可以读取 `report/scores.json`，或链接挂载目录内的日志、配置，无需为这些文件分别登记 entry。更新报告或添加支撑文件也无需增加入口。只有原始输出的诊断检查，可以只在 Result／Config 中记录结论和路径，不配置 Viewers。
+
+整理已有直接配置时，用 null 删除过时的入口键，例如 `{"viewers":{"entries":{"旧检查":null}}}`。省略的键和 `entries:{}` 都会保留已有入口。仍被页面或指标使用的 mounts／sources 应保留；删除入口不会删除文件。
+
 没有直接配置时，Item 从父 Card 继承；Card 从 viewerSource，否则 basedOn 递归继承。显式空对象禁用继承；viewers:null 恢复继承。继承配置中的变量按目标对象展开；SourceRef 始终按其中明确引用的对象展开。
 
-W&B 来源属于 Viewers，独立于 Metrics／Progress 消费者：
+W&B 来源属于 Viewers，独立于 Metrics／Progress 消费者。以下例子不需要 HTML 页面或 Viewer 入口：
 
 ```json
 {

@@ -5,18 +5,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused } from "@react-navigation/native";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Grid2X2, List, RefreshCw, Undo2, GitBranch } from "lucide-react-native";
-import type {
-  WorkCard,
-  WorkPlacement,
-  WorkSelect,
-  WorkView,
-} from "@getpaseo/protocol/work-objects";
+import type { WorkCard, WorkPlacement } from "@getpaseo/protocol/work-objects";
 import { useHostFeature } from "@/runtime/host-features";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useFetchQuery } from "@/data/query";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { Button } from "@/components/ui/button";
-import { MarkdownRenderer } from "@/components/markdown/renderer";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { BoardCanvas } from "@/components/board-canvas";
 import {
   arrangeLineageTrees,
@@ -27,28 +22,10 @@ import {
 import { useWorksConnection } from "./works/connection";
 import { useAppVisible } from "@/hooks/use-app-visible";
 import { WorksContext, WorkActivityContext, useWorks, errorMessage } from "./works/context";
-import {
-  ObjectComponents,
-  ObjectActivity,
-  ArchiveButton,
-  cardView,
-  formatTime,
-  relativeTime,
-} from "./works/components";
+import { WorkCardPreview, cardHeight, useCanvasDisplay } from "./works/preview";
+import { CardDetail } from "./works/detail";
 import { workStyles as styles } from "./works/styles";
 
-const DETAIL_SELECT: WorkSelect = [
-  "timestamps",
-  "touches",
-  "sessions",
-  "viewers",
-  "viewerEntries",
-  "progress",
-  "metrics",
-  "result",
-  "config",
-  "storage",
-];
 const EMPTY_CARDS: WorkCard[] = [];
 const EMPTY_PLACEMENTS: WorkPlacement[] = [];
 const VIEW_KEY = "works-board-view-mode";
@@ -87,6 +64,7 @@ export function WorksScreen({
 function WorksBoard({ embedded }: { embedded: boolean }) {
   const { client, serverId, projectId, active, connected } = useWorks();
   const compact = useIsCompactFormFactor();
+  const display = useCanvasDisplay();
   const [, refreshAge] = useState(0);
   useEffect(() => {
     if (!active) return;
@@ -95,6 +73,10 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
   }, [active]);
   const cache = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  const setItemExpanded = useCallback((id: string, expanded: boolean) => {
+    setExpandedItems((current) => ({ ...current, [id]: expanded }));
+  }, []);
   const [mode, setMode] = useState<"canvas" | "list">("canvas");
   const [search, setSearch] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -118,9 +100,12 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
   const sizes = useMemo(
     () =>
       new Map(
-        cards.map((card) => [card.id, { width: 15, height: cardHeight(card) } satisfies BoardSize]),
+        cards.map((card) => [
+          card.id,
+          { width: 15, height: cardHeight(card, display.panels[card.id]) } satisfies BoardSize,
+        ]),
       ),
-    [cards],
+    [cards, display.panels],
   );
   const placements = useMemo(() => stored.map(toBoard), [stored]);
   const resolved = useMemo(
@@ -233,15 +218,66 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
     [saveLayout],
   );
   const toggleArchived = useCallback(() => setIncludeArchived((value) => !value), []);
+  const resetCardSize = useCallback(
+    (cardId: string, dimensions: "height" | "both" = "both") => {
+      const previous = stored.find((placement) => placement.cardId === cardId);
+      saveLayout.mutate(
+        [
+          {
+            cardId,
+            column: previous?.column ?? null,
+            row: previous?.row ?? null,
+            width: dimensions === "height" ? (previous?.width ?? null) : null,
+            height: null,
+          },
+        ],
+        {
+          onSuccess: () => setLayoutVersion((version) => version + 1),
+        },
+      );
+    },
+    [stored, saveLayout],
+  );
+  const changePanels = useCallback(
+    (cardId: string, panels: string[]) => {
+      display.save.mutate({ cardId, panels }, { onSuccess: () => resetCardSize(cardId, "height") });
+    },
+    [display.save, resetCardSize],
+  );
+  const canvasDisplays = useMemo(
+    () =>
+      Object.fromEntries(
+        cards.map((card) => [
+          card.id,
+          {
+            panels: display.panels[card.id] ?? [],
+            disabled:
+              !connected || display.loading || display.save.isPending || saveLayout.isPending,
+            onChange: changePanels,
+            onResetSize: resetCardSize,
+          },
+        ]),
+      ),
+    [
+      cards,
+      display.panels,
+      display.loading,
+      display.save.isPending,
+      saveLayout.isPending,
+      connected,
+      changePanels,
+      resetCardSize,
+    ],
+  );
   const renderCard = useCallback(
     (id: string) => (
       <WorkCardPreview
         card={cards.find((card) => card.id === id)!}
         count={board.data?.itemCounts[id] ?? 0}
-        inCanvas
+        canvas={canvasDisplays[id]}
       />
     ),
-    [cards, board.data?.itemCounts],
+    [cards, board.data?.itemCounts, canvasDisplays],
   );
   return (
     <WorkActivityContext.Provider value={latestTouches}>
@@ -264,7 +300,7 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
           />
           <BoardStatus
             connected={connected}
-            error={board.error ?? subscriptionError ?? saveLayout.error}
+            error={board.error ?? subscriptionError ?? saveLayout.error ?? display.error}
             pending={board.isPending}
             empty={filtered.length === 0}
             hasCards={cards.length > 0}
@@ -274,7 +310,7 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
               <View style={styles.pane}>
                 {mode === "canvas" ? (
                   <BoardCanvas
-                    key={layoutVersion}
+                    layoutRevision={layoutVersion}
                     experiments={cards}
                     sizes={sizes}
                     storedPlacements={placements}
@@ -303,6 +339,8 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
                   cards={cards}
                   onSelect={setSelected}
                   onClose={closeDetail}
+                  expandedItems={expandedItems}
+                  onItemExpandedChange={setItemExpanded}
                 />
               </View>
             ) : null}
@@ -313,136 +351,6 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
   );
 }
 
-function CardDetail({
-  cardId,
-  cards,
-  onSelect,
-  onClose,
-}: {
-  cardId: string;
-  cards: WorkCard[];
-  onSelect: (id: string) => void;
-  onClose: () => void;
-}) {
-  const { client, projectId, serverId, active, connected } = useWorks();
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const query = useFetchQuery({
-    queryKey: ["works", serverId, projectId, "card", cardId],
-    queryFn: async () => {
-      if (!client) throw new Error("Host is disconnected");
-      return client.getWorkCard({ projectId, cardId, allItems: true, select: DETAIL_SELECT });
-    },
-    enabled: active && connected,
-    retry: false,
-    dataShape: "value",
-    staleTimeMs: 5_000,
-  });
-  const card = query.data?.object;
-  const items = query.data?.items?.filter((item) => includeArchived || !item.archivedAt) ?? [];
-  const basedOn = card?.kind === "card" ? card.basedOn : null;
-  const completed = items.filter((item) => item.result?.completed).length;
-  const tracked = items.filter((item) => item.result !== null && item.result !== undefined).length;
-  const toggleArchived = useCallback(() => setIncludeArchived((value) => !value), []);
-  const setItemExpanded = useCallback(
-    (id: string, value: boolean) => setExpanded((current) => ({ ...current, [id]: value })),
-    [],
-  );
-  return (
-    <ScrollView contentContainerStyle={styles.scrollContent}>
-      <Button variant="ghost" size="xs" onPress={onClose}>
-        Back to board
-      </Button>
-      {query.isPending ? <Text style={styles.meta}>Loading details…</Text> : null}
-      {query.error ? <Text style={styles.error}>{errorMessage(query.error)}</Text> : null}
-      {card ? (
-        <View style={styles.card}>
-          <Text style={styles.heading}>{card.title}</Text>
-          <MarkdownRenderer text={card.body} />
-          <ObjectComponents object={card} />
-          <ObjectActivity object={card} />
-          <ArchiveButton object={card} />
-          {basedOn ? (
-            <RelatedCardLink
-              id={basedOn}
-              title={`Based on: ${cards.find((candidate) => candidate.id === basedOn)?.title ?? basedOn}`}
-              onSelect={onSelect}
-            />
-          ) : null}
-          {cards
-            .filter((candidate) => candidate.basedOn === card.id)
-            .map((child) => (
-              <RelatedCardLink
-                key={child.id}
-                id={child.id}
-                title={`Derived: ${child.title}`}
-                onSelect={onSelect}
-              />
-            ))}
-          <View style={styles.row}>
-            <Text style={styles.title}>
-              {card.label === "experiment" ? "Runs" : "Work items"} · {items.length}
-              {tracked ? ` · ${completed}/${tracked} completed` : ""}
-            </Text>
-            <Button size="xs" variant="ghost" onPress={toggleArchived}>
-              {includeArchived ? "Hide archived" : "Include archived"}
-            </Button>
-          </View>
-          {items.map((item, index) => (
-            <ItemRow
-              key={item.id}
-              object={item}
-              index={index}
-              expanded={expanded[item.id] ?? index === items.length - 1}
-              onExpandedChange={setItemExpanded}
-            />
-          ))}
-        </View>
-      ) : null}
-    </ScrollView>
-  );
-}
-function ItemRow({
-  object,
-  index,
-  expanded,
-  onExpandedChange,
-}: {
-  object: WorkView;
-  index: number;
-  expanded: boolean;
-  onExpandedChange: (id: string, expanded: boolean) => void;
-}) {
-  const onToggle = useCallback(
-    () => onExpandedChange(object.id, !expanded),
-    [object.id, expanded, onExpandedChange],
-  );
-  const accessibilityState = useMemo(() => ({ expanded }), [expanded]);
-  return (
-    <View style={styles.item}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={accessibilityState}
-        onPress={onToggle}
-      >
-        <Text style={styles.title}>
-          {expanded ? "▾" : "▸"} {index + 1}. {object.title}
-        </Text>
-        <Text style={styles.meta}>
-          {object.label} · {object.createdAt ? formatTime(object.createdAt) : ""}
-        </Text>
-      </Pressable>
-      {expanded ? (
-        <>
-          <MarkdownRenderer text={object.body} />
-          <ObjectComponents object={object} />
-          <ObjectActivity object={object} />
-          <ArchiveButton object={object} />
-        </>
-      ) : null}
-    </View>
-  );
-}
 function toBoard({ cardId, ...placement }: WorkPlacement): BoardPlacement {
   return { id: cardId, ...placement };
 }
@@ -450,46 +358,6 @@ function fromBoard({ id, ...placement }: BoardPlacement): WorkPlacement {
   return { cardId: id, ...placement };
 }
 
-function cardHeight(card: WorkCard): number {
-  const metrics =
-    card.metrics?.panels.reduce(
-      (height, panel) => height + (panel.display === "line" ? 9 : 3) + panel.series.length,
-      0,
-    ) ?? 0;
-  return (
-    9 +
-    metrics +
-    (card.progress ? 8 : 0) +
-    (card.result ? 2 : 0) +
-    (card.sessions?.agentIds.length ?? 0) * 2 +
-    Object.keys(card.viewers?.entries ?? {}).length * 2
-  );
-}
-function WorkCardPreview({
-  card,
-  count,
-  inCanvas = false,
-}: {
-  card: WorkCard;
-  count: number;
-  inCanvas?: boolean;
-}) {
-  return (
-    <View style={styles.stack}>
-      {!inCanvas ? <Text style={styles.title}>{card.title}</Text> : null}
-      <Text style={styles.meta}>
-        {card.label} · {count} {card.label === "experiment" ? "runs" : "work items"}
-        {card.goal ? ` · ${card.goal}` : ""}
-        {card.archivedAt ? " · archived" : ""}
-      </Text>
-      <Text style={styles.text} numberOfLines={inCanvas ? 3 : undefined}>
-        {card.body}
-      </Text>
-      <ObjectComponents object={cardView(card)} compact />
-      <Text style={styles.meta}>Last activity {relativeTime(card.updatedAt)}</Text>
-    </View>
-  );
-}
 function WorkCardTile({
   card,
   count,
@@ -539,22 +407,6 @@ function WorkCardList({
     </ScrollView>
   );
 }
-function RelatedCardLink({
-  id,
-  title,
-  onSelect,
-}: {
-  id: string;
-  title: string;
-  onSelect: (id: string) => void;
-}) {
-  const select = useCallback(() => onSelect(id), [id, onSelect]);
-  return (
-    <Button variant="ghost" size="xs" onPress={select}>
-      {title}
-    </Button>
-  );
-}
 interface BoardToolbarProps {
   search: string;
   onSearch: (value: string) => void;
@@ -570,8 +422,13 @@ interface BoardToolbarProps {
   restoreLayout: () => void;
 }
 function BoardToolbar(props: BoardToolbarProps) {
-  const canvas = useCallback(() => props.changeMode("canvas"), [props]);
-  const list = useCallback(() => props.changeMode("list"), [props]);
+  const viewOptions = useMemo(
+    () => [
+      { value: "canvas" as const, label: "Canvas", icon: Grid2X2 },
+      { value: "list" as const, label: "List", icon: List },
+    ],
+    [],
+  );
   return (
     <View style={styles.toolbar}>
       <EditingTextInput
@@ -581,12 +438,12 @@ function BoardToolbar(props: BoardToolbarProps) {
         placeholder="Find work…"
         accessibilityLabel="Find work"
       />
-      <Button size="xs" variant="ghost" leftIcon={Grid2X2} onPress={canvas}>
-        Canvas
-      </Button>
-      <Button size="xs" variant="ghost" leftIcon={List} onPress={list}>
-        List
-      </Button>
+      <SegmentedControl
+        options={viewOptions}
+        value={props.mode}
+        onValueChange={props.changeMode}
+        size="xs"
+      />
       <Button size="xs" variant="ghost" onPress={props.toggleArchived}>
         {props.includeArchived ? "Hide archived" : "Include archived"}
       </Button>

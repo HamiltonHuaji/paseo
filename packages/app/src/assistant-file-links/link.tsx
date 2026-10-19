@@ -29,7 +29,7 @@ export function AssistantMarkdownLink({
   monoSurface,
   children,
 }: AssistantMarkdownLinkProps) {
-  const { target, externalUrl, onHoverIn, onPress } = useFileLink(source);
+  const { target, externalUrl, viewerHref, onHoverIn, onPress } = useFileLink(source);
   const { configRef } = useAssistantFileLinkResolverContext();
   const workspaceRoot = configRef.current.workspaceRoot;
   const tooltipPath = useMemo(
@@ -41,7 +41,7 @@ export function AssistantMarkdownLink({
     [onPress],
   );
   const unwrapForMarkdownCopy = source.sourceType === "inline-code" || source.markup === "linkify";
-  const tooltipTarget = tooltipPath ?? externalUrl;
+  const tooltipTarget = tooltipPath ?? viewerHref ?? externalUrl;
 
   if (isNative) {
     // Must be a MarkdownTextSpan, not a plain <Text>: on iOS the link renders

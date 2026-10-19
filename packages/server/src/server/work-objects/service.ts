@@ -64,7 +64,10 @@ export class WorkService {
   readonly wandb = new WandbReader();
   private readonly progressReader = new WorkProgressReader();
 
-  constructor(private readonly projects: Pick<ProjectRegistry, "get">) {}
+  constructor(
+    private readonly projects: Pick<ProjectRegistry, "get">,
+    private readonly serverId: string,
+  ) {}
 
   async store(projectId: string): Promise<WorkStore> {
     const existing = this.stores.get(projectId);
@@ -230,7 +233,7 @@ export class WorkService {
   }
   async viewerEntries(projectId: string, objectId: string): Promise<WorkViewerEntries> {
     const store = await this.store(projectId);
-    return resolveViewerEntries(store, projectId, store.get(objectId));
+    return resolveViewerEntries(store, projectId, store.get(objectId), this.serverId);
   }
   async data(
     projectId: string,
@@ -330,7 +333,7 @@ export class WorkService {
           view.storage = await store.storage(object.id);
           break;
         case "viewerEntries":
-          view.viewerEntries = await resolveViewerEntries(store, projectId, object);
+          view.viewerEntries = await resolveViewerEntries(store, projectId, object, this.serverId);
           break;
         case "sessions":
           view.sessions = object.sessions;
@@ -398,7 +401,8 @@ function baseView(object: WorkObject): WorkView {
 
 export function resolveWorkService(
   projects: Pick<ProjectRegistry, "get">,
+  serverId: string,
   service?: WorkService,
 ): WorkService {
-  return service ?? new WorkService(projects);
+  return service ?? new WorkService(projects, serverId);
 }

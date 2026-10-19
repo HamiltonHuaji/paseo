@@ -693,7 +693,7 @@ export class VoiceAssistantWebSocketServer {
     this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
     this.workspaceLabelService = workspaceLabelService ?? null;
     this.experimentService = experimentService ?? new ExperimentService(this.projectRegistry);
-    this.workService = resolveWorkService(this.projectRegistry, workService);
+    this.workService = resolveWorkService(this.projectRegistry, serverId, workService);
     this.skillRepositoryService = skillRepositoryService;
     const requiredServices = requireWebSocketServices({
       scheduleService,

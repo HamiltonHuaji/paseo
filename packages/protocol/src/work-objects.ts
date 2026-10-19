@@ -131,6 +131,8 @@ export const WorkStorageSchema = z.object({ path: z.string(), sharedPath: z.stri
 export const WorkViewerEntrySchema = z.object({
   name: z.string(),
   path: z.string(),
+  // Chat URI, separate from the HTTP path. Older daemons omit this field.
+  href: z.string().optional(),
   available: z.boolean(),
   unavailableReason: z.string().nullable(),
 });

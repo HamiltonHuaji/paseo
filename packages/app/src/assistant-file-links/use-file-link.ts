@@ -19,6 +19,7 @@ import {
 export interface UseFileLinkResult {
   target: InlinePathTarget | null;
   externalUrl: string | null;
+  viewerHref: string | null;
   onHoverIn: () => void;
   onPress: () => void;
   open: (source: AssistantFileLinkSource, disposition: OpenFileDisposition) => void;
@@ -132,10 +133,14 @@ export function useFileLink(source: AssistantFileLinkSource): UseFileLinkResult 
     resolution.kind === "resolved" && resolution.value.kind === "external"
       ? resolution.value.url
       : null;
+  const viewerHref =
+    resolution.kind === "resolved" && resolution.value.kind === "viewer"
+      ? resolution.value.href
+      : null;
 
   return useMemo(
-    () => ({ target, externalUrl, onHoverIn, onPress, open }),
-    [target, externalUrl, onHoverIn, onPress, open],
+    () => ({ target, externalUrl, viewerHref, onHoverIn, onPress, open }),
+    [target, externalUrl, viewerHref, onHoverIn, onPress, open],
   );
 }
 
@@ -272,6 +277,16 @@ async function dispatchResolvedLink(input: {
   context: AssistantFileLinkResolverContextValue;
 }) {
   const { value } = input.resolution;
+  if (value.kind === "viewer") {
+    const current = input.context.configRef.current;
+    if (
+      current.serverId === input.capturedServerId &&
+      current.workspaceRoot === input.capturedWorkspaceRoot
+    ) {
+      current.onOpenViewer?.(value.target);
+    }
+    return;
+  }
   if (value.kind === "file") {
     await dispatchFileTarget({
       target: value.target,

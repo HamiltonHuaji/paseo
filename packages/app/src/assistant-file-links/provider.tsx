@@ -9,6 +9,7 @@ import {
 } from "react";
 import React from "react";
 import type { ToastApi } from "@/components/toast-host";
+import type { ViewerDeepLinkTarget } from "@getpaseo/protocol/viewer-deep-link";
 import type { OpenFileDisposition } from "@/workspace/file-open";
 import type { InlinePathTarget } from "./parse";
 import type { AssistantFileLinkContext, GetDirectorySuggestions } from "./resolver";
@@ -22,6 +23,7 @@ export interface AssistantFileLinkResolverConfig {
   serverId?: string;
   workspaceRoot?: string;
   onOpenWorkspaceFile?: (target: InlinePathTarget, disposition: OpenFileDisposition) => void;
+  onOpenViewer?: (target: ViewerDeepLinkTarget) => void;
   toast?: ToastApi | null;
 }
 
@@ -42,6 +44,7 @@ export function AssistantFileLinkResolverProvider({
   serverId,
   workspaceRoot,
   onOpenWorkspaceFile,
+  onOpenViewer,
   toast,
   children,
 }: AssistantFileLinkResolverProviderProps) {
@@ -50,9 +53,10 @@ export function AssistantFileLinkResolverProvider({
     serverId,
     workspaceRoot,
     onOpenWorkspaceFile,
+    onOpenViewer,
     toast,
   });
-  configRef.current = { client, serverId, workspaceRoot, onOpenWorkspaceFile, toast };
+  configRef.current = { client, serverId, workspaceRoot, onOpenWorkspaceFile, onOpenViewer, toast };
 
   const getDirectorySuggestions = useCallback<GetDirectorySuggestions>(async (input) => {
     const activeClient = configRef.current.client;

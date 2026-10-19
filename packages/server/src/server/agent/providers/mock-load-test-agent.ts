@@ -264,8 +264,8 @@ function parseSteeringReplayShape(prompt: AgentPromptInput): SteeringReplayShape
   return match?.[1] === "claude" || match?.[1] === "codex" ? match[1] : null;
 }
 
-function parseSettledAssistantImageMarkdown(prompt: AgentPromptInput): string | null {
-  const match = /^emit settled assistant image markdown:\s*(!\[[^\]\r\n]*\]\(.+\))\s*$/i.exec(
+function parseSettledAssistantMarkdown(prompt: AgentPromptInput): string | null {
+  const match = /^emit settled assistant (?:image )?markdown:\s*(.+)\s*$/is.exec(
     promptToText(prompt),
   );
   return match?.[1] ?? null;
@@ -832,7 +832,7 @@ export class MockLoadTestAgentSession implements AgentSession {
     const stress = parseAgentStreamStressPrompt(prompt);
     const questionPrompt = parseMockQuestionPrompt(prompt);
     const structuredBranchName = parseStructuredBranchNamePrompt(prompt);
-    const settledAssistantImageMarkdown = parseSettledAssistantImageMarkdown(prompt);
+    const settledAssistantMarkdown = parseSettledAssistantMarkdown(prompt);
     const steeringReplayShape = parseSteeringReplayShape(prompt);
     const scheduleTurn = () => {
       if (shouldEmitTurnFailure(prompt)) {
@@ -845,8 +845,8 @@ export class MockLoadTestAgentSession implements AgentSession {
         this.scheduleSettledAssistantTurn(turn, this.assistantResponse);
       } else if (structuredBranchName) {
         this.scheduleSettledAssistantTurn(turn, JSON.stringify(structuredBranchName));
-      } else if (settledAssistantImageMarkdown) {
-        this.scheduleSettledAssistantTurn(turn, settledAssistantImageMarkdown);
+      } else if (settledAssistantMarkdown) {
+        this.scheduleSettledAssistantTurn(turn, settledAssistantMarkdown);
       } else if (shouldEmitPlanApprovalPrompt(prompt)) {
         this.schedulePlanApprovalTurn(turn);
       } else if (questionPrompt) {

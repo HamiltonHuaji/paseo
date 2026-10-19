@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
+import { buildViewerDeepLink } from "@getpaseo/protocol/viewer-deep-link";
 import type {
   WorkObject,
   WorkResolvedViewers,
@@ -134,18 +135,26 @@ export async function resolveViewerEntries(
   store: WorkStore,
   projectId: string,
   object: WorkObject,
+  serverId: string,
 ): Promise<WorkViewerEntries> {
   const config = resolveViewerConfig(store, object);
   const entries = await Promise.all(
     Object.entries(config.resolved?.entries ?? {}).map(async ([name, value]) => {
       const entryPath = `${viewerBasePath(projectId, object.id)}/files/${encodeViewerPath(value)}`;
+      const href = buildViewerDeepLink({ serverId, path: entryPath });
       try {
         const file = await resolveViewerPath(store, object.id, value);
         if (!file) throw new WorkError("mount_missing", "Entry does not match a configured mount");
         await stat(file);
-        return { name, path: entryPath, available: true, unavailableReason: null };
+        return { name, path: entryPath, href, available: true, unavailableReason: null };
       } catch (error) {
-        return { name, path: entryPath, available: false, unavailableReason: errorMessage(error) };
+        return {
+          name,
+          path: entryPath,
+          href,
+          available: false,
+          unavailableReason: errorMessage(error),
+        };
       }
     }),
   );

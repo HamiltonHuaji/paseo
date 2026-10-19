@@ -39,6 +39,7 @@ interface CanvasCamera {
 
 interface BoardCanvasProps {
   active?: boolean;
+  layoutRevision?: number;
   visibleIds?: Set<string>;
   experiments: BoardNode[];
   sizes: Map<string, BoardSize>;
@@ -53,6 +54,7 @@ interface BoardCanvasProps {
 
 export function BoardCanvas({
   active = true,
+  layoutRevision = 0,
   visibleIds,
   experiments,
   sizes,
@@ -69,6 +71,8 @@ export function BoardCanvas({
     [sizes, experiments, storedPlacements],
   );
   const [localPlacements, setLocalPlacements] = useState<Record<string, ResolvedPlacement>>({});
+  // Accept an explicit layout reset without moving the user's canvas camera.
+  useEffect(() => setLocalPlacements({}), [layoutRevision]);
   const [camera, setCameraState] = useState<CanvasCamera>({ x: 0, y: 0 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const cameraRef = useRef(camera);

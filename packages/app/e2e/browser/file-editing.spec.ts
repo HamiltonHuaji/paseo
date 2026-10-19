@@ -8,8 +8,82 @@ import {
 } from "../support/helpers/file-explorer";
 import { installDaemonWebSocketGate } from "../support/helpers/daemon-websocket-gate";
 import { openAgentRoute, seedMockAgentWorkspace } from "../support/helpers/mock-agent";
+import { connectDaemonClient } from "../support/helpers/daemon-client-loader";
+import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 
 const APP_SETTINGS_KEY = "@paseo:app-settings";
+test.use({ e2eDaemonEnvironment: { PASEO_EXPERIMENT_VIEWER_LISTEN: "0.0.0.0:0" } });
+
+test.describe("Viewer links in assistant chat", () => {
+  test("opens the published viewer from a Markdown chat link in the browser", async ({
+    page,
+    context,
+  }) => {
+    const session = await seedMockAgentWorkspace({
+      repoPrefix: "viewer-chat-link-",
+      title: "Viewer chat link",
+    });
+    const client = await connectDaemonClient<DaemonClient>({ clientIdPrefix: "viewer-chat-link" });
+    try {
+      await writeFile(
+        path.join(session.cwd, "report.html"),
+        '<h1 id="summary">Published training report</h1>',
+      );
+      const workspaces = await session.client.fetchWorkspaces();
+      const workspace = workspaces.entries.find((entry) => entry.id === session.workspaceId)!;
+      const result = await client.createWorkCard({
+        projectId: workspace.projectId,
+        preset: "topic",
+        title: "Training report",
+        body: "Viewer link test",
+        viewers: { mounts: { report: session.cwd }, entries: { Report: "report/report.html" } },
+      });
+      const entry = result.object.viewerEntries!.entries[0]!;
+      const href = `${entry.href}?run=a%2Fb#summary`;
+      await session.client.sendAgentMessage(
+        session.agentId,
+        `Emit settled assistant Markdown: [View report](${href})`,
+      );
+      await openAgentRoute(page, session);
+      const link = page.getByTestId("assistant-message").getByText("View report", { exact: true });
+      await expect(link).toBeVisible();
+      const opened = context.waitForEvent("page");
+      await link.click();
+      const viewer = await opened;
+      await expect(
+        viewer.getByRole("heading", { name: "Published training report" }),
+      ).toBeVisible();
+      const url = new URL(viewer.url());
+      expect(`${url.pathname}${url.search}${url.hash}`).toBe(`${entry.path}?run=a%2Fb#summary`);
+      await expect(page.getByTestId("file-source-editor")).toHaveCount(0);
+      await viewer.close();
+    } finally {
+      await client.close();
+      await session.cleanup();
+    }
+  });
+
+  test("shows a retryable error in chat when the link's Host is unavailable", async ({ page }) => {
+    const session = await seedMockAgentWorkspace({
+      repoPrefix: "viewer-chat-error-",
+      title: "Unavailable viewer Host",
+      initialPrompt:
+        "Emit settled assistant Markdown: [View report](paseo://h/missing-host/view/v2/project/card/files/report.html)",
+    });
+    try {
+      await openAgentRoute(page, session);
+      const link = page.getByTestId("assistant-message").getByText("View report", { exact: true });
+      await link.click();
+      await expect(page.getByTestId("viewer-link-error")).toContainText("Connect to this host");
+      await expect(page.getByTestId("viewer-link-error")).toContainText("Click the link to retry");
+      await link.click();
+      await expect(page.getByTestId("viewer-link-error")).toBeVisible();
+      await expect(page.getByTestId("file-source-editor")).toHaveCount(0);
+    } finally {
+      await session.cleanup();
+    }
+  });
+});
 
 const RED_PIXEL = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=",
