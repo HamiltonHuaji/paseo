@@ -1,3 +1,4 @@
+import { readInitialSessionIds, recoverSessionLineage } from "./session-lineage.js";
 import { projectTimelineRows } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
@@ -282,7 +283,18 @@ interface ProviderEnabledFlag {
 type ProviderEnabledMap = Partial<Record<AgentProvider, ProviderEnabledFlag>>;
 type ProviderClientMap = Partial<Record<AgentProvider, AgentClient>>;
 
+function initialConversationMetadata(
+  options?: Pick<ManagedAgent, "lastAssistantMessageAt" | "forkedFrom" | "providerSessionIds">,
+) {
+  return {
+    lastAssistantMessageAt: options?.lastAssistantMessageAt ?? null,
+    forkedFrom: options?.forkedFrom,
+    providerSessionIds: options?.providerSessionIds ?? [],
+  };
+}
+
 export interface CreateAgentOptions {
+  contextForkSourceAgentId?: string;
   labels?: Record<string, string>;
   initialPrompt?: string;
   env?: Record<string, string>;
@@ -402,6 +414,9 @@ interface ManagedAgentBase {
   persistence: AgentPersistenceHandle | null;
   historyPrimed: boolean;
   lastUserMessageAt: Date | null;
+  lastAssistantMessageAt?: Date | null;
+  forkedFrom?: StoredAgentRecord["forkedFrom"];
+  providerSessionIds?: string[];
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
   lastUsage?: AgentUsage;
@@ -1293,6 +1308,7 @@ export class AgentManager {
         throw new Error("The forked provider session does not match the requested provider");
       }
       const registered = await this.registerSession(session, storedConfig, resolvedAgentId, {
+        forkedFrom: { agentId: sourceAgent.id, forkedAt: new Date().toISOString() },
         labels: options.labels,
         initialTitle: options.initialTitle,
         workspaceId: options.workspaceId,
@@ -1348,6 +1364,9 @@ export class AgentManager {
     const session = await client.createSession(providerLaunchConfig, launchContext, createOptions);
     await this.requireExternalMcpSupport(session, storedConfig);
     const agent = await this.registerSession(session, storedConfig, resolvedAgentId, {
+      forkedFrom: options.contextForkSourceAgentId
+        ? { agentId: options.contextForkSourceAgentId, forkedAt: new Date().toISOString() }
+        : undefined,
       labels: options.labels,
       initialTitle: options.initialTitle,
       workspaceId: options.workspaceId,
@@ -1380,6 +1399,9 @@ export class AgentManager {
       createdAt?: Date;
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
+      lastAssistantMessageAt?: Date | null;
+      forkedFrom?: StoredAgentRecord["forkedFrom"];
+      providerSessionIds?: string[];
       labels?: Record<string, string>;
       workspaceId?: string;
       owner?: AgentOwner;
@@ -1412,6 +1434,9 @@ export class AgentManager {
       createdAt?: Date;
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
+      lastAssistantMessageAt?: Date | null;
+      forkedFrom?: StoredAgentRecord["forkedFrom"];
+      providerSessionIds?: string[];
       labels?: Record<string, string>;
       workspaceId?: string;
       owner?: AgentOwner;
@@ -1661,6 +1686,9 @@ export class AgentManager {
         createdAt: existing.createdAt,
         updatedAt: existing.updatedAt,
         lastUserMessageAt: existing.lastUserMessageAt,
+        lastAssistantMessageAt: existing.lastAssistantMessageAt,
+        forkedFrom: existing.forkedFrom,
+        providerSessionIds: existing.providerSessionIds,
         historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
         lastUsage: preservedLastUsage,
         lastError: preservedLastError,
@@ -1816,6 +1844,45 @@ export class AgentManager {
         status: "canceled",
       });
       this.dispatch({ type: "provider_subagent", event });
+    }
+  }
+
+  /** Bootstrap reconciliation runs before agents can start; it never resumes them. */
+  async recoverStoredSessionLineage(paseoHome: string): Promise<void> {
+    if (!this.registry) return;
+    const records = await this.registry.list();
+    const initialIds = await readInitialSessionIds(paseoHome);
+    for (const [provider, client] of this.clients) {
+      if (!client.readSessionLineage) continue;
+      const matching = records.filter(
+        (record) => record.provider === provider && record.persistence,
+      );
+      if (!matching.length) continue;
+      try {
+        const recovered = recoverSessionLineage({
+          records: matching,
+          history: await client.readSessionLineage(
+            matching
+              .filter((record) => !record.lastAssistantMessageAt)
+              .map((record) => record.persistence!.sessionId),
+          ),
+          initialIds: initialIds,
+        });
+        for (const record of matching) {
+          const metadata = recovered.get(record.id);
+          if (
+            metadata &&
+            (JSON.stringify(record.providerSessionIds) !==
+              JSON.stringify(metadata.providerSessionIds) ||
+              JSON.stringify(record.forkedFrom) !== JSON.stringify(metadata.forkedFrom) ||
+              record.lastAssistantMessageAt !== metadata.lastAssistantMessageAt)
+          ) {
+            await this.registry.upsert({ ...record, ...metadata });
+          }
+        }
+      } catch (err) {
+        this.logger.warn({ err, provider }, "Unable to recover provider session lineage");
+      }
     }
   }
 
@@ -1977,6 +2044,11 @@ export class AgentManager {
         persistence: record.persistence ?? null,
         historyPrimed: true,
         lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
+        lastAssistantMessageAt: record.lastAssistantMessageAt
+          ? new Date(record.lastAssistantMessageAt)
+          : null,
+        forkedFrom: record.forkedFrom,
+        providerSessionIds: record.providerSessionIds,
         lastUsage: undefined,
         lastError: record.lastError ?? undefined,
         attention,
@@ -3204,7 +3276,9 @@ export class AgentManager {
     options?: HydrateTimelineOptions,
   ): Promise<void> {
     const agent = this.requireSessionAgent(agentId);
+    const previousReply = agent.lastAssistantMessageAt;
     await this.hydrateTimelineFromLegacyProviderHistory(agent, options);
+    if (agent.lastAssistantMessageAt !== previousReply) this.emitState(agent);
   }
 
   async rewind(agentId: string, messageId: string, mode: RewindMode): Promise<void> {
@@ -3232,6 +3306,7 @@ export class AgentManager {
         { agentId, provider: agent.provider, messageId, mode },
         "agent.rewind.start",
       );
+      this.refreshSessionPersistence(agent);
       await invokeRewindCapability(agent.session, { messageId: providerMessageId, mode });
       if (mode !== "files") {
         await this.hydrateTimelineFromProvider(agentId, {
@@ -3511,6 +3586,9 @@ export class AgentManager {
       createdAt?: Date;
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
+      lastAssistantMessageAt?: Date | null;
+      forkedFrom?: StoredAgentRecord["forkedFrom"];
+      providerSessionIds?: string[];
       labels?: Record<string, string>;
       timeline?: AgentTimelineItem[];
       timelineRows?: AgentTimelineRow[];
@@ -3562,6 +3640,13 @@ export class AgentManager {
       });
 
       this.assertAcceptingAgentRegistrations();
+      for (const row of options?.timelineRows ?? []) {
+        if (row.item.type === "assistant_message") {
+          const timestamp = new Date(row.timestamp);
+          if (!managed.lastAssistantMessageAt || timestamp > managed.lastAssistantMessageAt)
+            managed.lastAssistantMessageAt = timestamp;
+        }
+      }
       this.agents.set(resolvedAgentId, managed);
       registered = true;
       // Initialize previousStatus to track transitions
@@ -3678,6 +3763,9 @@ export class AgentManager {
           createdAt?: Date;
           updatedAt?: Date;
           lastUserMessageAt?: Date | null;
+          lastAssistantMessageAt?: Date | null;
+          forkedFrom?: StoredAgentRecord["forkedFrom"];
+          providerSessionIds?: string[];
           labels?: Record<string, string>;
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
@@ -3690,6 +3778,8 @@ export class AgentManager {
       | undefined;
   }): ActiveManagedAgent {
     const { resolvedAgentId, session, config, now, durableTimelineHasRows, options } = params;
+    const { lastAssistantMessageAt, forkedFrom, providerSessionIds } =
+      initialConversationMetadata(options);
     return {
       id: resolvedAgentId,
       provider: config.provider,
@@ -3721,6 +3811,9 @@ export class AgentManager {
       ),
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
+      lastAssistantMessageAt,
+      forkedFrom,
+      providerSessionIds,
       lastUsage: options?.lastUsage,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
@@ -4076,11 +4169,10 @@ export class AgentManager {
       }
     }
     for (const event of historyEvents) {
-      const row = this.recordTimeline(
-        agent.id,
-        event.item,
-        event.timestamp ? { timestamp: event.timestamp } : undefined,
-      );
+      const row = this.recordTimeline(agent.id, event.item, {
+        timestamp: event.timestamp,
+        fromHistory: true,
+      });
       if (broadcastTimeline) {
         this.dispatchStream(agent.id, event, {
           seq: row.seq,
@@ -4123,11 +4215,10 @@ export class AgentManager {
         if (event.item.type === "user_message" && isSystemInjectedEnvelope(event.item.text)) {
           continue;
         }
-        const row = this.recordTimeline(
-          agent.id,
-          event.item,
-          event.timestamp ? { timestamp: event.timestamp } : undefined,
-        );
+        const row = this.recordTimeline(agent.id, event.item, {
+          timestamp: event.timestamp,
+          fromHistory: true,
+        });
         if (deferredBroadcast) {
           timelineEvents.push({ event, row });
         } else if (broadcast) {
@@ -4421,6 +4512,13 @@ export class AgentManager {
   private refreshSessionPersistence(agent: ActiveManagedAgent): void {
     const handle = agent.session.describePersistence();
     if (handle) {
+      agent.providerSessionIds = Array.from(
+        new Set([
+          ...(agent.providerSessionIds ?? []),
+          ...(agent.persistence?.sessionId ? [agent.persistence.sessionId] : []),
+          handle.sessionId,
+        ]),
+      );
       agent.persistence = attachPersistenceCwd(handle, agent.cwd);
     }
   }
@@ -4450,11 +4548,7 @@ export class AgentManager {
     }
 
     if (options?.fromHistory) {
-      this.recordTimeline(
-        agent.id,
-        event.item,
-        event.timestamp ? { timestamp: event.timestamp } : undefined,
-      );
+      this.recordTimeline(agent.id, event.item, { timestamp: event.timestamp, fromHistory: true });
       flags.shouldDispatchEvent = false;
       flags.shouldNotifyWaiters = false;
       return;
@@ -4812,12 +4906,28 @@ export class AgentManager {
     item: AgentTimelineItem,
     options?: {
       timestamp?: string;
+      fromHistory?: boolean;
       providerMessageId?: string;
       turnId?: string;
     },
   ): AgentTimelineRow {
     item = limitAgentTimelineItemContent(item);
     const row = this.timelineStore.append(agentId, item, options);
+    const agent = this.agents.get(agentId);
+    if (
+      agent &&
+      item.type === "assistant_message" &&
+      (!options?.fromHistory || options.timestamp)
+    ) {
+      const timestamp = new Date(row.timestamp);
+      // Inherited messages belong to the source conversation, before this fork existed.
+      if (
+        (!agent.forkedFrom || timestamp >= new Date(agent.forkedFrom.forkedAt)) &&
+        (!agent.lastAssistantMessageAt || timestamp > agent.lastAssistantMessageAt)
+      ) {
+        agent.lastAssistantMessageAt = timestamp;
+      }
+    }
     this.enqueueDurableTimelineAppend(agentId, row);
     return row;
   }

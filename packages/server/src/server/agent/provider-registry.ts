@@ -544,6 +544,7 @@ function wrapClientProvider(
     listFeatures: listFeatures
       ? async (config) => await listFeatures({ ...config, provider: inner.provider })
       : undefined,
+    readSessionLineage: inner.readSessionLineage?.bind(inner),
     listImportableSessions: listImportableSessions
       ? async (options) => await listImportableSessions(options)
       : undefined,

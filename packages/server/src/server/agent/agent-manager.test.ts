@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -13,7 +13,9 @@ import {
   type AgentManagerEvent,
   type ManagedAgent,
 } from "./agent-manager.js";
-import { AgentStorage } from "./agent-storage.js";
+import { recoverSessionLineage } from "./session-lineage.js";
+import { readCodexSessionLineage } from "./providers/codex/session-lineage.js";
+import { AgentStorage, parseStoredAgentRecord } from "./agent-storage.js";
 import { InMemoryAgentTimelineStore } from "./agent-timeline-store.js";
 import { toAgentPayload } from "./agent-projections.js";
 import { projectTimelineRows } from "./timeline-projection.js";
@@ -53,6 +55,177 @@ import type { ProviderDefinition } from "./provider-registry.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
+
+function lineageRecord(id: string, sessionId: string, createdAt: string): StoredAgentRecord {
+  return parseStoredAgentRecord({
+    id,
+    provider: "codex",
+    cwd: "/workspace",
+    createdAt,
+    updatedAt: createdAt,
+    persistence: { provider: "codex", sessionId },
+  });
+}
+
+const lineageHistory = [
+  { sessionId: "a0", createdAt: "2026-10-01T00:00:00Z" },
+  { sessionId: "b0", parentSessionId: "a0", createdAt: "2026-10-02T00:00:00Z" },
+  { sessionId: "a1", parentSessionId: "a0", createdAt: "2026-10-03T00:00:00Z" },
+  { sessionId: "b1", parentSessionId: "b0", createdAt: "2026-10-04T00:00:00Z" },
+  { sessionId: "b2", parentSessionId: "b1", createdAt: "2026-10-05T00:00:00Z" },
+  { sessionId: "c0", parentSessionId: "b1", createdAt: "2026-10-04T01:00:00Z" },
+];
+
+test("session canvas recovers old forks through repeated rewinds on both ends and an intermediate fork", () => {
+  const records = [
+    lineageRecord("A", "a1", "2026-10-01T00:00:00.010Z"),
+    lineageRecord("B", "b2", "2026-10-02T00:00:00.010Z"),
+    lineageRecord("C", "c0", "2026-10-04T01:00:01Z"),
+  ];
+  for (const receipts of [
+    new Map<string, string>(),
+    new Map([
+      ["A", "a0"],
+      ["B", "b0"],
+      ["C", "c0"],
+    ]),
+  ]) {
+    const result = recoverSessionLineage({
+      records: records,
+      history: lineageHistory,
+      initialIds: receipts,
+    });
+    expect(result.get("A")?.forkedFrom).toBeUndefined();
+    expect(result.get("A")?.providerSessionIds).toEqual(expect.arrayContaining(["a0", "a1"]));
+    expect(result.get("B")?.forkedFrom).toEqual({ agentId: "A", forkedAt: "2026-10-02T00:00:00Z" });
+    expect(result.get("B")?.providerSessionIds).toEqual(expect.arrayContaining(["b0", "b1", "b2"]));
+    expect(result.get("C")?.forkedFrom).toEqual({ agentId: "B", forkedAt: "2026-10-04T01:00:00Z" });
+    expect(result.get("C")?.providerSessionIds).toEqual(["c0"]);
+  }
+});
+
+test("session canvas does not choose between duplicate imports or invent a missing parent", () => {
+  const records = [
+    lineageRecord("A", "a0", "2026-10-01T00:00:01Z"),
+    lineageRecord("duplicate", "a0", "2026-10-01T00:00:02Z"),
+    lineageRecord("B", "b0", "2026-10-02T00:00:01Z"),
+  ];
+  expect(
+    recoverSessionLineage({ records: records, history: lineageHistory, initialIds: new Map() }).get(
+      "B",
+    )?.forkedFrom,
+  ).toBeUndefined();
+  expect(
+    recoverSessionLineage({
+      records: records.slice(2),
+      history: lineageHistory,
+      initialIds: new Map(),
+    }).get("B")?.forkedFrom,
+  ).toBeUndefined();
+});
+
+test("session canvas can finish recovery when missing native ancestry becomes available later", () => {
+  const records = [
+    lineageRecord("A", "a1", "2026-10-01T00:00:00Z"),
+    lineageRecord("B", "b2", "2026-10-02T00:00:00Z"),
+  ];
+  const partial = recoverSessionLineage({
+    records: records,
+    history: lineageHistory.filter((node) => node.sessionId === "b2"),
+    initialIds: new Map(),
+  });
+  const later = recoverSessionLineage({
+    records: records.map((record) => Object.assign({}, record, partial.get(record.id))),
+    history: lineageHistory,
+    initialIds: new Map(),
+  });
+  expect(later.get("B")?.forkedFrom).toEqual({ agentId: "A", forkedAt: "2026-10-02T00:00:00Z" });
+  expect(later.get("A")?.forkedFrom).toBeUndefined();
+});
+
+test("session canvas reconciles creation receipts and archived Codex headers without launching sessions", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "canvas-lineage-"));
+  const storage = new AgentStorage(join(directory, "agents"), logger);
+  const client = new TestAgentClient();
+  const create = vi.spyOn(client, "createSession");
+  const manager = new AgentManager({
+    clients: {
+      codex: Object.assign(client, {
+        readSessionLineage: (ids?: readonly string[]) =>
+          readCodexSessionLineage({ codexHome: join(directory, "codex"), activitySessionIds: ids }),
+      }),
+    },
+    registry: storage,
+    logger,
+  });
+  try {
+    mkdirSync(join(directory, "creations"), { recursive: true });
+    mkdirSync(join(directory, "codex", "archived_sessions"), { recursive: true });
+    for (const node of lineageHistory) {
+      writeFileSync(
+        join(directory, "codex", "archived_sessions", `${node.sessionId}.jsonl`),
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            id: node.sessionId,
+            forked_from_id: node.parentSessionId,
+            timestamp: node.createdAt,
+          },
+        }) + "\ninvalid-body-never-read\n",
+      );
+    }
+    for (const [id, initial, current] of [
+      ["A", "a0", "a1"],
+      ["B", "b0", "b2"],
+    ]) {
+      // Imported after native history was created: receipts, not dates, define the boundary.
+      await storage.upsert(lineageRecord(id!, current!, "2026-10-20T00:00:00Z"));
+      writeFileSync(
+        join(directory, "creations", `${id}.json`),
+        JSON.stringify({ snapshot: { agent: { id, persistence: { sessionId: initial } } } }),
+      );
+    }
+    const b2 = lineageHistory.find((node) => node.sessionId === "b2")!;
+    writeFileSync(
+      join(directory, "codex", "archived_sessions", "b2.jsonl"),
+      [
+        JSON.stringify({
+          type: "session_meta",
+          payload: {
+            id: b2.sessionId,
+            forked_from_id: b2.parentSessionId,
+            timestamp: b2.createdAt,
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          timestamp: "2026-10-05T01:00:00Z",
+          payload: { type: "message", role: "assistant", content: "答复" },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          payload: { type: "function_call_output", output: "资料".repeat(100_000) },
+        }),
+        "",
+      ].join("\n"),
+    );
+    await manager.recoverStoredSessionLineage(directory);
+    expect((await storage.get("B"))?.lastAssistantMessageAt).toBe("2026-10-05T01:00:00Z");
+    expect((await storage.get("A"))?.providerSessionIds).toEqual(
+      expect.arrayContaining(["a0", "a1"]),
+    );
+    expect((await storage.get("B"))?.forkedFrom).toEqual({
+      agentId: "A",
+      forkedAt: "2026-10-02T00:00:00Z",
+    });
+    await manager.recoverStoredSessionLineage(directory);
+    expect((await storage.get("B"))?.forkedFrom?.agentId).toBe("A");
+    expect(create).not.toHaveBeenCalled();
+  } finally {
+    await storage.flush();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -11109,6 +11282,144 @@ test("concurrent native restores run once before resuming the same agent", async
   } finally {
     restoreAllowed.resolve();
     if (agentId) await manager.closeAgent(agentId);
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("session canvas persists reply timestamps and context-fork provenance without treating other activity as replies", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-canvas-metadata-"));
+  const storage = new AgentStorage(workdir, logger);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    logger,
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-10-01T10:00:00Z"));
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-a",
+      contextForkSourceAgentId: "source-agent",
+      labels: { [PARENT_AGENT_ID_LABEL]: "delegating-agent" },
+    });
+    expect(agent.forkedFrom).toEqual({
+      agentId: "source-agent",
+      forkedAt: "2026-10-01T10:00:00.000Z",
+    });
+    expect(agent.lastAssistantMessageAt).toBeNull();
+    vi.setSystemTime(new Date("2026-10-01T10:01:00Z"));
+    await manager.appendTimelineItem(agent.id, { type: "assistant_message", text: "An answer" });
+    vi.setSystemTime(new Date("2026-10-01T10:02:00Z"));
+    await manager.appendTimelineItem(agent.id, { type: "user_message", text: "A later question" });
+    await manager.appendTimelineItem(agent.id, { type: "reasoning", text: "Thinking" });
+    await manager.flush();
+    const record = await storage.get(agent.id);
+    expect(record?.lastAssistantMessageAt).toBe("2026-10-01T10:01:00.000Z");
+    expect(record?.forkedFrom).toEqual(agent.forkedFrom);
+    const payload = toAgentPayload(manager.getAgent(agent.id)!);
+    expect(payload.lastAssistantMessageAt).toBe(record?.lastAssistantMessageAt);
+    await manager.reloadAgentSession(agent.id);
+    expect(manager.getAgent(agent.id)?.forkedFrom).toEqual(agent.forkedFrom);
+    expect(manager.getAgent(agent.id)?.lastAssistantMessageAt?.toISOString()).toBe(
+      record?.lastAssistantMessageAt,
+    );
+  } finally {
+    vi.useRealTimers();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flush();
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("session canvas records native fork ancestry and excludes inherited replies", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-native-canvas-"));
+  class ForkSession extends TestAgentSession {
+    override readonly capabilities = {
+      ...TEST_CAPABILITIES,
+      supportsNativeConversationFork: true,
+      supportsRewindConversation: true,
+    };
+    private threadId = this.id;
+    async revertConversation() {
+      this.threadId = randomUUID();
+    }
+    override describePersistence() {
+      return { provider: this.provider, sessionId: this.threadId };
+    }
+    override async getRuntimeInfo() {
+      return { ...(await super.getRuntimeInfo()), sessionId: this.threadId };
+    }
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      yield {
+        type: "timeline",
+        provider: "codex",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        item: { type: "assistant_message", text: "Inherited", messageId: "reply-1" },
+      };
+    }
+  }
+  const client = new (class extends TestAgentClient {
+    override readonly capabilities = { ...TEST_CAPABILITIES, supportsNativeConversationFork: true };
+    override async createSession(config: AgentSessionConfig) {
+      return new ForkSession(config);
+    }
+    async forkSession(
+      _source: AgentSession,
+      input: import("./agent-sdk-types.js").AgentConversationForkInput,
+    ) {
+      return new ForkSession(input.targetConfig);
+    }
+  })();
+  const storage = new AgentStorage(workdir, logger);
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const source = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    await manager.appendTimelineItem(source.id, {
+      type: "assistant_message",
+      text: "Source response",
+      messageId: "reply-1",
+    });
+    const fork = await manager.forkAgentFromConversation(
+      { agentId: source.id, boundaryMessageId: "reply-1" },
+      { provider: "codex", cwd: workdir },
+      undefined,
+      { workspaceId: "workspace-a" },
+    );
+    expect(fork.forkedFrom?.agentId).toBe(source.id);
+    expect(fork.lastAssistantMessageAt).toBeNull();
+    const origin = fork.forkedFrom;
+    const sourceThread = source.persistence!.sessionId;
+    const forkThread = fork.persistence!.sessionId;
+    await manager.rewind(source.id, "reply-1", "conversation");
+    await manager.rewind(fork.id, "reply-1", "conversation");
+    const intermediateForkThread = manager.getAgent(fork.id)!.persistence!.sessionId;
+    await manager.rewind(fork.id, "reply-1", "conversation");
+    expect(manager.getAgent(fork.id)?.forkedFrom).toEqual(origin);
+    expect(manager.getAgent(source.id)?.forkedFrom).toBeUndefined();
+    const savedSource = await storage.get(source.id);
+    const savedFork = await storage.get(fork.id);
+    expect(savedSource?.providerSessionIds).toEqual([
+      sourceThread,
+      manager.getAgent(source.id)!.persistence!.sessionId,
+    ]);
+    expect(savedFork?.providerSessionIds).toEqual([
+      forkThread,
+      intermediateForkThread,
+      manager.getAgent(fork.id)!.persistence!.sessionId,
+    ]);
+    expect(savedFork?.forkedFrom).toEqual(origin);
+
+    expect(manager.getAgent(source.id)?.lastAssistantMessageAt).toBeInstanceOf(Date);
+    await manager.flush();
+    expect((await storage.get(fork.id))?.forkedFrom).toEqual(fork.forkedFrom);
+    expect(fork.labels[PARENT_AGENT_ID_LABEL]).toBeUndefined();
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flush();
     await storage.flush();
     rmSync(workdir, { recursive: true, force: true });
   }

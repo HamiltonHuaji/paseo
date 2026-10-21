@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
+  sessionCanvas: sessionCanvas["zh-CN"],
   heartbeats: heartbeatSettings["zh-CN"],
   paneFind: {
     searchFailed: "无法搜索此聊天。请检查主机连接后重试。",

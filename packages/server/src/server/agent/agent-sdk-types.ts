@@ -784,6 +784,9 @@ export interface AgentClient {
   isCreateConfigUnattended?(input: AgentCreateConfigUnattendedInput): boolean;
   listCommands?(config: AgentSessionConfig): Promise<AgentSlashCommand[]>;
   listFeatures?(config: AgentSessionConfig): Promise<AgentFeature[]>;
+  readSessionLineage?(
+    activitySessionIds?: readonly string[],
+  ): Promise<import("./session-lineage.js").ProviderSessionLineage[]>;
   listImportableSessions?(
     options?: ListImportableSessionsOptions,
   ): Promise<ImportableProviderSession[]>;

@@ -1731,6 +1731,7 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(experiments): remove after supported clients all include Experiments.
         experiments: true,
         works: true,
+        sessionCanvas: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.

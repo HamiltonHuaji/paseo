@@ -890,6 +890,11 @@ const AgentActiveTurnPayloadSchema = z.object({
   startedAt: z.string().nullable(),
 });
 
+export const AgentForkOriginSchema = z.object({
+  agentId: z.string(),
+  forkedAt: z.string(),
+});
+
 export const AgentSnapshotPayloadSchema = z.object({
   id: z.string(),
   provider: AgentProviderSchema,
@@ -902,6 +907,8 @@ export const AgentSnapshotPayloadSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   lastUserMessageAt: z.string().nullable(),
+  lastAssistantMessageAt: z.string().nullable().optional(),
+  forkedFrom: AgentForkOriginSchema.optional(),
   status: AgentStatusSchema,
   activeTurn: AgentActiveTurnPayloadSchema.nullable().optional(),
   capabilities: AgentCapabilityFlagsSchema,
@@ -937,6 +944,8 @@ export const AgentListItemPayloadSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   lastUserMessageAt: z.string().nullable(),
+  lastAssistantMessageAt: z.string().nullable().optional(),
+  forkedFrom: AgentForkOriginSchema.optional(),
   archivedAt: z.string().nullable().optional(),
   requiresAttention: z.boolean().optional(),
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
@@ -1194,6 +1203,7 @@ export const TextAttachmentSchema = z
     type: z.literal("text"),
     mimeType: z.literal("text/plain"),
     contextKind: z.string().optional(),
+    sourceAgentId: z.string().optional(),
     title: z.string().nullable().optional(),
     text: z.string(),
     externalResource: ExternalResourceAttachmentMetadataSchema.optional(),
@@ -3704,6 +3714,7 @@ export const ServerInfoStatusPayloadSchema = z
         // COMPAT(experiments): remove after supported clients all include Experiments.
         experiments: z.boolean().optional(),
         works: z.boolean().optional(),
+        sessionCanvas: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
         // feature gate and checkoutGithubSetAutoMerge fallback after 2027-01-17
         // once the supported daemon floor is >= v0.2.0.

@@ -3217,6 +3217,7 @@ describe("HostRuntimeStore", () => {
         createdAt: new Date(stale.createdAt),
         updatedAt: new Date(stale.updatedAt),
         lastUserMessageAt: null,
+        lastAssistantMessageAt: null,
         lastActivityAt: new Date(stale.updatedAt),
         archivedAt: stale.archivedAt ? new Date(stale.archivedAt) : null,
         attentionTimestamp: stale.attentionTimestamp ? new Date(stale.attentionTimestamp) : null,

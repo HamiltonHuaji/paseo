@@ -355,7 +355,13 @@ function CanvasCard({
             {experiment.title}
           </Text>
         </View>
-        <Pressable style={styles.cardBody} onPress={handleSelect}>
+        <Pressable
+          style={styles.cardBody}
+          onPress={handleSelect}
+          accessibilityRole="button"
+          accessibilityLabel={experiment.title}
+          testID={`canvas-card-open-${experiment.id}`}
+        >
           {content}
         </Pressable>
         <View
@@ -446,6 +452,7 @@ function LineageOverlay({
       {routes.map(({ experiment, route }) => (
         <Polyline
           key={experiment}
+          testID={`canvas-edge-${experiment}`}
           points={route.points.map((point) => `${point.x},${point.y}`).join(" ")}
           fill="none"
           stroke={lineColor}

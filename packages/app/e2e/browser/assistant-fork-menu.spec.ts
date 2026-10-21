@@ -1,3 +1,4 @@
+import { renameModalInput, renameModalSubmit } from "../support/helpers/rename";
 import { expect, test as base } from "../support/fixtures";
 import { awaitAssistantMessage } from "../support/helpers/agent-stream";
 import {
@@ -35,8 +36,107 @@ const test = base.extend<{
   },
 });
 
+async function workspaceSessionEntries(session: MockAgentWorkspace) {
+  const result = await session.client.fetchAgents({ scope: "active" });
+  return result.entries.filter((entry) => entry.agent.workspaceId === session.workspaceId);
+}
+
 test.describe("Assistant fork menu", () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test("session canvas shows context forks, arranges vertically, renames and hosts a complete conversation", async ({
+    page,
+    seedForkWorkspace,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    await page.setViewportSize({ width: 1600, height: 1050 });
+    const session = await seedForkWorkspace({
+      repoPrefix: "session-canvas-",
+      title: "Canvas source",
+      model: "ten-second-stream",
+      initialPrompt: "emit 1 coalesced agent stream updates for the canvas source.",
+    });
+    await openAgentRoute(page, session);
+    await awaitAssistantMessage(page);
+    await session.client.waitForFinish(session.agentId, 45_000);
+    await forkMostRecentAssistantTurnToNewTab(page);
+    await expectChatHistoryAttachment(page);
+    await page
+      .getByRole("textbox", { name: "Message agent..." })
+      .first()
+      .fill("emit 1 coalesced agent stream updates in the fork.");
+    await page
+      .getByRole("button", { name: /^(Send message|Create agent)$/ })
+      .filter({ visible: true })
+      .click();
+    await expect
+      .poll(async () => (await workspaceSessionEntries(session)).length, { timeout: 30_000 })
+      .toBe(2);
+    const fork = (await session.client.fetchAgents({ scope: "active" })).entries.find(
+      (e) => e.agent.workspaceId === session.workspaceId && e.agent.id !== session.agentId,
+    )!.agent;
+    await session.client.waitForFinish(fork.id, 45_000);
+    await page.getByTestId("workspace-session-canvas-button").filter({ visible: true }).click();
+    const canvas = page.getByTestId("session-canvas-screen");
+    const sourceCard = canvas.getByTestId(`canvas-card-open-${session.agentId}`);
+    const forkCard = canvas.getByTestId(`canvas-card-open-${fork.id}`);
+    await expect(sourceCard).toBeVisible();
+    await expect(forkCard).toBeVisible();
+    await expect(forkCard).toContainText("Forked from Canvas source");
+    await expect(canvas.getByTestId(`canvas-edge-${fork.id}`)).toHaveCount(1);
+    const sourceBox = (await sourceCard.boundingBox())!;
+    const forkBox = (await forkCard.boundingBox())!;
+    expect(forkBox.y).toBeGreaterThan(sourceBox.y + sourceBox.height);
+    expect(forkBox.y - sourceBox.y - sourceBox.height).toBeLessThan(70);
+    await canvas.getByTestId("session-sort-direction").click();
+    await expect
+      .poll(async () => (await forkCard.boundingBox())!.y < (await sourceCard.boundingBox())!.y)
+      .toBe(true);
+    await canvas.getByTestId("session-sort-direction").click();
+    await page.screenshot({ path: testInfo.outputPath("session-canvas.png") });
+    await sourceCard.click();
+    const detail = canvas.getByTestId("session-canvas-detail");
+    await expect(detail.getByTestId("assistant-message").first()).toBeVisible();
+    await canvas.getByTestId("session-canvas-rename").click();
+    const renameId = `workspace-tab-rename-modal-agent-${session.agentId}`;
+    await renameModalInput(page, renameId).fill("Renamed canvas source");
+    await renameModalSubmit(page, renameId).click();
+    await expect(detail).toContainText("Renamed canvas source");
+    const input = detail.getByRole("textbox", { name: "Message agent..." });
+    await expect(input).toBeEditable();
+    await input.fill("emit 1 coalesced agent stream updates from the canvas detail.");
+    await expect(detail.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
+    await input.press("Control+Enter");
+    await expect(
+      detail.getByText("emit 1 coalesced agent stream updates from the canvas detail.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("session-canvas-detail.png") });
+    await canvas.getByTestId("session-canvas-close-detail").click();
+    await expect(detail).toHaveCount(0);
+    await canvas.getByTestId("session-sort-input").click();
+    await expect
+      .poll(async () => (await sourceCard.boundingBox())!.y > (await forkCard.boundingBox())!.y)
+      .toBe(true);
+    await page.reload();
+    await page.getByTestId("workspace-session-canvas-button").filter({ visible: true }).click();
+    await expect(canvas.getByTestId("session-sort-input")).toHaveAttribute("aria-selected", "true");
+    await sourceCard.click();
+    await page.setViewportSize({ width: 430, height: 932 });
+    await page.getByTestId("workspace-session-canvas-button").filter({ visible: true }).click();
+    await sourceCard.click();
+    await expect(detail.getByRole("textbox", { name: "Message agent..." })).toBeEditable();
+    await page.screenshot({ path: testInfo.outputPath("session-canvas-compact-detail.png") });
+    await canvas.getByTestId("session-canvas-close-detail").click();
+    await expect(detail).toHaveCount(0);
+    await page.setViewportSize({ width: 1600, height: 1050 });
+    await page.getByTestId("workspace-session-canvas-button").filter({ visible: true }).click();
+    await sourceCard.click();
+    await canvas.getByTestId("session-canvas-open-tab").click();
+    await expect(canvas).not.toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Message agent..." }).first()).toBeEditable();
+  });
 
   test("forks a failed assistant turn that has no provider message id", async ({
     page,

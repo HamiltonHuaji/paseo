@@ -42,6 +42,8 @@ import { WorkspaceActions } from "@/git/workspace-actions";
 import { WorkspaceOpenInEditorButton } from "@/workspace/open-in-editor/button";
 import { WorkspaceScriptsButton } from "@/screens/workspace/workspace-scripts-button";
 import { WorksScreen } from "@/screens/works-screen";
+import { SessionCanvasScreen } from "@/screens/session-canvas/screen";
+import { WorkspaceSessionCanvasButton } from "./workspace-session-canvas-button";
 import { WorkspaceWorksButton } from "./workspace-works-button";
 import { WorkspaceExperimentsButton } from "@/screens/workspace/workspace-experiments-button";
 import { ExperimentsScreen } from "@/screens/experiments-screen";
@@ -233,22 +235,47 @@ function getWorkspaceProjectId(
   return workspaceDescriptor?.projectId;
 }
 
-function useWorkspaceWorkSurfaces(serverId: string, projectId: string | undefined) {
+function canvasSessionTab(agentId: string): WorkspaceTabDescriptor {
+  return {
+    key: `agent_${agentId}`,
+    tabId: `agent_${agentId}`,
+    kind: "agent",
+    target: { kind: "agent", agentId },
+  };
+}
+
+function useWorkspaceWorkSurfaces(
+  serverId: string,
+  projectId: string | undefined,
+  workspaceId: string,
+) {
   const experiments = useHostFeature(serverId, "experiments");
   const works = useHostFeature(serverId, "works");
-  const [active, setActive] = useState<"workspace" | "experiments" | "works">("workspace");
-  const [opened, setOpened] = useState({ experiments: false, works: false });
+  const sessions = useHostFeature(serverId, "sessionCanvas");
+  const [active, setActive] = useState<"workspace" | "experiments" | "works" | "sessions">(
+    "workspace",
+  );
+  const [opened, setOpened] = useState({ experiments: false, works: false, sessions: false });
   useEffect(() => {
     setActive("workspace");
-    setOpened({ experiments: false, works: false });
-  }, [serverId, projectId]);
-  const toggle = useCallback((surface: "experiments" | "works") => {
+    setOpened({ experiments: false, works: false, sessions: false });
+  }, [serverId, projectId, workspaceId]);
+  const toggle = useCallback((surface: "experiments" | "works" | "sessions") => {
     setOpened((current) => ({ ...current, [surface]: true }));
     setActive((current) => (current === surface ? "workspace" : surface));
   }, []);
   const toggleExperiments = useCallback(() => toggle("experiments"), [toggle]);
   const toggleWorks = useCallback(() => toggle("works"), [toggle]);
+  const toggleSessions = useCallback(() => toggle("sessions"), [toggle]);
+  const showWorkspace = useCallback(() => setActive("workspace"), []);
   return {
+    showWorkspace,
+    sessions: {
+      active: active === "sessions" && sessions,
+      available: sessions,
+      hasOpened: opened.sessions,
+      toggle: toggleSessions,
+    },
     experiments: {
       active: active === "experiments" && experiments && Boolean(projectId),
       available: experiments && Boolean(projectId),
@@ -291,6 +318,32 @@ function WorkspaceExperimentsSurface({
           serverId={serverId}
           projectId={projectId}
           embedded
+          active={active && routeFocused}
+        />
+      </View>
+    </RetainedPanel>
+  );
+}
+
+function WorkspaceSessionCanvasSurface({
+  mounted,
+  active,
+  routeFocused,
+  header,
+  ...props
+}: React.ComponentProps<typeof SessionCanvasScreen> & {
+  mounted: boolean;
+  routeFocused: boolean;
+  header: ReactNode;
+}) {
+  if (!mounted) return null;
+  return (
+    <RetainedPanel active={active}>
+      {header}
+      <View style={styles.centerContent}>
+        <SessionCanvasScreen
+          key={`${props.serverId}:${props.workspaceId}`}
+          {...props}
           active={active && routeFocused}
         />
       </View>
@@ -1086,6 +1139,7 @@ interface WorkspaceHeaderTitleBarProps {
   liveTerminalIds: string[];
   showExperiments: boolean;
   showWorks: boolean;
+  showSessionCanvas: boolean;
   showWorkspaceSetup: boolean;
   showCreateBrowserTab: boolean;
   isMobile: boolean;
@@ -1105,6 +1159,7 @@ interface WorkspaceHeaderTitleBarProps {
   onOpenUrlInBrowserTab: (url: string) => void;
   onOpenExperiments: () => void;
   onOpenWorks: () => void;
+  onOpenSessionCanvas: () => void;
 }
 
 function WorkspaceHeaderTitleBar({
@@ -1119,6 +1174,7 @@ function WorkspaceHeaderTitleBar({
   liveTerminalIds,
   showExperiments,
   showWorks,
+  showSessionCanvas,
   showWorkspaceSetup,
   showCreateBrowserTab,
   isMobile,
@@ -1138,6 +1194,7 @@ function WorkspaceHeaderTitleBar({
   onOpenUrlInBrowserTab,
   onOpenExperiments,
   onOpenWorks,
+  onOpenSessionCanvas,
 }: WorkspaceHeaderTitleBarProps) {
   return (
     <View style={styles.headerTitleContainer}>
@@ -1203,6 +1260,9 @@ function WorkspaceHeaderTitleBar({
           <WorkspaceExperimentsButton onPress={onOpenExperiments} mobile />
         ) : null}
         {isMobile && showWorks ? <WorkspaceWorksButton onPress={onOpenWorks} mobile /> : null}
+        {isMobile && showSessionCanvas ? (
+          <WorkspaceSessionCanvasButton onPress={onOpenSessionCanvas} mobile />
+        ) : null}
       </View>
     </View>
   );
@@ -1706,15 +1766,23 @@ function WorkspaceScreenContent({
   }, [normalizedServerId, normalizedWorkspaceId, workspaceDescriptor]);
   const workspaceScripts = getWorkspaceScripts(workspaceDescriptor);
   const experimentProjectId = getWorkspaceProjectId(workspaceDescriptor);
-  const { experiments: experimentsSurface, works: worksSurface } = useWorkspaceWorkSurfaces(
-    normalizedServerId,
-    experimentProjectId,
-  );
+  const {
+    experiments: experimentsSurface,
+    works: worksSurface,
+    sessions: sessionsSurface,
+    showWorkspace,
+  } = useWorkspaceWorkSurfaces(normalizedServerId, experimentProjectId, normalizedWorkspaceId);
   const handleOpenExperiments = experimentsSurface.toggle;
   const showExperiments = experimentsSurface.available;
   const handleOpenWorks = worksSurface.toggle;
   const showWorks = worksSurface.available;
-  const workSurfaceActive = [experimentsSurface.active, worksSurface.active].some(Boolean);
+  const handleOpenSessionCanvas = sessionsSurface.toggle;
+  const showSessionCanvas = sessionsSurface.available;
+  const workSurfaceActive = [
+    experimentsSurface.active,
+    worksSurface.active,
+    sessionsSurface.active,
+  ].some(Boolean);
   const tabDeckFocused = isWorkspaceTabDeckFocused(isRouteFocused, workSurfaceActive);
   const { handleRetryHost, handleManageHost, handleDismissMissingWorkspace } =
     useWorkspaceRouteActions(normalizedServerId);
@@ -2230,6 +2298,12 @@ function WorkspaceScreenContent({
   ]);
 
   const activeTabId = focusedPaneTabState.activeTabId;
+  const canvasPreviousTab = useRef(activeTabId);
+  useEffect(() => {
+    if (canvasPreviousTab.current !== activeTabId && sessionsSurface.active) showWorkspace();
+    canvasPreviousTab.current = activeTabId;
+  }, [activeTabId, sessionsSurface.active, showWorkspace]);
+
   const activeTab = focusedPaneTabState.activeTab;
 
   const tabs = useMemo<WorkspaceTabDescriptor[]>(
@@ -3828,6 +3902,54 @@ function WorkspaceScreenContent({
     [buildPaneContentModel],
   );
 
+  const buildCanvasConversation = useCallback(
+    (agentId: string, onClose: () => void) => {
+      const model = buildPaneContentModel({ tab: canvasSessionTab(agentId) });
+      const context = model.paneContextValue;
+      return {
+        ...model,
+        paneContextValue: {
+          ...context,
+          closeCurrentTab: onClose,
+          retargetCurrentTab: (target: Parameters<typeof context.openTab>[0]) => {
+            context.openTab(target);
+            showWorkspace();
+          },
+          openTargetToSide: context.openTargetToSide
+            ? (target: Parameters<typeof context.openTab>[0]) => {
+                context.openTargetToSide?.(target);
+                showWorkspace();
+              }
+            : undefined,
+          openTab: (...args: Parameters<typeof context.openTab>) => {
+            context.openTab(...args);
+            showWorkspace();
+          },
+          openPreferredTarget: (...args: Parameters<typeof context.openPreferredTarget>) => {
+            context.openPreferredTarget(...args);
+            showWorkspace();
+          },
+          openFileInWorkspace: (...args: Parameters<typeof context.openFileInWorkspace>) => {
+            context.openFileInWorkspace(...args);
+            showWorkspace();
+          },
+        },
+      };
+    },
+    [buildPaneContentModel, showWorkspace],
+  );
+  const renameCanvasSession = useCallback(
+    (agentId: string) => handleRenameTab(canvasSessionTab(agentId)),
+    [handleRenameTab],
+  );
+  const openCanvasSession = useCallback(
+    (agentId: string) => {
+      handleImportedAgent(agentId);
+      showWorkspace();
+    },
+    [handleImportedAgent, showWorkspace],
+  );
+
   const desktopTabRowItems = useMemo<WorkspaceDesktopTabRowItem[]>(
     () =>
       tabs.map((tab) => ({
@@ -3935,6 +4057,11 @@ function WorkspaceScreenContent({
           hidden={isMobile}
         />
         <WorkspaceWorksButton onPress={handleOpenWorks} visible={showWorks} hidden={isMobile} />
+        <WorkspaceSessionCanvasButton
+          onPress={handleOpenSessionCanvas}
+          visible={showSessionCanvas}
+          hidden={isMobile}
+        />
         {!isMobile && workspaceDirectory ? (
           <WorkspaceOpenInEditorButton
             serverId={normalizedServerId}
@@ -3982,12 +4109,14 @@ function WorkspaceScreenContent({
       handleOpenUrlInBrowserTab,
       handleOpenExperiments,
       handleOpenWorks,
+      handleOpenSessionCanvas,
       handleToggleExplorerSidebar,
       explorerSidebarToggleLabel,
       explorerSidebarToggleAccessibilityState,
       explorerToggleOwner,
       showExperiments,
       showWorks,
+      showSessionCanvas,
       t,
     ],
   );
@@ -4064,6 +4193,7 @@ function WorkspaceScreenContent({
                 workspaceScripts={workspaceScripts}
                 liveTerminalIds={liveTerminalIds}
                 showWorks={showWorks}
+                showSessionCanvas={showSessionCanvas}
                 showExperiments={showExperiments}
                 showWorkspaceSetup={showWorkspaceSetup}
                 showCreateBrowserTab={showCreateBrowserTab}
@@ -4083,6 +4213,7 @@ function WorkspaceScreenContent({
                 onViewScriptTerminal={handleViewScriptTerminal}
                 onOpenUrlInBrowserTab={handleOpenUrlInBrowserTab}
                 onOpenWorks={handleOpenWorks}
+                onOpenSessionCanvas={handleOpenSessionCanvas}
                 onOpenExperiments={handleOpenExperiments}
               />
             </>
@@ -4104,6 +4235,7 @@ function WorkspaceScreenContent({
       handleOpenUrlInBrowserTab,
       handleOpenExperiments,
       handleOpenWorks,
+      handleOpenSessionCanvas,
       handleScriptTerminalStarted,
       handleViewScriptTerminal,
       headerRight,
@@ -4116,6 +4248,7 @@ function WorkspaceScreenContent({
       showCreateBrowserTab,
       showExperiments,
       showWorks,
+      showSessionCanvas,
       showScreenHeader,
       showWorkspaceSetup,
       workspaceDirectory,
@@ -4295,6 +4428,17 @@ function WorkspaceScreenContent({
         projectId={experimentProjectId}
         header={renderWorkspaceScreenHeader()}
         routeFocused={isRouteFocused}
+      />
+      <WorkspaceSessionCanvasSurface
+        mounted={sessionsSurface.hasOpened}
+        active={sessionsSurface.active}
+        routeFocused={isRouteFocused}
+        header={renderWorkspaceScreenHeader()}
+        serverId={normalizedServerId}
+        workspaceId={normalizedWorkspaceId}
+        buildConversation={buildCanvasConversation}
+        onRename={renameCanvasSession}
+        onOpen={openCanvasSession}
       />
     </View>
   );

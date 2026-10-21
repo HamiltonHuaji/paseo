@@ -78,6 +78,23 @@ Permission requests are notification checkpoints, not the end of that subscripti
 The permission notification includes the normalized request plus the child and request IDs, so the caller can inspect it and respond without fetching agent status.
 A watched child that closes before its finish event also notifies the caller so delegated work cannot disappear silently during archive or workspace teardown.
 
+### Conversation forks and rewind
+
+The workspace Sessions canvas follows conversation forks using stable Paseo agent IDs. Fork
+relationships do not confer ownership or cascade archive. Rewind keeps the same Paseo agent even
+when the provider implements it by forking into a new native session. Retain previous native IDs
+when replacing the persistence handle so descendants still resolve to the same source agent.
+
+Older Codex records can recover this distinction from rollout ancestry and creation receipts.
+When receipts are absent, recovery uses the native ancestry's creation times to find the session
+linked at Paseo creation. Duplicate imports leave ownership ambiguous; do not pick an arbitrary
+parent. Recovery reads local provider records without resuming sessions. Native files that are
+unavailable cannot supply missing lineage or reply timestamps.
+
+Canvas arrangement uses ordinal time with compact gaps; elapsed idle time does not become blank
+space. Activity changes update cards without moving them until the user arranges again. The
+detail hosts the existing conversation pane, and closing that detail leaves the session open.
+
 ## Provider-managed child agents
 
 Some providers can create their own child sessions inside one provider runtime. OMP's task tool reports these with `child_session` events; `AgentManager` imports the live provider handle, stamps `paseo.parent-agent-id`, and surfaces the result as a normal subagent in the parent's subagents track.

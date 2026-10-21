@@ -1,4 +1,6 @@
+import { sessionCanvas } from "./session-canvas";
 export const en = {
+  sessionCanvas: sessionCanvas["en"],
   heartbeats: heartbeatSettings["en"],
   paneFind: {
     searchFailed: "Could not search this chat. Check the host connection and retry.",

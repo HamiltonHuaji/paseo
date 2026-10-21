@@ -56,6 +56,7 @@ import { z } from "zod";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 import { composeSystemPromptParts } from "../system-prompt.js";
 import { curateAgentActivity } from "../activity-curator.js";
+import { readCodexSessionLineage } from "./codex/session-lineage.js";
 import { CodexAsyncQuestions, codexAsyncQuestionToTimeline } from "./codex/async-questions.js";
 import {
   mapCodexToolCallEnvelope,
@@ -7109,6 +7110,14 @@ export class CodexAppServerAgentSession implements AgentSession {
 }
 
 export class CodexAppServerAgentClient implements AgentClient {
+  readSessionLineage(activitySessionIds?: readonly string[]) {
+    const env = createProviderEnv({ runtimeSettings: this.runtimeSettings });
+    return readCodexSessionLineage({
+      codexHome: env.CODEX_HOME ?? path.join(env.HOME ?? os.homedir(), ".codex"),
+      activitySessionIds: activitySessionIds,
+    });
+  }
+
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
   private goalsEnabledPromise: Promise<boolean> | null = null;

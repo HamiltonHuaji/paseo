@@ -8540,6 +8540,7 @@ export class Session {
         agentTitle: agentPayload.title,
         cwd: snapshot.cwd,
       });
+      forkContext.attachment.sourceAgentId = msg.agentId;
 
       this.emit({
         type: "agent.fork_context.response",

@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ptBR: TranslationResources = {
+  sessionCanvas: sessionCanvas["pt-BR"],
   heartbeats: heartbeatSettings["pt-BR"],
   paneFind: {
     searchFailed:

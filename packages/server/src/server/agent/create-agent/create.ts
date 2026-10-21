@@ -297,6 +297,13 @@ async function resolveSessionCreateAgent(
   return {
     config: sessionConfig,
     createOptions: {
+      contextForkSourceAgentId: input.attachments?.flatMap((attachment) =>
+        attachment.type === "text" &&
+        attachment.contextKind === "chat_history" &&
+        attachment.sourceAgentId
+          ? [attachment.sourceAgentId]
+          : [],
+      )[0],
       labels: input.labels,
       initialPrompt: trimmedPrompt,
       env: input.env,

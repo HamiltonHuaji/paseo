@@ -1,3 +1,9 @@
+import {
+  arrangeSessions,
+  sessionNodes,
+  SESSION_CARD_SIZE,
+  type CanvasSession,
+} from "@/screens/session-canvas/model";
 import { describe, expect, it } from "vitest";
 import {
   arrangeLineageTrees,
@@ -35,5 +41,52 @@ describe("shared board geometry", () => {
     expect(arrangeLineageTrees(cyclic, resolveBoardPlacements(cyclic, new Map(), []))).toHaveLength(
       2,
     );
+  });
+});
+
+describe("session chronology", () => {
+  const sessions = Array.from(
+    { length: 12 },
+    (_, index): CanvasSession => ({
+      id: `session-${index}`,
+      title: `Session ${index}`,
+      provider: "codex",
+      status: "idle",
+      createdAt: new Date(Date.UTC(2026, 9, index + 1)),
+      lastUserMessageAt: new Date(Date.UTC(2026, 10, 12 - index)),
+      lastAssistantMessageAt: index === 0 ? null : new Date(Date.UTC(2026, 11, index + 1)),
+      forkedFrom:
+        index === 1 || index === 3
+          ? { agentId: "session-0", forkedAt: new Date(Date.UTC(2026, 9, index + 1)).toISOString() }
+          : undefined,
+    }),
+  );
+  it("keeps time strictly vertical with a compact gap, independently of branches and canvas width", () => {
+    const layout = arrangeSessions(sessions, "created", "oldest");
+    for (let i = 1; i < layout.length; i++) {
+      expect(layout[i].row! - layout[i - 1].row!).toBe(SESSION_CARD_SIZE.height + 0.5);
+    }
+    expect(layout[1].column).toBeGreaterThan(layout[0].column!);
+    expect(layout[2].column).toBe(layout[0].column);
+    expect(sessionNodes(sessions, "Untitled")[1].basedOn).toBe("session-0");
+  });
+  it("sorts each event separately and places missing events last in both directions", () => {
+    expect(arrangeSessions(sessions, "input", "oldest")[0].id).toBe("session-11");
+    expect(arrangeSessions(sessions, "created", "newest")[0].id).toBe("session-11");
+    expect(
+      arrangeSessions(sessions, "forked", "oldest")
+        .slice(0, 2)
+        .map((p) => p.id),
+    ).toEqual(["session-1", "session-3"]);
+    for (const order of ["oldest", "newest"] as const)
+      expect(arrangeSessions(sessions, "reply", order).at(-1)?.id).toBe("session-0");
+  });
+  it("shows an out-of-workspace source without inventing a parent node", () => {
+    const orphan: CanvasSession = {
+      ...sessions[0],
+      forkedFrom: { agentId: "elsewhere", forkedAt: sessions[0].createdAt.toISOString() },
+    };
+    expect(sessionNodes([orphan], "Untitled")[0].basedOn).toBe("elsewhere");
+    expect(arrangeSessions([orphan], "created", "oldest")[0].column).toBe(1);
   });
 });
