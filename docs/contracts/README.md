@@ -12,6 +12,7 @@
 | [Paseo Works](works.md)                 | 工作记录、成果、进度、指标、Canvas、agent 工作方式及 v1 共存 |
 | [Viewer](viewers.md)                    | 成果入口、静态资源、远程访问、Android 后台与目标规格边界     |
 | [Skills](skills.md)                     | 用户目录所有权、仓库同步、客户端凭证与多设备订阅             |
+| [Canvas](canvas.md)                     | 关系可读性、空间利用、布局连续性和密集图验收                 |
 | [客户端](clients.md)                    | 文件、Markdown、输入、tabs 与 heartbeat；VS Code 已退役      |
 | [发行](distribution.md)                 | fork 身份、更新、共存、版本漂移与不可变产物                  |
 | [升级验收记录](baseline-review.md)      | 每次 bump 的记录格式、初始证据与已知缺口                     |

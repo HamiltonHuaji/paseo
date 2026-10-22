@@ -9,7 +9,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { Grip, Maximize2 } from "lucide-react-native";
-import Svg, { Polygon, Polyline } from "react-native-svg";
+import Svg, { Path, Polygon } from "react-native-svg";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { isWeb } from "@/constants/platform";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
@@ -18,6 +18,7 @@ import {
   BOARD_CANVAS_GRID_SIZE,
   canvasDimensions,
   orthogonalRoute,
+  roundedRoutePath,
   resolveBoardPlacements,
   type ResolvedPlacement,
   type BoardNode,
@@ -88,6 +89,10 @@ export function BoardCanvas({
         ),
       ),
     [localPlacements, resolved],
+  );
+  const visibleExperiments = useMemo(
+    () => (visibleIds ? experiments.filter((node) => visibleIds.has(node.id)) : experiments),
+    [experiments, visibleIds],
   );
   const worldDimensions = useMemo(() => canvasDimensions(placements), [placements]);
   const updateCamera = useCallback((next: CanvasCamera) => {
@@ -195,9 +200,7 @@ export function BoardCanvas({
       />
       <View pointerEvents="box-none" style={worldStyle}>
         <ThemedLineageOverlay
-          experiments={
-            visibleIds ? experiments.filter((node) => visibleIds.has(node.id)) : experiments
-          }
+          experiments={visibleExperiments}
           placements={placements}
           width={worldDimensions.width}
           height={worldDimensions.height}
@@ -433,13 +436,17 @@ function LineageOverlay({
   height,
   lineColor,
 }: LineageOverlayProps) {
-  const routes = experiments.flatMap((experiment) => {
-    if (!experiment.basedOn) return [];
-    const source = placements.get(experiment.basedOn);
-    const target = placements.get(experiment.id);
-    if (!source || !target) return [];
-    return [{ experiment: experiment.id, route: orthogonalRoute(source, target) }];
-  });
+  const routes = useMemo(() => {
+    const visibleIds = new Set(experiments.map((node) => node.id));
+    const obstacles = [...placements.values()].filter((card) => visibleIds.has(card.id));
+    return experiments.flatMap((experiment) => {
+      if (!experiment.basedOn) return [];
+      const source = placements.get(experiment.basedOn);
+      const target = placements.get(experiment.id);
+      if (!source || !target || !visibleIds.has(source.id)) return [];
+      return [{ experiment: experiment.id, route: orthogonalRoute(source, target, obstacles) }];
+    });
+  }, [experiments, placements]);
   return (
     <Svg
       width={width}
@@ -450,13 +457,15 @@ function LineageOverlay({
       importantForAccessibility="no-hide-descendants"
     >
       {routes.map(({ experiment, route }) => (
-        <Polyline
+        <Path
           key={experiment}
           testID={`canvas-edge-${experiment}`}
-          points={route.points.map((point) => `${point.x},${point.y}`).join(" ")}
+          d={roundedRoutePath(route.points)}
           fill="none"
           stroke={lineColor}
           strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
       ))}
       {routes.map(({ experiment, route }) => (

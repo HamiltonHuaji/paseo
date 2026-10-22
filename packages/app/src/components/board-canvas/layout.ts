@@ -22,11 +22,11 @@ export const BOARD_CANVAS_MIN_ROWS = 30;
 const DEFAULT_WIDTH = 12;
 const DEFAULT_HEIGHT = 7;
 const MIN_COLUMNS = 58;
-const LINEAGE_INDENT = 3;
-const TREE_ROW_COLUMNS = 58;
 const TREE_COLUMN_GAP = 3;
-const TREE_ROW_GAP = 3;
+const TREE_ROW_GAP = 2;
 const TREE_BLOCK_GAP = 4;
+
+export { orthogonalRoute, roundedRoutePath } from "./routing";
 
 export type ResolvedPlacement = Omit<BoardPlacement, "column" | "row" | "width" | "height"> & {
   column: number;
@@ -43,28 +43,43 @@ export function buildAutomaticLayout(
   const storedByExperiment = new Map(
     storedPlacements.map((placement) => [placement.id, placement]),
   );
-  const depthById = lineageDepths(experiments);
-  const goalGroups = groupExperimentsByGoal(experiments);
+  const initial = new Map(
+    experiments.map((node, index) => {
+      const size = automaticCardSize(node, sizes.get(node.id) ?? null);
+      return [
+        node.id,
+        resolvePlacement(storedByExperiment.get(node.id), {
+          ...fallbackPlacement(node.id, index),
+          ...size,
+        }),
+      ];
+    }),
+  );
+  const candidates = arrangeLineageTrees(experiments, initial);
+  const occupied = candidates.flatMap((candidate) => {
+    const stored = storedByExperiment.get(candidate.id);
+    return stored?.row == null ? [] : [resolvePlacement(stored, candidate)];
+  });
+  const nodes = new Map(experiments.map((node) => [node.id, node]));
   const result = new Map<string, ResolvedPlacement>();
-  const occupied = reservedPlacements(experiments, sizes, storedByExperiment, depthById);
-  let groupRow = 1;
-  for (const group of goalGroups.values()) {
-    let row = groupRow;
-    let groupBottom = 0;
-    for (const experiment of group) {
-      const stored = storedByExperiment.get(experiment.id);
-      const automatic = automaticPlacement(experiment, sizes, depthById, row);
-      automatic.column = stored?.column ?? automatic.column;
-      if (stored?.row === null || stored?.row === undefined) {
-        automatic.row = firstAvailableRow(resolvePlacement(stored, automatic), occupied);
-      }
-      result.set(experiment.id, automatic);
-      const resolved = resolvePlacement(stored, automatic);
-      if (stored?.row === null || stored?.row === undefined) occupied.push(resolved);
-      row = resolved.row + resolved.height + 1;
-      groupBottom = Math.max(groupBottom, resolved.row + resolved.height);
+  for (const candidate of candidates) {
+    const stored = storedByExperiment.get(candidate.id);
+    const automatic = { ...candidate };
+    const parentId = nodes.get(candidate.id)?.basedOn;
+    const parent =
+      parentId && storedByExperiment.get(parentId)?.row != null
+        ? occupied.find((card) => card.id === parentId)
+        : undefined;
+    if (stored?.row == null && parent) {
+      automatic.column = parent.column + parent.width + TREE_COLUMN_GAP;
+      automatic.row = parent.row;
     }
-    groupRow = groupBottom + 2;
+    automatic.column = stored?.column ?? automatic.column;
+    if (stored?.row == null) {
+      automatic.row = firstAvailableRow(resolvePlacement(stored, automatic), occupied);
+      occupied.push(resolvePlacement(stored, automatic));
+    }
+    result.set(candidate.id, automatic);
   }
   return result;
 }
@@ -86,147 +101,166 @@ export function resolveBoardPlacements(
   );
 }
 
+// A forest has one source per node. Cut only the layout traversal of malformed cycles;
+// the actual relationship remains visible to the edge renderer.
 export function arrangeLineageTrees(
-  experiments: BoardNode[],
+  nodes: BoardNode[],
   placements: Map<string, ResolvedPlacement>,
 ): ResolvedPlacement[] {
-  const arranged: ResolvedPlacement[] = [];
-  let row = 1;
-  for (const tree of lineageTrees(experiments)) {
-    const rows = packTreeRows(tree, placements);
-    rows.forEach((cards, rowIndex) => {
-      const reverse = rowIndex % 2 === 1;
-      let rowRight = TREE_ROW_COLUMNS;
-      for (const card of cards) rowRight = Math.max(rowRight, card.width + 1);
-      let column = reverse ? rowRight : 1;
-      let rowHeight = 0;
-      for (const card of cards) {
-        if (reverse) column -= card.width;
-        arranged.push({ ...card, column, row });
-        if (reverse) column -= TREE_COLUMN_GAP;
-        else column += card.width + TREE_COLUMN_GAP;
-        rowHeight = Math.max(rowHeight, card.height);
+  const chronological = [...nodes].sort(compareExperiments);
+  const byId = new Map(chronological.map((node) => [node.id, node]));
+  const children = new Map<string, BoardNode[]>();
+  for (const node of chronological) {
+    if (!node.basedOn || !byId.has(node.basedOn)) continue;
+    const siblings = children.get(node.basedOn) ?? [];
+    siblings.push(node);
+    children.set(node.basedOn, siblings);
+  }
+  const roots = chronological.filter((node) => !node.basedOn || !byId.has(node.basedOn));
+  const visited = new Set<string>();
+  interface Branch {
+    card: ResolvedPlacement;
+    children: Branch[];
+    height: number;
+    depth: number;
+  }
+  const trees: {
+    cards: ResolvedPlacement[];
+    width: number;
+    height: number;
+    goal: string | null;
+  }[] = [];
+  for (const root of [...roots, ...chronological]) {
+    if (visited.has(root.id)) continue;
+    const widths: number[] = [];
+    const visit = (node: BoardNode, depth: number): Branch => {
+      visited.add(node.id);
+      const card = placements.get(node.id);
+      if (!card) throw new Error(`Missing canvas placement for ${node.id}`);
+      widths[depth] = Math.max(widths[depth] ?? 0, card.width);
+      const branches: Branch[] = [];
+      for (const child of children.get(node.id) ?? []) {
+        if (!visited.has(child.id)) branches.push(visit(child, depth + 1));
       }
-      row += rowHeight + TREE_ROW_GAP;
+      const childrenHeight =
+        branches.reduce((sum, branch) => sum + branch.height, 0) +
+        Math.max(0, branches.length - 1) * TREE_ROW_GAP;
+      return { card, children: branches, height: Math.max(card.height, childrenHeight), depth };
+    };
+    const tree = visit(root, 0);
+    const columns: number[] = [];
+    widths.forEach((width, depth) => {
+      columns[depth] = depth === 0 ? 0 : columns[depth - 1]! + widths[depth - 1]! + TREE_COLUMN_GAP;
     });
-    row += TREE_BLOCK_GAP;
+    const cards: ResolvedPlacement[] = [];
+    const place = (branch: Branch, top: number) => {
+      cards.push({
+        ...branch.card,
+        column: columns[branch.depth]!,
+        row: top + Math.floor((branch.height - branch.card.height) / 2),
+      });
+      let childTop =
+        top +
+        Math.floor(
+          (branch.height -
+            branch.children.reduce((sum, child) => sum + child.height, 0) -
+            Math.max(0, branch.children.length - 1) * TREE_ROW_GAP) /
+            2,
+        );
+      for (const child of branch.children) {
+        place(child, childTop);
+        childTop += child.height + TREE_ROW_GAP;
+      }
+    };
+    place(tree, 0);
+    const linear =
+      cards.length >= 4 && cards.every((card) => (children.get(card.id)?.length ?? 0) <= 1);
+    if (linear) {
+      const compact = compactChain(cards);
+      trees.push({
+        cards: compact,
+        width: Math.max(...compact.map((card) => card.column + card.width)),
+        height: Math.max(...compact.map((card) => card.row + card.height)),
+        goal: root.goal,
+      });
+      continue;
+    }
+    trees.push({
+      cards,
+      width: columns.at(-1)! + widths.at(-1)!,
+      height: tree.height,
+      goal: root.goal,
+    });
+  }
+  // Pack connected components together. A linear history may fold, but branches
+  // retain separate bands so a wrap never implies a different parent.
+  const targetWidth = Math.max(
+    MIN_COLUMNS,
+    Math.ceil(
+      Math.sqrt(
+        trees.reduce(
+          (area, tree) => area + (tree.width + TREE_BLOCK_GAP) * (tree.height + TREE_BLOCK_GAP),
+          0,
+        ),
+      ) * 1.35,
+    ),
+  );
+  const arranged: ResolvedPlacement[] = [];
+  const groups = new Map<string | null, typeof trees>();
+  for (const tree of trees) groups.set(tree.goal, [...(groups.get(tree.goal) ?? []), tree]);
+  let row = 1;
+  for (const group of groups.values()) {
+    let column = 1;
+    let shelfHeight = 0;
+    for (const tree of group) {
+      if (column > 1 && column + tree.width > targetWidth) {
+        row += shelfHeight + TREE_BLOCK_GAP;
+        column = 1;
+        shelfHeight = 0;
+      }
+      for (const card of tree.cards)
+        arranged.push({ ...card, column: card.column + column, row: card.row + row });
+      column += tree.width + TREE_BLOCK_GAP;
+      shelfHeight = Math.max(shelfHeight, tree.height);
+    }
+    row += shelfHeight + TREE_BLOCK_GAP;
   }
   return arranged;
 }
 
-function lineageTrees(experiments: BoardNode[]): BoardNode[][] {
-  const chronological = [...experiments].sort(compareExperiments);
-  const byId = new Map(chronological.map((experiment) => [experiment.id, experiment]));
-  const children = new Map<string, BoardNode[]>();
-  for (const experiment of chronological) {
-    if (!experiment.basedOn || !byId.has(experiment.basedOn)) continue;
-    const siblings = children.get(experiment.basedOn) ?? [];
-    siblings.push(experiment);
-    children.set(experiment.basedOn, siblings);
-  }
-  const visited = new Set<string>();
-  const trees: BoardNode[][] = [];
-  const roots = chronological.filter(
-    (experiment) => !experiment.basedOn || !byId.has(experiment.basedOn),
-  );
-  for (const root of [...roots, ...chronological]) {
-    if (visited.has(root.id)) continue;
-    const tree: BoardNode[] = [];
-    const pending = [root];
-    while (pending.length > 0) {
-      const experiment = pending.pop();
-      if (!experiment || visited.has(experiment.id)) continue;
-      visited.add(experiment.id);
-      tree.push(experiment);
-      pending.push(...(children.get(experiment.id) ?? []).toReversed());
-    }
-    trees.push(tree);
-  }
-  return trees;
-}
-
-function packTreeRows(
-  tree: BoardNode[],
-  placements: Map<string, ResolvedPlacement>,
-): ResolvedPlacement[][] {
+function compactChain(chain: ResolvedPlacement[]): ResolvedPlacement[] {
   const rows: ResolvedPlacement[][] = [];
-  let cards: ResolvedPlacement[] = [];
-  let rowWidth = 0;
-  for (const experiment of tree) {
-    const card = placements.get(experiment.id);
-    if (!card) throw new Error(`Missing canvas placement for ${experiment.id}`);
-    const nextWidth = rowWidth + (cards.length > 0 ? TREE_COLUMN_GAP : 0) + card.width;
-    if (cards.length > 0 && nextWidth + 1 > TREE_ROW_COLUMNS) {
-      rows.push(cards);
-      cards = [];
-      rowWidth = 0;
+  let row: ResolvedPlacement[] = [];
+  let width = 0;
+  for (const card of chain) {
+    if (row.length && width + TREE_COLUMN_GAP + card.width > MIN_COLUMNS) {
+      rows.push(row);
+      row = [];
+      width = 0;
     }
-    rowWidth += (cards.length > 0 ? TREE_COLUMN_GAP : 0) + card.width;
-    cards.push(card);
+    width += (row.length ? TREE_COLUMN_GAP : 0) + card.width;
+    row.push(card);
   }
-  if (cards.length > 0) rows.push(cards);
-  return rows;
-}
-
-function lineageDepths(experiments: BoardNode[]): Map<string, number> {
-  const experimentById = new Map(experiments.map((experiment) => [experiment.id, experiment]));
-  const depthById = new Map<string, number>();
-  const resolveDepth = (experiment: BoardNode, visiting: Set<string>): number => {
-    const cached = depthById.get(experiment.id);
-    if (cached !== undefined) return cached;
-    if (!experiment.basedOn || visiting.has(experiment.id)) return 0;
-    const parent = experimentById.get(experiment.basedOn);
-    if (!parent) return 0;
-    const nextVisiting = new Set(visiting);
-    nextVisiting.add(experiment.id);
-    const depth = resolveDepth(parent, nextVisiting) + 1;
-    depthById.set(experiment.id, depth);
-    return depth;
-  };
-  for (const experiment of experiments) resolveDepth(experiment, new Set());
-  return depthById;
-}
-
-function groupExperimentsByGoal(experiments: BoardNode[]): Map<string, BoardNode[]> {
-  const goalGroups = new Map<string, BoardNode[]>();
-  for (const experiment of [...experiments].sort(compareExperiments)) {
-    const key = experiment.goal ?? "Ungrouped";
-    goalGroups.set(key, [...(goalGroups.get(key) ?? []), experiment]);
-  }
-  return goalGroups;
-}
-
-function reservedPlacements(
-  experiments: BoardNode[],
-  sizes: Map<string, BoardSize>,
-  storedByExperiment: Map<string, BoardPlacement>,
-  depthById: Map<string, number>,
-): ResolvedPlacement[] {
-  const occupied: ResolvedPlacement[] = [];
-  for (const experiment of experiments) {
-    const stored = storedByExperiment.get(experiment.id);
-    if (stored?.row === null || stored?.row === undefined) continue;
-    occupied.push(
-      resolvePlacement(stored, automaticPlacement(experiment, sizes, depthById, stored.row)),
-    );
-  }
-  return occupied;
-}
-
-function automaticPlacement(
-  experiment: BoardNode,
-  sizes: Map<string, BoardSize>,
-  depthById: Map<string, number>,
-  row: number,
-): ResolvedPlacement {
-  const size = automaticCardSize(experiment, sizes.get(experiment.id) ?? null);
-  return {
-    id: experiment.id,
-    column: 1 + (depthById.get(experiment.id) ?? 0) * LINEAGE_INDENT,
-    row,
-    width: size.width,
-    height: size.height,
-  };
+  rows.push(row);
+  const widest = Math.max(
+    ...rows.map(
+      (cards) =>
+        cards.reduce((sum, card) => sum + card.width, 0) + (cards.length - 1) * TREE_COLUMN_GAP,
+    ),
+  );
+  const result: ResolvedPlacement[] = [];
+  let top = 0;
+  rows.forEach((cards, index) => {
+    const reverse = index % 2 === 1;
+    let column = reverse ? widest : 0;
+    for (const card of cards) {
+      if (reverse) column -= card.width;
+      result.push({ ...card, column, row: top });
+      column += reverse ? -TREE_COLUMN_GAP : card.width + TREE_COLUMN_GAP;
+    }
+    top += Math.max(...cards.map((card) => card.height)) + TREE_ROW_GAP;
+  });
+  return result;
 }
 
 function firstAvailableRow(card: ResolvedPlacement, occupied: ResolvedPlacement[]): number {
@@ -280,69 +314,10 @@ export function canvasDimensions(placements: Map<string, ResolvedPlacement>) {
   };
 }
 
-export function orthogonalRoute(source: ResolvedPlacement, target: ResolvedPlacement) {
-  const sourceBox = placementBox(source);
-  const targetBox = placementBox(target);
-  if (sourceBox.right <= targetBox.left) {
-    const start = { x: sourceBox.right, y: sourceBox.centerY };
-    const end = { x: targetBox.left, y: targetBox.centerY };
-    const middle = snap((start.x + end.x) / 2);
-    return {
-      points: [start, { x: middle, y: start.y }, { x: middle, y: end.y }, end],
-      end,
-      direction: "right" as const,
-    };
-  }
-  if (targetBox.right <= sourceBox.left) {
-    const start = { x: sourceBox.left, y: sourceBox.centerY };
-    const end = { x: targetBox.right, y: targetBox.centerY };
-    const middle = snap((start.x + end.x) / 2);
-    return {
-      points: [start, { x: middle, y: start.y }, { x: middle, y: end.y }, end],
-      end,
-      direction: "left" as const,
-    };
-  }
-  const targetIsBelow = targetBox.centerY >= sourceBox.centerY;
-  const start = {
-    x: sourceBox.centerX,
-    y: targetIsBelow ? sourceBox.bottom : sourceBox.top,
-  };
-  const end = {
-    x: targetBox.centerX,
-    y: targetIsBelow ? targetBox.top : targetBox.bottom,
-  };
-  const middle = snap((start.y + end.y) / 2);
-  return {
-    points: [start, { x: start.x, y: middle }, { x: end.x, y: middle }, end],
-    end,
-    direction: targetIsBelow ? ("down" as const) : ("up" as const),
-  };
-}
-
 function automaticCardSize(node: BoardNode, size: BoardSize | null): BoardSize {
   return size ?? { width: node.title.length > 48 ? 14 : DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
 }
 
 function compareExperiments(left: BoardNode, right: BoardNode): number {
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
-}
-
-function placementBox(placement: ResolvedPlacement) {
-  const left = placement.column * BOARD_CANVAS_GRID_SIZE;
-  const top = placement.row * BOARD_CANVAS_GRID_SIZE;
-  const right = (placement.column + placement.width) * BOARD_CANVAS_GRID_SIZE;
-  const bottom = (placement.row + placement.height) * BOARD_CANVAS_GRID_SIZE;
-  return {
-    left,
-    top,
-    right,
-    bottom,
-    centerX: snap((left + right) / 2),
-    centerY: snap((top + bottom) / 2),
-  };
-}
-
-function snap(value: number): number {
-  return Math.round(value / BOARD_CANVAS_GRID_SIZE) * BOARD_CANVAS_GRID_SIZE;
 }

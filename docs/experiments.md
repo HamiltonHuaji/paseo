@@ -657,21 +657,15 @@ When a progress plan has additional units, show a unit dropdown on that Attempt.
 changes the axis, tracks, segments, total, and projected current marker together. Units are local to
 the Attempt and do not come from a global catalog.
 
-The Canvas view places Experiment cards on an integer grid. Nullable stored `column`, `row`,
-`width`, and `height` values are user overrides. The client supplies missing values with a
-deterministic default layout: Goals form vertical blocks, cards within a Goal run oldest-to-newest
-from top to bottom, and lineage depth adds a small horizontal indent. New cards use the actual
-positions and sizes of existing cards, including manual overrides, instead of accumulating space
-for those cards' old automatic positions. Dragging and resizing move
-continuously during the gesture, then snap to the grid and write concrete values when the gesture
-ends. Moving a card does not change the Experiment's `updated_at`.
+Canvas coordinates and dimensions are user view state. Nullable stored values ask the client for
+an initial arrangement; concrete values preserve the user's choices. Dragging and resizing remain
+continuous during the gesture and commit once on release. Moving a card does not change the
+Experiment's updated timestamp.
 
-The Canvas toolbar can arrange the whole board in one batch. It groups Experiments by `basedOn`
-trees, orders roots and siblings by creation time, walks each tree depth-first, and wraps its cards
-into alternating left-to-right and right-to-left rows. Roots start at the left; trees stack from top
-to bottom with space between them. Arrangement changes positions while preserving card sizes and
-offers Undo until the next manual card move. This action overwrites manual positions; the ordinary
-default layout still leaves them alone.
+The Canvas toolbar can arrange the whole board in one batch while preserving card sizes and offers
+Undo until the next manual card move. The ordinary data refresh leaves manual positions alone.
+Shared layout and routing quality is defined by the [Canvas contract](contracts/canvas.md).
+Do not preserve an old automatic arrangement solely because an earlier implementation used it.
 
 The Canvas is a fixed clipped viewport over an unbounded world coordinate plane. Keep a local camera
 translation separate from persisted card positions. The wheel translates the camera and dragging
@@ -680,9 +674,8 @@ content edge. Selecting a card changes the detail surface without resizing the C
 Card drag and resize gestures keep pointer ownership until release, including when the pointer
 outruns the handle or card bounds.
 
-Render lineage as grid-aligned orthogonal polylines. Routing follows current card edges and uses no
-automatic graph layout or obstacle-avoidance engine. The user can move a card when an edge crosses
-content.
+Relationships follow current card boundaries. Obstacle handling and dense graph acceptance belong
+to the [Canvas contract](contracts/canvas.md).
 
 The client requests progress only for visible Attempts that have a source. It stops automatic
 requests after an ended observation and keeps a manual refresh action that sends the same request.

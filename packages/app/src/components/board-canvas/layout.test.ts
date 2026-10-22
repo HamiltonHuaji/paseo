@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
   arrangeLineageTrees,
   resolveBoardPlacements,
+  orthogonalRoute,
+  type ResolvedPlacement,
   type BoardNode,
   type BoardPlacement,
 } from "./layout";
@@ -23,7 +25,8 @@ describe("shared board geometry", () => {
     const placements = resolveBoardPlacements(nodes, new Map(), stored);
     expect(placements.get("a")).toEqual(stored[0]);
     const b = placements.get("b")!;
-    expect(b.row).toBeGreaterThanOrEqual(17);
+    expect(b.column).toBeGreaterThanOrEqual(24);
+    expect(b.row).toBe(5);
     expect(placements.get("c")!.row).toBeGreaterThan(b.row + b.height);
     const more = resolveBoardPlacements(
       [...nodes, { ...nodes[1]!, id: "d", createdAt: "2026-01-04" }],
@@ -41,6 +44,106 @@ describe("shared board geometry", () => {
     expect(arrangeLineageTrees(cyclic, resolveBoardPlacements(cyclic, new Map(), []))).toHaveLength(
       2,
     );
+  });
+  it("keeps a branching tree readable, forward and deterministic with mixed card sizes", () => {
+    const family = [
+      nodes[0]!,
+      { ...nodes[1]!, id: "first" },
+      { ...nodes[1]!, id: "second", createdAt: "2026-01-03" },
+      { ...nodes[1]!, id: "grandchild", basedOn: "first", createdAt: "2026-01-04" },
+    ];
+    const sizes = new Map([["first", { width: 20, height: 10 }]]);
+    const positions = resolveBoardPlacements(family, sizes, []);
+    const arranged = arrangeLineageTrees(family, positions);
+    expect(arrangeLineageTrees(family.toReversed(), positions)).toEqual(arranged);
+    const byId = new Map(arranged.map((card) => [card.id, card]));
+    expect(byId.get("first")!.column).toBe(byId.get("second")!.column);
+    expect(byId.get("first")!.row + 10).toBeLessThan(byId.get("second")!.row);
+    for (const node of family.slice(1)) {
+      const card = byId.get(node.id)!;
+      const parent = byId.get(node.basedOn!)!;
+      expect(card.column).toBeGreaterThan(parent.column + parent.width);
+    }
+    const root = byId.get("a")!;
+    expect(root.row).toBeGreaterThan(byId.get("first")!.row);
+    expect(root.row).toBeLessThan(byId.get("second")!.row);
+    for (const card of arranged) {
+      expect(card.width).toBe(positions.get(card.id)!.width);
+      expect(card.height).toBe(positions.get(card.id)!.height);
+    }
+  });
+
+  it("packs independent roots across a shelf instead of creating a tall single column", () => {
+    const independent = Array.from({ length: 9 }, (_, index) => ({
+      ...nodes[0]!,
+      id: String(index),
+      createdAt: String(index),
+    }));
+    const arranged = arrangeLineageTrees(
+      independent,
+      resolveBoardPlacements(independent, new Map(), []),
+    );
+    expect(arranged[0]!.row).toBe(arranged[1]!.row);
+    expect(arranged[1]!.column).toBeGreaterThan(arranged[0]!.column + arranged[0]!.width);
+    expect(Math.max(...arranged.map((card) => card.row + card.height))).toBeLessThan(40);
+  });
+
+  it("folds a long unbranched history without adding false branches or overlaps", () => {
+    const chain = Array.from({ length: 5 }, (_, index) => ({
+      ...nodes[0]!,
+      id: String(index),
+      basedOn: index ? String(index - 1) : null,
+      createdAt: String(index),
+    }));
+    const placements = resolveBoardPlacements(
+      chain,
+      new Map(chain.map((node) => [node.id, { width: 15, height: 9 }])),
+      [],
+    );
+    const arranged = arrangeLineageTrees(chain, placements);
+    expect(Math.max(...arranged.map((card) => card.column + card.width))).toBeLessThan(58);
+    expect(Math.max(...arranged.map((card) => card.row + card.height))).toBeLessThan(25);
+    const byId = new Map(arranged.map((card) => [card.id, card]));
+    for (const node of chain.slice(1)) {
+      const route = orthogonalRoute(byId.get(node.basedOn!)!, byId.get(node.id)!, arranged);
+      expectRouteClear(route.points, arranged);
+    }
+  });
+
+  it("keeps narrow fork connectors between cards and attaches to exact edge centers", () => {
+    const source = { id: "source", column: 1, row: 1, width: 16, height: 9 };
+    const target = { id: "target", column: 18, row: 10.5, width: 16, height: 9 };
+    const route = orthogonalRoute(source, target);
+    expect(route.points).toEqual([
+      { x: 408, y: 132 },
+      { x: 420, y: 132 },
+      { x: 420, y: 360 },
+      { x: 432, y: 360 },
+    ]);
+    expect(route.direction).toBe("right");
+  });
+
+  it("routes around intervening cards with orthogonal segments", () => {
+    const source = { id: "source", column: 1, row: 4, width: 12, height: 7 };
+    const target = { id: "target", column: 39, row: 4, width: 12, height: 7 };
+    const blocker = { id: "blocker", column: 20, row: 1, width: 12, height: 15 };
+    const route = orthogonalRoute(source, target, [source, target, blocker]);
+    expect(route.points[0]).toEqual({ x: 312, y: 180 });
+    expect(route.end).toEqual({ x: 936, y: 180 });
+    expect(route.points.some((point) => point.y <= 16 || point.y >= 392)).toBe(true);
+    expectRouteClear(route.points, [source, target, blocker]);
+  });
+
+  it("routes reverse and vertical relationships around intervening cards", () => {
+    const source = { id: "source", column: 1, row: 1, width: 12, height: 7 };
+    const target = { id: "target", column: 1, row: 22, width: 12, height: 7 };
+    const blocker = { id: "blocker", column: 1, row: 11, width: 12, height: 7 };
+    const forward = orthogonalRoute(source, target, [source, target, blocker]);
+    const backward = orthogonalRoute(target, source, [source, target, blocker]);
+    expect(forward.direction).toBe("down");
+    expect(backward.direction).toBe("up");
+    expectRouteClear(forward.points, [source, target, blocker]);
+    expectRouteClear(backward.points, [source, target, blocker]);
   });
 });
 
@@ -90,3 +193,22 @@ describe("session chronology", () => {
     expect(arrangeSessions([orphan], "created", "oldest")[0].column).toBe(1);
   });
 });
+
+function expectRouteClear(points: { x: number; y: number }[], cards: ResolvedPlacement[]) {
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1]!,
+      b = points[index]!;
+    expect(a.x === b.x || a.y === b.y).toBe(true);
+    for (const card of cards) {
+      const left = card.column * 24,
+        right = (card.column + card.width) * 24;
+      const top = card.row * 24,
+        bottom = (card.row + card.height) * 24;
+      const intersects =
+        a.x === b.x
+          ? a.x > left && a.x < right && Math.max(a.y, b.y) > top && Math.min(a.y, b.y) < bottom
+          : a.y > top && a.y < bottom && Math.max(a.x, b.x) > left && Math.min(a.x, b.x) < right;
+      expect(intersects).toBe(false);
+    }
+  }
+}
