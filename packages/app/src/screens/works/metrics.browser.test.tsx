@@ -48,9 +48,7 @@ vi.mock("@/components/ui/floating", async (importOriginal) => {
 });
 
 // Exercise actual SVG elements in Chromium, rather than the suite's native SVG stub.
-vi.mock("react-native-svg", () =>
-  vi.importActual<typeof import("react-native-svg")>("react-native-svg/lib/module/elements.web.js"),
-);
+vi.mock("react-native-svg", () => import("react-native-svg/lib/module/elements.web.js"));
 vi.mock("react-native-unistyles", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../../../test-stubs/react-native-unistyles")>();

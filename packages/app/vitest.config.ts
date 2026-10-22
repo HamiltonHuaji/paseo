@@ -114,6 +114,8 @@ export default defineConfig({
           "react-native-keyboard-controller",
           "react-native-screens",
           "expo-router",
+          "expo-modules-core",
+          "react-native-enriched-markdown",
         ],
       },
     },
@@ -136,6 +138,8 @@ export default defineConfig({
       "react-native-keyboard-controller",
       "react-native-screens",
       "expo-router",
+      "expo-modules-core",
+      "react-native-enriched-markdown",
     ],
   },
   // The globals a React Native bundler defines, which esbuild is no longer there to supply for
