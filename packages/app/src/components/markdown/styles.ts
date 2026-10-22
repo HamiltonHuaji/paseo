@@ -96,6 +96,16 @@ export function createMarkdownStyles(
         checkmarkColor: theme.colors.accentForeground,
         borderColor: theme.colors.foregroundMuted,
       },
+      // Math substyles do not inherit paragraph colours in the shared engine.
+      inlineMath: { color: theme.colors.foreground },
+      math: {
+        ...block,
+        fontSize: Math.round(fontSize * 1.2),
+        color: theme.colors.foreground,
+        backgroundColor: theme.colors.surface1,
+        padding: 12,
+        textAlign: "center",
+      },
       inlineImage: { size: paragraph.lineHeight },
       image: { ...block, height: 320, resizeMode: "contain", borderRadius: 8 },
       thematicBreak: { ...block, color: theme.colors.border, height: 1 },

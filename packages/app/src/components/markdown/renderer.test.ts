@@ -1,3 +1,6 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import katex from "katex";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toNativeLinkRecognition } from "react-native-enriched-markdown/src/utils/regexParser";
 import { parseMarkdown } from "react-native-enriched-markdown/src/web/parseMarkdown";
@@ -800,3 +803,48 @@ describe("math source on the shared engine", () => {
     expect(types).toContain("LatexMathDisplay");
   });
 });
+
+it.each([
+  ["dark", darkTheme],
+  ["light", lightTheme],
+] as const)(
+  "renders inline and block math with %s theme colours and copyable TeX",
+  async (_name, theme) => {
+    // Exercise the shipped web modules, without compiling the native source helpers.
+    const normalizerPath =
+      "react-native-enriched-markdown/lib/module/normalizeMarkdownStyle.web.js";
+    const stylesPath = "react-native-enriched-markdown/lib/module/web/styles.js";
+    const rendererPath = "react-native-enriched-markdown/lib/module/web/renderers/KaTeXRenderer.js";
+    const {
+      normalizeMarkdownStyle,
+    }: typeof import("react-native-enriched-markdown/lib/typescript/src/normalizeMarkdownStyle.web") =
+      await import(normalizerPath);
+    const {
+      buildStyles,
+    }: typeof import("react-native-enriched-markdown/lib/typescript/src/web/styles") = await import(
+      stylesPath
+    );
+    const {
+      KaTeXRenderer,
+    }: typeof import("react-native-enriched-markdown/lib/typescript/src/web/renderers/KaTeXRenderer") =
+      await import(rendererPath);
+    const { markdownStyle } = createMarkdownStyles(theme, { blockGap: 16 });
+    const styles = buildStyles(normalizeMarkdownStyle(markdownStyle));
+    const content = String.raw`e^{i\pi}+1=0`;
+    for (const displayMode of [false, true]) {
+      const html = renderToStaticMarkup(
+        createElement(KaTeXRenderer, {
+          content,
+          katex,
+          displayMode,
+          style: displayMode ? styles.mathDisplay : styles.mathInline,
+        }),
+      );
+      expect(html).toContain(`color:${theme.colors.foreground}`);
+      expect(html).toContain("<math");
+      expect(html).toContain('role="math"');
+      expect(html).toContain(`aria-label="${content}"`);
+      if (displayMode) expect(html).toContain(`background-color:${theme.colors.surface1}`);
+    }
+  },
+);
