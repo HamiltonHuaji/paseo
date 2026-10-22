@@ -28,6 +28,15 @@ The pinned `docs/refactors/experiment-viewer-transport-spec.md` must not be chan
 
 | Doc                                                                  | What's in it                                                                                                                   |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| [Fork behavior contracts](docs/contracts/README.md)                  | Stable behavior IDs and baseline review scope                                                                                  |
+| [Session contracts](docs/contracts/sessions.md)                      | Native fork, rewind, identity, lineage and recovery                                                                            |
+| [Model and storage contracts](docs/contracts/models-and-storage.md)  | Model discovery and project storage target                                                                                     |
+| [Client contracts](docs/contracts/clients.md)                        | File, Markdown, composer, tabs and heartbeat behavior; VS Code retired                                                         |
+| [Distribution contracts](docs/contracts/distribution.md)             | Fork identity, updates and release behavior                                                                                    |
+| [Works contracts](docs/contracts/works.md)                           | Deferred Works and v1 continuity requirements                                                                                  |
+| [Viewer contracts](docs/contracts/viewers.md)                        | Deferred result viewer requirements                                                                                            |
+| [Skill contracts](docs/contracts/skills.md)                          | Deferred skill ownership and repository sync requirements                                                                      |
+| [Baseline review format](docs/contracts/baseline-review.md)          | Per-version evidence and known gaps                                                                                            |
 | [docs/product.md](docs/product.md)                                   | What Paseo is, who it's for, where it's going                                                                                  |
 | [docs/architecture.md](docs/architecture.md)                         | System design, package layering, WebSocket protocol, agent lifecycle, data flow                                                |
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                   | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                  |
