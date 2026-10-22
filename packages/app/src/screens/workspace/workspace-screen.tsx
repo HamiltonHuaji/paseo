@@ -1,3 +1,6 @@
+import type { ComponentProps } from "react";
+import { SessionCanvasScreen } from "@/screens/session-canvas/screen";
+import { WorkspaceSessionCanvasButton } from "./workspace-session-canvas-button";
 import { useHostFeature } from "@/runtime/host-features";
 import {
   AssistantFileLinkResolverProvider,
@@ -1073,6 +1076,11 @@ function WorkspaceScreenContent({
   const workspaceDirectory = workspaceDescriptor?.workspaceDirectory || null;
   const isMissingWorkspaceDirectory = Boolean(workspaceDescriptor) && !workspaceDirectory;
   const [isImportSheetVisible, setIsImportSheetVisible] = useState(false);
+  const supportsSessionCanvas = useHostFeature(normalizedServerId, "sessionCanvas");
+  const [sessionCanvasOpen, setSessionCanvasOpen] = useState(false);
+  const showWorkspace = useCallback(() => setSessionCanvasOpen(false), []);
+  const toggleSessionCanvas = useCallback(() => setSessionCanvasOpen((open) => !open), []);
+  useEffect(showWorkspace, [normalizedServerId, normalizedWorkspaceId, showWorkspace]);
   const canOpenImportSheet = [client, isConnected, workspaceDirectory].every(Boolean);
   const openImportSheet = useCallback(() => {
     setIsImportSheetVisible(true);
@@ -3108,6 +3116,54 @@ function WorkspaceScreenContent({
     [buildPaneContentModel],
   );
 
+  const buildCanvasConversation = useCallback(
+    (agentId: string, onClose: () => void) => {
+      const model = buildPaneContentModel({ tab: canvasSessionTab(agentId) });
+      const context = model.paneContextValue;
+      return {
+        ...model,
+        paneContextValue: {
+          ...context,
+          closeCurrentTab: onClose,
+          retargetCurrentTab: (target: Parameters<typeof context.openTab>[0]) => {
+            context.openTab(target);
+            showWorkspace();
+          },
+          openTargetToSide: context.openTargetToSide
+            ? (target: Parameters<typeof context.openTab>[0]) => {
+                context.openTargetToSide?.(target);
+                showWorkspace();
+              }
+            : undefined,
+          openTab: (...args: Parameters<typeof context.openTab>) => {
+            context.openTab(...args);
+            showWorkspace();
+          },
+          openPreferredTarget: (...args: Parameters<typeof context.openPreferredTarget>) => {
+            context.openPreferredTarget(...args);
+            showWorkspace();
+          },
+          openFileInWorkspace: (...args: Parameters<typeof context.openFileInWorkspace>) => {
+            context.openFileInWorkspace(...args);
+            showWorkspace();
+          },
+        },
+      };
+    },
+    [buildPaneContentModel, showWorkspace],
+  );
+  const renameCanvasSession = useCallback(
+    (agentId: string) => handleRenameTab(canvasSessionTab(agentId)),
+    [handleRenameTab],
+  );
+  const openCanvasSession = useCallback(
+    (agentId: string) => {
+      handleImportedAgent(agentId);
+      showWorkspace();
+    },
+    [handleImportedAgent, showWorkspace],
+  );
+
   const desktopTabRowItems = useMemo<WorkspaceDesktopTabRowItem[]>(
     () =>
       tabs.map((tab) => ({
@@ -3197,6 +3253,10 @@ function WorkspaceScreenContent({
     () => (
       <View style={styles.headerRight}>
         <PluginHeaderButtons serverId={normalizedServerId} workspaceId={normalizedWorkspaceId} />
+        <WorkspaceSessionCanvasButton
+          onPress={toggleSessionCanvas}
+          visible={supportsSessionCanvas}
+        />
         {workspaceDescriptor && workspaceDescriptor.scripts.length > 0 ? (
           <WorkspaceScriptsButton
             serverId={normalizedServerId}
@@ -3247,6 +3307,8 @@ function WorkspaceScreenContent({
       explorerSidebarToggleLabel,
       explorerSidebarToggleAccessibilityState,
       explorerToggleOwner,
+      toggleSessionCanvas,
+      supportsSessionCanvas,
       t,
     ],
   );
@@ -3783,17 +3845,66 @@ function WorkspaceScreenContent({
   }
   return (
     <WorkspaceContentProviders key={persistenceKey} workspaceKey={persistenceKey}>
-      <AssistantFileLinkResolverProvider
-        client={client}
+      <WorkspaceSessionsSwitcher
+        open={sessionCanvasOpen}
+        renderHeader={renderWorkspaceScreenHeader}
         serverId={normalizedServerId}
+        workspaceId={normalizedWorkspaceId}
+        active={isRouteFocused}
+        buildConversation={buildCanvasConversation}
+        onRename={renameCanvasSession}
+        onOpen={openCanvasSession}
+        client={client}
         workspaceRoot={workspaceDirectory ?? undefined}
         onOpenWorkspaceFile={openMarkdownPath}
         toast={toast}
       >
         {renderedWorkspaceScreen}
-      </AssistantFileLinkResolverProvider>
+      </WorkspaceSessionsSwitcher>
     </WorkspaceContentProviders>
   );
+}
+
+function WorkspaceSessionsSwitcher({
+  open,
+  children,
+  renderHeader,
+  client,
+  workspaceRoot,
+  onOpenWorkspaceFile,
+  toast,
+  ...canvas
+}: ComponentProps<typeof SessionCanvasScreen> &
+  Omit<ComponentProps<typeof AssistantFileLinkResolverProvider>, "serverId"> & {
+    open: boolean;
+    renderHeader: () => ReactNode;
+  }) {
+  return (
+    <AssistantFileLinkResolverProvider
+      client={client}
+      serverId={canvas.serverId}
+      workspaceRoot={workspaceRoot}
+      onOpenWorkspaceFile={onOpenWorkspaceFile}
+      toast={toast}
+    >
+      <View style={[styles.container, open && { display: "none" }]}>{children}</View>
+      {open ? (
+        <View style={styles.container}>
+          {renderHeader()}
+          <SessionCanvasScreen {...canvas} />
+        </View>
+      ) : null}
+    </AssistantFileLinkResolverProvider>
+  );
+}
+
+function canvasSessionTab(agentId: string): WorkspaceTabDescriptor {
+  return {
+    key: `agent_${agentId}`,
+    tabId: `agent_${agentId}`,
+    kind: "agent",
+    target: { kind: "agent", agentId },
+  };
 }
 
 const styles = StyleSheet.create((theme) => ({

@@ -46,6 +46,8 @@ export const CLIENT_CAPS = {
   workspaceSetupObservation: "workspace_setup_observation",
   // COMPAT(workspaceSetupBlocked): added in v0.8.0, remove after 2027-03-07 once client floor >= v0.8.0.
   workspaceSetupBlocked: "workspace_setup_blocked",
+  // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+  agentConversationFork: "agent_conversation_fork",
   browserHost: "browser_host",
 } as const;
 

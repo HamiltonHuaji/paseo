@@ -976,6 +976,7 @@ export async function createPaseoDaemon(
   );
   await agentStorage.initialize();
   await closeStaleAgentRecords(agentStorage);
+  await agentManager.recoverStoredSessionLineage(config.paseoHome);
   logger.info({ elapsed: elapsed() }, "Agent storage initialized");
   await bootstrapWorkspaceRegistries({
     serverId,

@@ -5,6 +5,7 @@ import {
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
+  type AgentConversationForkInput,
   type AgentFeature,
   type AgentLaunchContext,
   type AgentResumeSessionOptions,
@@ -39,7 +40,10 @@ import {
   type ProviderRefreshContext,
   type ResolveAgentDefaultModeInput,
 } from "../agent-sdk-types.js";
-import { importSessionFromPersistence } from "../provider-session-import.js";
+import {
+  collectImportedHistory,
+  importSessionFromPersistence,
+} from "../provider-session-import.js";
 import { runProviderRefreshActivity } from "../provider-refresh-deadline.js";
 import type { Logger } from "pino";
 
@@ -53,6 +57,7 @@ import { z } from "zod";
 import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 import { composeSystemPromptParts } from "../system-prompt.js";
 import { curateAgentActivity } from "../activity-curator.js";
+import { readCodexSessionLineage } from "./codex/session-lineage.js";
 import { CodexAsyncQuestions, codexAsyncQuestionToTimeline } from "./codex/async-questions.js";
 import {
   mapCodexToolCallEnvelope,
@@ -239,6 +244,7 @@ const CODEX_APP_SERVER_CAPABILITIES: AgentCapabilityFlags = {
   supportsRewindConversation: true,
   supportsRewindFiles: false,
   supportsRewindBoth: false,
+  supportsNativeConversationFork: true,
 };
 
 const CODEX_MODES: AgentMode[] = [
@@ -952,6 +958,7 @@ interface CodexModel {
 }
 
 const CodexModelListResponseSchema = z.object({
+  nextCursor: z.string().nullable().optional(),
   data: z
     .array(
       z.object({
@@ -974,6 +981,26 @@ const CodexModelListResponseSchema = z.object({
     )
     .optional(),
 });
+
+export async function readCodexModels(
+  client: Pick<CodexAppServerClientLike, "request">,
+): Promise<CodexModel[]> {
+  const models = new Map<string, CodexModel>();
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = CodexModelListResponseSchema.parse(
+      await client.request("model/list", cursor ? { cursor } : {}),
+    );
+    for (const model of page.data ?? []) models.set(model.id, model);
+    const next = page.nextCursor;
+    if (!next) break;
+    if (cursors.has(next)) throw new Error("Codex returned a repeated model cursor");
+    cursors.add(next);
+    cursor = next;
+  } while (cursor);
+  return [...models.values()];
+}
 
 /**
  * Read the newest `window.limit` threads Codex knows about.
@@ -2087,6 +2114,69 @@ async function requestCodexThreadHistory(
   return CodexThreadReadResponseSchema.parse(response);
 }
 
+const CodexThreadItemsListResponseSchema = z
+  .object({
+    data: z
+      .array(
+        z
+          .object({
+            turnId: z.string(),
+            item: z.unknown(),
+          })
+          .passthrough(),
+      )
+      .default([]),
+    nextCursor: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export async function resolveCodexForkBeforeTurnId(input: {
+  threadId: string;
+  boundaryMessageId: string;
+  isLatestCompletedTurn: boolean;
+  request: (method: string, params?: unknown) => Promise<unknown>;
+  activeTurnId?: string | null;
+}): Promise<string | undefined> {
+  if (input.isLatestCompletedTurn) return undefined;
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  let boundaryTurnId: string | null = null;
+  while (true) {
+    const response = CodexThreadItemsListResponseSchema.parse(
+      await input.request("thread/items/list", {
+        threadId: input.threadId,
+        limit: 100,
+        sortDirection: "asc",
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    for (const entry of response.data) {
+      if (boundaryTurnId && entry.turnId !== boundaryTurnId) {
+        return entry.turnId;
+      }
+      const item = toObjectRecord(entry.item);
+      if (item?.id === input.boundaryMessageId) {
+        boundaryTurnId = entry.turnId;
+      }
+    }
+    const nextCursor = response.nextCursor ?? null;
+    if (!nextCursor) break;
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("Codex returned a repeated thread item cursor while resolving fork");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  if (!boundaryTurnId) {
+    throw new Error(`Could not map Codex message '${input.boundaryMessageId}' to a completed turn`);
+  }
+  if (boundaryTurnId === input.activeTurnId) {
+    throw new Error("Wait for the current turn to finish before forking this conversation");
+  }
+  if (input.activeTurnId) return input.activeTurnId;
+  throw new Error("The selected response is no longer followed by a persisted Codex turn");
+}
+
 async function loadCodexThreadHistoryTimeline(params: {
   threadId: string;
   cwd: string | null;
@@ -3175,8 +3265,9 @@ const CodexNotificationSchema = z.union([
 ]);
 
 async function readCodexConfiguredDefaults(
-  client: CodexAppServerClient,
+  client: Pick<CodexAppServerClientLike, "request">,
   logger: Logger,
+  cwd?: string,
 ): Promise<CodexConfiguredDefaults> {
   let savedConfigDefaults: CodexConfiguredDefaults = {};
   try {
@@ -3193,13 +3284,13 @@ async function readCodexConfiguredDefaults(
     logger.debug({ error }, "Failed to read Codex saved config defaults");
   }
 
-  if (savedConfigDefaults.model && savedConfigDefaults.thinkingOptionId) {
+  if (!cwd && savedConfigDefaults.model && savedConfigDefaults.thinkingOptionId) {
     return savedConfigDefaults;
   }
 
   let configReadDefaults: CodexConfiguredDefaults = {};
   try {
-    const response = toObjectRecord(await client.request("config/read", {}));
+    const response = toObjectRecord(await client.request("config/read", cwd ? { cwd } : {}));
     const config = toObjectRecord(response?.config);
     const modelValue = typeof config?.model === "string" ? config.model : undefined;
     const thinkingOptionValue =
@@ -3212,7 +3303,9 @@ async function readCodexConfiguredDefaults(
     logger.debug({ error }, "Failed to read Codex config defaults");
   }
 
-  return mergeCodexConfiguredDefaults(savedConfigDefaults, configReadDefaults);
+  return cwd
+    ? mergeCodexConfiguredDefaults(configReadDefaults, savedConfigDefaults)
+    : mergeCodexConfiguredDefaults(savedConfigDefaults, configReadDefaults);
 }
 
 interface CodexSkillPromptBlock {
@@ -3429,7 +3522,7 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   private readonly logger: Logger;
   private readonly config: AgentSessionConfig;
-  private readonly asyncQuestions: CodexAsyncQuestions;
+  private asyncQuestions: CodexAsyncQuestions;
   private readonly codexHome: string;
   private currentMode: string;
   private hasWorkflowModeOverride: boolean;
@@ -3494,6 +3587,16 @@ export class CodexAppServerAgentSession implements AgentSession {
   private warnedIncompleteEditToolCallIds = new Set<string>();
   private latestUsage: AgentUsage | undefined;
   private latestPlanResult: { callId: string; text: string; turnId: string | null } | null = null;
+  private providerSessionTreeId: string | undefined;
+  private providerForkedFromId: string | undefined;
+  private branchOperations: Array<{
+    operation: "fork" | "import-copy" | "rewind";
+    sourceThreadId: string;
+    resultThreadId: string;
+    boundaryMessageId?: string;
+    createdAt: string;
+  }> = [];
+  private readonly pendingRootTools = new Map<string, ToolCallTimelineItem>();
   private readonly userMessageTurnIndexes = new Map<string, number>();
   private readonly userMessageTurnIds: string[] = [];
   private readonly userMessageProviderTurnIds = new Map<string, string>();
@@ -3562,6 +3665,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.config = config;
     this.harnessEnvironment = deps.environment ?? buildCodexAppServerEnv();
     this.asyncQuestions = new CodexAsyncQuestions(resumeHandle?.metadata?.asyncQuestions);
+    this.restoreBranchMetadata(resumeHandle?.metadata);
     this.codexHome = deps.codexHome ?? resolveCodexHomeDir(process.env);
     this.config.thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
     this.serviceTier = readCodexServiceTier(this.config.featureValues);
@@ -3575,6 +3679,29 @@ export class CodexAppServerAgentSession implements AgentSession {
       // Resuming can start a goal before the caller receives the session.
       if (this.initialResumePurpose === "interactive") this.startupEvents = [];
     }
+  }
+
+  private restoreBranchMetadata(metadata: Record<string, unknown> | undefined): void {
+    this.providerSessionTreeId =
+      typeof metadata?.providerSessionTreeId === "string"
+        ? metadata.providerSessionTreeId
+        : undefined;
+    this.providerForkedFromId =
+      typeof metadata?.providerForkedFromId === "string"
+        ? metadata.providerForkedFromId
+        : undefined;
+    this.branchOperations =
+      z
+        .array(
+          z.object({
+            operation: z.enum(["fork", "import-copy", "rewind"]),
+            sourceThreadId: z.string(),
+            resultThreadId: z.string(),
+            boundaryMessageId: z.string().optional(),
+            createdAt: z.string(),
+          }),
+        )
+        .safeParse(metadata?.branchOperations).data ?? [];
   }
 
   get id(): string | null {
@@ -3643,8 +3770,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.threadRollbackAvailable = codexServerHasThreadRollback(initialized?.userAgent);
       client.notify("initialized", {});
 
-      this.speedModels =
-        CodexModelListResponseSchema.parse(await client.request("model/list", {})).data ?? [];
+      this.speedModels = await readCodexModels(client);
       this.reconcileServiceTier();
       await this.loadResolvedWorkspaceWrite();
       await this.loadCollaborationModes();
@@ -3690,7 +3816,10 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
   }
 
-  private rememberResolvedSandboxPolicy(response: unknown): void {
+  private rememberThreadConfiguration(response: unknown): void {
+    const thread = toObjectRecord(toObjectRecord(response)?.thread);
+    if (typeof thread?.sessionId === "string") this.providerSessionTreeId = thread.sessionId;
+    if (typeof thread?.forkedFromId === "string") this.providerForkedFromId = thread.forkedFromId;
     const sandbox = toObjectRecord(toObjectRecord(response)?.sandbox);
     this.resolvedSandboxPolicy = sandbox ?? null;
     if (sandbox?.type !== "workspaceWrite") return;
@@ -4082,7 +4211,7 @@ export class CodexAppServerAgentSession implements AgentSession {
         return;
       }
       const response = await this.client.request("thread/resume", params);
-      this.rememberResolvedSandboxPolicy(response);
+      this.rememberThreadConfiguration(response);
     } catch (error) {
       const threadId = this.currentThreadId;
       const message = error instanceof Error ? error.message : String(error);
@@ -4095,7 +4224,7 @@ export class CodexAppServerAgentSession implements AgentSession {
           }
         }
         const response = await this.client.request("thread/resume", params);
-        this.rememberResolvedSandboxPolicy(response);
+        this.rememberThreadConfiguration(response);
         this.logger.info({ threadId }, "Unarchived Codex thread to restore active Paseo agent");
         return;
       }
@@ -4928,6 +5057,9 @@ export class CodexAppServerAgentSession implements AgentSession {
       nativeHandle: this.currentThreadId,
       metadata: {
         provider: CODEX_PROVIDER,
+        providerSessionTreeId: this.providerSessionTreeId,
+        providerForkedFromId: this.providerForkedFromId,
+        branchOperations: this.branchOperations,
         cwd: this.config.cwd,
         title: this.config.title ?? null,
         threadId: this.currentThreadId,
@@ -4942,7 +5074,92 @@ export class CodexAppServerAgentSession implements AgentSession {
     };
   }
 
-  async revertConversation(input: { messageId: string }): Promise<void> {
+  async forkNativeSession(threadId: string): Promise<void> {
+    await this.connect();
+    if (!this.client) throw new Error("Codex client is not initialized");
+    const config = this.buildCodexInnerConfig();
+    const developerInstructions = composeSystemPromptParts(
+      this.config.systemPrompt,
+      this.config.daemonAppendSystemPrompt,
+    );
+    const forked = await forkCodexThread(this.client, {
+      threadId,
+      cwd: this.config.cwd,
+      ...(config ? { config } : {}),
+      ...(developerInstructions ? { developerInstructions } : {}),
+      excludeTurns: false,
+      persistExtendedHistory: true,
+    });
+    this.currentThreadId = forked.thread.id;
+    this.providerSessionTreeId = forked.thread.sessionId;
+    this.providerForkedFromId = forked.thread.forkedFromId ?? threadId;
+    this.branchOperations.push({
+      operation: "import-copy",
+      sourceThreadId: threadId,
+      resultThreadId: forked.thread.id,
+      createdAt: new Date().toISOString(),
+    });
+    this.rememberThreadConfiguration(forked);
+    await this.loadPersistedHistory(this.client);
+  }
+
+  async forkFromConversation(
+    source: CodexAppServerAgentSession,
+    input: AgentConversationForkInput,
+  ): Promise<void> {
+    await this.connect();
+    if (!this.client) {
+      throw new Error("Codex client is not initialized");
+    }
+    if (!source.currentThreadId) {
+      throw new Error("Codex thread is not initialized");
+    }
+    if (source.activeForegroundTurnId && input.isLatestCompletedTurn) {
+      throw new Error("Wait for the current turn to finish before forking this conversation");
+    }
+
+    const targetConfig = input.targetConfig;
+    const codexConfig = this.buildCodexInnerConfig();
+    const developerInstructions = composeSystemPromptParts(
+      targetConfig.systemPrompt,
+      targetConfig.daemonAppendSystemPrompt,
+    );
+    const serviceTier = readCodexServiceTier(targetConfig.featureValues);
+    const beforeTurnId = await resolveCodexForkBeforeTurnId({
+      threadId: source.currentThreadId,
+      boundaryMessageId: input.boundaryMessageId,
+      isLatestCompletedTurn: input.isLatestCompletedTurn,
+      request: (method, params) => this.client!.request(method, params),
+      activeTurnId: source.currentTurnId,
+    });
+    const forked = await forkCodexThread(this.client, {
+      threadId: source.currentThreadId,
+      ...(beforeTurnId ? { beforeTurnId } : {}),
+      cwd: targetConfig.cwd,
+      model: targetConfig.model ?? null,
+      serviceTier,
+      ...(codexConfig ? { config: codexConfig } : {}),
+      ...(developerInstructions ? { developerInstructions } : {}),
+      excludeTurns: false,
+      persistExtendedHistory: true,
+    });
+    this.currentThreadId = forked.thread.id;
+    this.providerSessionTreeId = forked.thread.sessionId;
+    this.providerForkedFromId = forked.thread.forkedFromId ?? source.currentThreadId;
+    this.branchOperations.push({
+      operation: "fork",
+      sourceThreadId: source.currentThreadId,
+      resultThreadId: forked.thread.id,
+      boundaryMessageId: input.boundaryMessageId,
+      createdAt: new Date().toISOString(),
+    });
+    this.rememberThreadConfiguration(forked);
+    await this.loadPersistedHistory(this.client);
+  }
+
+  async revertConversation(input: {
+    messageId: string;
+  }): Promise<{ rollback: () => Promise<void> }> {
     await this.connect();
     if (!this.client) {
       throw new Error("Codex client is not initialized");
@@ -4953,25 +5170,80 @@ export class CodexAppServerAgentSession implements AgentSession {
       await this.ensureThread();
     }
 
-    await revertCodexConversation({
-      client: this.client,
+    const previous = {
       threadId: this.currentThreadId,
-      messageId: input.messageId,
-      cwd: this.config.cwd ?? null,
-      model: this.config.model ?? null,
-      serviceTier: this.serviceTier,
-      config: this.buildCodexInnerConfig(),
-      userMessageTurns: this.codexUserMessageTurns(),
-      threadRollbackAvailable: this.threadRollbackAvailable,
-      setThreadId: async (threadId) => {
-        this.currentThreadId = threadId;
-        this.cachedRuntimeInfo = null;
-        this.persistedHistory = [];
-        this.historyPending = false;
-        await this.loadPersistedHistory(this.client);
-        this.reconcileAsyncQuestionsAfterRewind();
-      },
-    });
+      history: this.persistedHistory,
+      historyPending: this.historyPending,
+      runtimeInfo: this.cachedRuntimeInfo,
+      operations: [...this.branchOperations],
+      questions: this.asyncQuestions,
+      providerSessionTreeId: this.providerSessionTreeId,
+      providerForkedFromId: this.providerForkedFromId,
+      userMessageTurnIndexes: new Map(this.userMessageTurnIndexes),
+      userMessageTurnIds: [...this.userMessageTurnIds],
+      userMessageProviderTurnIds: new Map(this.userMessageProviderTurnIds),
+      subAgentCalls: new Map(this.subAgentCallsByCallId),
+      subAgentRoutes: new Map(this.subAgentCallIdByChildThreadId),
+      pendingSubAgentNotifications: new Map(this.pendingSubAgentNotificationsByThreadId),
+      subAgentHistory: this.persistedProviderSubagentEvents,
+    };
+    const rollback = async () => {
+      this.currentThreadId = previous.threadId;
+      this.persistedHistory = previous.history;
+      this.historyPending = previous.historyPending;
+      this.cachedRuntimeInfo = previous.runtimeInfo;
+      this.branchOperations = previous.operations;
+      this.asyncQuestions = previous.questions;
+      this.providerSessionTreeId = previous.providerSessionTreeId;
+      this.providerForkedFromId = previous.providerForkedFromId;
+      this.resetCodexUserMessageTurns();
+      // Drained history excludes live turns; restore the live indexes themselves.
+      for (const [id, index] of previous.userMessageTurnIndexes)
+        this.userMessageTurnIndexes.set(id, index);
+      this.userMessageTurnIds.push(...previous.userMessageTurnIds);
+      for (const [id, turnId] of previous.userMessageProviderTurnIds)
+        this.userMessageProviderTurnIds.set(id, turnId);
+      this.subAgentCallsByCallId = previous.subAgentCalls;
+      this.subAgentCallIdByChildThreadId = previous.subAgentRoutes;
+      this.pendingSubAgentNotificationsByThreadId = previous.pendingSubAgentNotifications;
+      this.persistedProviderSubagentEvents = previous.subAgentHistory;
+    };
+    try {
+      await revertCodexConversation({
+        client: this.client,
+        threadId: this.currentThreadId,
+        messageId: input.messageId,
+        cwd: this.config.cwd ?? null,
+        model: this.config.model ?? null,
+        serviceTier: this.serviceTier,
+        developerInstructions: composeSystemPromptParts(
+          this.config.systemPrompt,
+          this.config.daemonAppendSystemPrompt,
+        ),
+        config: this.buildCodexInnerConfig(),
+        userMessageTurns: this.codexUserMessageTurns(),
+        threadRollbackAvailable: this.threadRollbackAvailable,
+        setThreadId: async (threadId) => {
+          this.currentThreadId = threadId;
+          this.cachedRuntimeInfo = null;
+          await this.loadPersistedHistory(this.client);
+          this.providerForkedFromId = previous.threadId ?? undefined;
+          this.branchOperations.push({
+            operation: "rewind",
+            sourceThreadId: previous.threadId!,
+            resultThreadId: threadId,
+            boundaryMessageId: input.messageId,
+            createdAt: new Date().toISOString(),
+          });
+          this.asyncQuestions = new CodexAsyncQuestions(previous.questions.serialize());
+          this.reconcileAsyncQuestionsAfterRewind();
+        },
+      });
+      return { rollback };
+    } catch (error) {
+      await rollback();
+      throw error;
+    }
   }
 
   async interrupt(): Promise<void> {
@@ -5232,7 +5504,11 @@ export class CodexAppServerAgentSession implements AgentSession {
     let model = this.config.model;
     let thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
     if (!model || !thinkingOptionId) {
-      configuredDefaults = await readCodexConfiguredDefaults(this.client, this.logger);
+      configuredDefaults = await readCodexConfiguredDefaults(
+        this.client,
+        this.logger,
+        this.config.cwd,
+      );
     }
     if (!model) {
       model = configuredDefaults.model;
@@ -5242,8 +5518,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
 
     if (!model || !thinkingOptionId) {
-      const modelResponse = toObjectRecord(await this.client.request("model/list", {}));
-      const modelData = Array.isArray(modelResponse?.data) ? modelResponse.data : [];
+      const modelData = await readCodexModels(this.client);
       const models = modelData
         .map((m) => {
           const record = toObjectRecord(m);
@@ -5295,7 +5570,7 @@ export class CodexAppServerAgentSession implements AgentSession {
 
     const { params, approvalPolicy, sandbox } = this.buildThreadStartRequest(model);
     const rawResponse = await this.client.request("thread/start", params);
-    this.rememberResolvedSandboxPolicy(rawResponse);
+    this.rememberThreadConfiguration(rawResponse);
     const response = toObjectRecord(rawResponse);
     const threadRecord = toObjectRecord(response?.thread);
     const threadId = typeof threadRecord?.id === "string" ? threadRecord.id : undefined;
@@ -5372,6 +5647,34 @@ export class CodexAppServerAgentSession implements AgentSession {
   }
 
   private emitEvent(event: AgentStreamEvent): void {
+    if (
+      !this.loadingPersistedHistory &&
+      event.type === "timeline" &&
+      event.item.type === "tool_call" &&
+      event.item.detail.type !== "sub_agent"
+    ) {
+      if (event.item.status === "running") this.pendingRootTools.set(event.item.callId, event.item);
+      else this.pendingRootTools.delete(event.item.callId);
+    }
+    if (
+      event.type === "turn_completed" ||
+      event.type === "turn_failed" ||
+      event.type === "turn_canceled"
+    ) {
+      for (const item of this.pendingRootTools.values()) {
+        this.notifySubscribers({
+          type: "timeline",
+          provider: CODEX_PROVIDER,
+          item: {
+            ...item,
+            status: "canceled",
+            error: null,
+            metadata: { ...item.metadata, completionUnobserved: true },
+          },
+        });
+      }
+      this.pendingRootTools.clear();
+    }
     if (this.loadingPersistedHistory && event.type === "provider_subagent") {
       this.persistedProviderSubagentEvents.push(event);
       return;
@@ -7159,6 +7462,14 @@ export class CodexAppServerAgentSession implements AgentSession {
 }
 
 export class CodexAppServerAgentClient implements AgentClient {
+  readSessionLineage(activitySessionIds?: readonly string[]) {
+    const env = createProviderEnv({ runtimeSettings: this.runtimeSettings });
+    return readCodexSessionLineage({
+      codexHome: env.CODEX_HOME ?? path.join(env.HOME ?? os.homedir(), ".codex"),
+      activitySessionIds: activitySessionIds,
+    });
+  }
+
   readonly provider = CODEX_PROVIDER;
   readonly capabilities = CODEX_APP_SERVER_CAPABILITIES;
   private goalsEnabledPromise: Promise<boolean> | null = null;
@@ -7265,7 +7576,7 @@ export class CodexAppServerAgentClient implements AgentClient {
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,
     options?: AgentCreateSessionOptions,
-  ): Promise<AgentSession> {
+  ): Promise<CodexAppServerAgentSession> {
     if (options?.persistSession === false) {
       this.logger.debug(
         "Codex app-server does not expose an ephemeral-session option; persistSession=false is currently a no-op",
@@ -7335,6 +7646,40 @@ export class CodexAppServerAgentClient implements AgentClient {
     return session;
   }
 
+  async forkSession(
+    source: AgentSession,
+    input: AgentConversationForkInput,
+    launchContext?: AgentLaunchContext,
+  ): Promise<AgentSession> {
+    if (!(source instanceof CodexAppServerAgentSession)) {
+      throw new Error("A Codex conversation fork requires a Codex source session");
+    }
+    const goalsEnabled = await this.resolveGoalsEnabled();
+    const autoReviewEnabled = await this.resolveAutoReviewEnabled();
+    const session = new CodexAppServerAgentSession(
+      { ...input.targetConfig, provider: CODEX_PROVIDER },
+      null,
+      this.logger,
+      () =>
+        this.spawnAppServer(launchContext?.env, {
+          goalsEnabled,
+          agentId: launchContext?.agentId,
+        }),
+      this.sessionDeps(launchContext?.env),
+      false,
+      goalsEnabled,
+      autoReviewEnabled,
+      launchContext?.agentId,
+    );
+    try {
+      await session.forkFromConversation(source, input);
+      return session;
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
+  }
+
   async listImportableSessions(
     options?: ListImportableSessionsOptions,
   ): Promise<ImportableProviderSession[]> {
@@ -7388,6 +7733,25 @@ export class CodexAppServerAgentClient implements AgentClient {
   }
 
   async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+    if (input.fork) {
+      const config = { ...context.config, cwd: input.cwd };
+      const session = await this.createSession(config, context.launchContext);
+      try {
+        await session.forkNativeSession(input.providerHandleId);
+        const persistence = session.describePersistence();
+        if (!persistence) throw new Error("Codex did not return a persistence handle for the copy");
+        const history = await collectImportedHistory(session.streamHistory());
+        return {
+          session,
+          config: { ...context.storedConfig, cwd: input.cwd },
+          persistence,
+          ...history,
+        };
+      } catch (error) {
+        await session.close().catch(() => undefined);
+        throw error;
+      }
+    }
     return importSessionFromPersistence({
       provider: CODEX_PROVIDER,
       request: input,
@@ -7396,17 +7760,19 @@ export class CodexAppServerAgentClient implements AgentClient {
     });
   }
 
-  async getCatalogCacheKey(_options: FetchCatalogOptions): Promise<string> {
-    // This client discovers through host configuration, independent of project cwd.
-    return "host";
+  async getCatalogCacheKey(options: FetchCatalogOptions): Promise<string> {
+    return options.scope === "workspace" ? options.cwd : "host";
   }
 
   async fetchCatalog(
-    _options: FetchCatalogOptions,
+    options: FetchCatalogOptions,
     context?: ProviderRefreshContext,
   ): Promise<ProviderCatalog> {
     const [models, autoReviewEnabled] = await Promise.all([
-      this.fetchModelsFromAppServer(context),
+      this.fetchModelsFromAppServer(
+        options.scope === "workspace" ? options.cwd : undefined,
+        context,
+      ),
       runProviderRefreshActivity(context, "version", () =>
         this.resolveAutoReviewEnabled(context?.signal),
       ),
@@ -7427,9 +7793,9 @@ export class CodexAppServerAgentClient implements AgentClient {
   }
 
   private async fetchModelsFromAppServer(
+    cwd: string | undefined,
     context?: ProviderRefreshContext,
   ): Promise<AgentModelDefinition[]> {
-    // Codex model/list is global to the app server in this flow; cwd/force are intentionally ignored.
     let client: CodexAppServerClient | undefined;
     let disposePromise: Promise<void> | undefined;
     const dispose = () => {
@@ -7452,13 +7818,11 @@ export class CodexAppServerAgentClient implements AgentClient {
       );
       client.notify("initialized", {});
 
-      const rawResponse = await runProviderRefreshActivity(context, "model/list", () =>
-        client!.request("model/list", {}),
+      const models = await runProviderRefreshActivity(context, "model/list", () =>
+        readCodexModels(client!),
       );
-      const parsedResponse = CodexModelListResponseSchema.safeParse(rawResponse);
-      const models = parsedResponse.success ? (parsedResponse.data.data ?? []) : [];
       const configuredDefaults = await runProviderRefreshActivity(context, "config/read", () =>
-        readCodexConfiguredDefaults(client!, this.logger),
+        readCodexConfiguredDefaults(client!, this.logger, cwd),
       );
       const configuredDefaultModelId = configuredDefaults.model;
       const configuredDefaultThinkingOptionId = configuredDefaults.thinkingOptionId;

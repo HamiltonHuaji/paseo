@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const es: TranslationResources = {
+  sessionCanvas: sessionCanvas["es"],
   paneFind: {
     connectionFailure:
       "No se pudo buscar en este chat. Comprueba la conexión con el host y vuelve a intentarlo.",
@@ -336,9 +338,15 @@ export const es: TranslationResources = {
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensaje",
       forkMenu: "Bifurcar mensaje",
+      forkImplementationNative: "Bifurcación nativa de la conversación",
+      forkImplementationCopiedContext: "Copia el historial del chat",
       forkInNewTab: "Bifurcar en una pestaña nueva",
       forkInNewWorkspace: "Bifurcar en un espacio de trabajo nuevo",
       forkUnavailable: "Actualiza el host para usar esto.",
+      forkNativeUnavailable:
+        "Actualiza el cliente y el host de Paseo para bifurcar conversaciones de Codex.",
+      forkWaitForTurn: "Espera a que termine el turno actual antes de bifurcar.",
+      forkSameHost: "Una bifurcación nativa de Codex debe permanecer en el host de origen.",
       forkMissingWorkspace: "Este agente no está en un espacio de trabajo.",
       forkFailed: "No se pudo bifurcar el chat",
       openFile: "Abrir archivo",
@@ -415,6 +423,8 @@ export const es: TranslationResources = {
       all: "Todo",
     },
     status: {
+      importCopy: en.importSession.status.importCopy,
+      retryImport: en.importSession.status.retryImport,
       connectHost: "Conéctese a un host para importar sesiones",
       updateHost: "Actualice el host para importar sesiones.",
       noProviders: "No hay proveedores importables habilitados.",
@@ -2438,6 +2448,11 @@ export const es: TranslationResources = {
           pureBlack: "Negro puro",
           auto: "Sistema",
         },
+      },
+      workspaceTabs: {
+        title: "Pestañas del espacio de trabajo",
+        description: "La izquierda se usa en paneles anchos; los estrechos vuelven arriba",
+        options: { top: "Arriba", left: "Izquierda" },
       },
       detailLevel: {
         title: "Nivel de detalle",

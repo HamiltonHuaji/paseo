@@ -179,6 +179,13 @@ export interface AgentCapabilityFlags {
   supportsRewindConversation?: boolean;
   supportsRewindFiles?: boolean;
   supportsRewindBoth?: boolean;
+  supportsNativeConversationFork?: boolean;
+}
+
+export interface AgentConversationForkInput {
+  boundaryMessageId: string;
+  isLatestCompletedTurn: boolean;
+  targetConfig: AgentSessionConfig;
 }
 
 export interface AgentPersistenceHandle {
@@ -564,6 +571,7 @@ export interface ImportableProviderSession {
 }
 
 export interface ImportProviderSessionInput {
+  fork?: boolean;
   providerHandleId: string;
   cwd: string;
 }
@@ -700,7 +708,9 @@ export interface AgentSession {
   setModel?(modelId: string | null): Promise<void>;
   setThinkingOption?(thinkingOptionId: string | null): Promise<void | AgentProviderNotice>;
   setFeature?(featureId: string, value: unknown): Promise<void>;
-  revertConversation?(input: { messageId: string }): Promise<void>;
+  revertConversation?(input: {
+    messageId: string;
+  }): Promise<void | { rollback: () => Promise<void> }>;
   revertFiles?(input: { messageId: string }): Promise<void>;
   revertBoth?(input: { messageId: string }): Promise<void>;
   /**
@@ -760,6 +770,11 @@ export interface AgentClient {
     launchContext?: AgentLaunchContext,
     options?: AgentResumeSessionOptions,
   ): Promise<AgentSession>;
+  forkSession?(
+    source: AgentSession,
+    input: AgentConversationForkInput,
+    launchContext?: AgentLaunchContext,
+  ): Promise<AgentSession>;
   /** Equal keys share availability and catalogue discovery within this configured client.
    * Include the execution environment and effective configuration; omit to use target identity.
    * force must not affect identity. Resolve before every cache lookup. */
@@ -783,6 +798,9 @@ export interface AgentClient {
   isCreateConfigUnattended?(input: AgentCreateConfigUnattendedInput): boolean;
   listCommands?(config: AgentSessionConfig): Promise<AgentSlashCommand[]>;
   listFeatures?(config: AgentSessionConfig): Promise<AgentFeature[]>;
+  readSessionLineage?(
+    activitySessionIds?: readonly string[],
+  ): Promise<import("./session-lineage.js").ProviderSessionLineage[]>;
   listImportableSessions?(
     options?: ListImportableSessionsOptions,
   ): Promise<ImportableProviderSession[]>;

@@ -9,7 +9,11 @@ import type {
   CreatePaseoWorktreeWorkflowFn,
   CreatePaseoWorktreeWorkflowResult,
 } from "../../worktree-session.js";
-import type { AgentAttachment, FirstAgentContext } from "../../messages.js";
+import type {
+  AgentAttachment,
+  AgentConversationForkSource,
+  FirstAgentContext,
+} from "../../messages.js";
 import type { AgentManager, CreateAgentOptions, ManagedAgent } from "../agent-manager.js";
 import type { AgentPromptInput, AgentRunOptions, AgentSessionConfig } from "../agent-sdk-types.js";
 import type { AgentStorage } from "../agent-storage.js";
@@ -57,6 +61,7 @@ export interface CreateAgentFromSessionInput {
   labels: Record<string, string>;
   env?: Record<string, string>;
   provisionalTitle: string | null;
+  forkFrom?: AgentConversationForkSource;
   firstAgentContext: FirstAgentContext;
 }
 
@@ -150,6 +155,7 @@ interface ResolvedCreateAgent {
   promptFailure: CreateAgentPromptFailureMode;
   promptLogger?: Logger;
   createdWorktree?: CreatePaseoWorktreeWorkflowResult;
+  forkFrom?: AgentConversationForkSource;
 }
 
 export async function createAgentCommand(
@@ -161,11 +167,18 @@ export async function createAgentCommand(
       ? await resolveSessionCreateAgent(dependencies, input)
       : await resolveMcpCreateAgent(dependencies, input);
 
-  const snapshot = await dependencies.agentManager.createAgent(
-    resolved.config,
-    input.kind === "session" ? input.agentId : undefined,
-    resolved.createOptions,
-  );
+  const snapshot = resolved.forkFrom
+    ? await dependencies.agentManager.forkAgentFromConversation(
+        resolved.forkFrom,
+        resolved.config,
+        input.kind === "session" ? input.agentId : undefined,
+        resolved.createOptions,
+      )
+    : await dependencies.agentManager.createAgent(
+        resolved.config,
+        input.kind === "session" ? input.agentId : undefined,
+        resolved.createOptions,
+      );
 
   if (input.kind === "session") await input.onAgentReady?.(snapshot);
 
@@ -245,6 +258,13 @@ async function resolveSessionCreateAgent(
   return {
     config: sessionConfig,
     createOptions: {
+      contextForkSourceAgentId: input.attachments?.flatMap((attachment) =>
+        attachment.type === "text" &&
+        attachment.contextKind === "chat_history" &&
+        attachment.sourceAgentId
+          ? [attachment.sourceAgentId]
+          : [],
+      )[0],
       labels: input.labels,
       initialPrompt: trimmedPrompt,
       env: input.env,
@@ -262,6 +282,7 @@ async function resolveSessionCreateAgent(
     promptLogger: dependencies.logger.child({
       clientMessageId: resolveClientMessageId(input.clientMessageId),
     }),
+    forkFrom: input.forkFrom,
   };
 }
 

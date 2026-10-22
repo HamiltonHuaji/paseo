@@ -1,3 +1,4 @@
+import { readInitialSessionIds, recoverSessionLineage } from "./session-lineage.js";
 import { projectTimelineRows } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
@@ -19,6 +20,7 @@ import {
 import type { Logger } from "pino";
 import type { ToolPolicy } from "@getpaseo/protocol/agent-types";
 import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
+import type { AgentConversationForkSource } from "@getpaseo/protocol/messages";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 
@@ -92,6 +94,7 @@ import {
 } from "./provider-subagents/store.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import { extractAttention } from "../persistence-hooks.js";
+import { resolveConversationForkBoundary } from "./conversation-fork-boundary.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -306,7 +309,27 @@ interface ProviderEnabledFlag {
 type ProviderEnabledMap = Partial<Record<AgentProvider, ProviderEnabledFlag>>;
 type ProviderClientMap = Partial<Record<AgentProvider, AgentClient>>;
 
+function restoreLastAssistantMessageTime(agent: ManagedAgent, rows: AgentTimelineRow[] = []): void {
+  for (const row of rows) {
+    if (row.item.type !== "assistant_message") continue;
+    const timestamp = new Date(row.timestamp);
+    if (!agent.lastAssistantMessageAt || timestamp > agent.lastAssistantMessageAt)
+      agent.lastAssistantMessageAt = timestamp;
+  }
+}
+
+function initialConversationMetadata(
+  options?: Pick<ManagedAgent, "lastAssistantMessageAt" | "forkedFrom" | "providerSessionIds">,
+) {
+  return {
+    lastAssistantMessageAt: options?.lastAssistantMessageAt ?? null,
+    forkedFrom: options?.forkedFrom,
+    providerSessionIds: options?.providerSessionIds ?? [],
+  };
+}
+
 export interface CreateAgentOptions {
+  contextForkSourceAgentId?: string;
   labels?: Record<string, string>;
   initialPrompt?: string;
   env?: Record<string, string>;
@@ -428,6 +451,9 @@ interface ManagedAgentBase {
   persistence: AgentPersistenceHandle | null;
   historyPrimed: boolean;
   lastUserMessageAt: Date | null;
+  lastAssistantMessageAt?: Date | null;
+  forkedFrom?: StoredAgentRecord["forkedFrom"];
+  providerSessionIds?: string[];
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
   lastUsage?: AgentUsage;
@@ -1276,6 +1302,128 @@ export class AgentManager {
     return this.trackAgentRegistrationOperation(this.createAgentInternal(config, agentId, options));
   }
 
+  forkAgentFromConversation(
+    source: AgentConversationForkSource,
+    config: AgentSessionConfig,
+    agentId: string | undefined,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(
+      this.forkAgentFromConversationInternal(source, config, agentId, options),
+    );
+  }
+
+  private async forkAgentFromConversationInternal(
+    source: AgentConversationForkSource,
+    config: AgentSessionConfig,
+    agentId: string | undefined,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
+    const sourceAgent = this.requireSessionAgent(source.agentId);
+    if (sourceAgent.lifecycle === "initializing") {
+      throw new Error("Wait for the current turn to finish before forking this conversation");
+    }
+    if (!sourceAgent.capabilities.supportsNativeConversationFork) {
+      throw new Error(
+        `Provider '${sourceAgent.provider}' does not support native conversation forks`,
+      );
+    }
+    if (sourceAgent.provider !== config.provider) {
+      throw new Error("A native conversation fork must use the same provider as its source");
+    }
+
+    const sourceHasRun = this.hasInFlightRun(sourceAgent.id) || isAgentBusy(sourceAgent.lifecycle);
+    const timeline = this.fetchTimeline(sourceAgent.id, { direction: "tail", limit: 0 });
+    const boundary = resolveConversationForkBoundary({
+      source,
+      epoch: timeline.epoch,
+      rows: timeline.rows,
+      sourceHasActiveTurn: sourceHasRun,
+    });
+    const sourceLock = sourceHasRun ? null : this.runs.createPendingRun(sourceAgent.id);
+    try {
+      const resolvedAgentId = validateAgentId(
+        agentId ?? this.idFactory(),
+        "forkAgentFromConversation",
+      );
+      await this.deleteAgentState(resolvedAgentId);
+      const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
+        {
+          ...sourceAgent.config,
+          ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined)),
+          featureValues: { ...sourceAgent.config.featureValues, ...config.featureValues },
+        },
+        resolvedAgentId,
+        { env: options.env },
+      );
+      this.requireEnabledProvider(storedConfig.provider);
+      const client = await this.requireAvailableClient({ provider: storedConfig.provider });
+      if (!client.capabilities.supportsNativeConversationFork || !client.forkSession) {
+        throw new Error(
+          `Provider '${storedConfig.provider}' does not support native conversation forks`,
+        );
+      }
+      this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
+      const launchContext = await this.buildLaunchContext(
+        resolvedAgentId,
+        client,
+        storedConfig.cwd,
+        paseoToolPolicy,
+        options.env,
+        { reason: "create", purpose: "interactive", workspaceId: options.workspaceId ?? null },
+      );
+      const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
+      const session = await client.forkSession(
+        sourceAgent.session,
+        { ...boundary, targetConfig: providerLaunchConfig },
+        launchContext,
+      );
+      try {
+        await this.requireExternalMcpSupport(session, storedConfig);
+      } catch (error) {
+        await this.closeUnregisteredSession(session);
+        throw error;
+      }
+      const persistence = session.describePersistence();
+      if (!persistence) {
+        await session.close();
+        throw new Error("The forked provider session did not return a persistence handle");
+      }
+      if (persistence.provider !== storedConfig.provider) {
+        await session.close();
+        throw new Error("The forked provider session does not match the requested provider");
+      }
+      const registered = await this.registerSession(session, storedConfig, resolvedAgentId, {
+        forkedFrom: {
+          agentId: sourceAgent.id,
+          forkedAt: new Date().toISOString(),
+          operation: "native-fork",
+          sourceProviderSessionId: sourceAgent.persistence?.sessionId,
+          resultProviderSessionId: persistence.sessionId,
+          boundaryMessageId: boundary.boundaryMessageId,
+        },
+        labels: options.labels,
+        initialTitle: options.initialTitle,
+        workspaceId: options.workspaceId,
+        owner: options.owner,
+        persistence,
+        historyPrimed: false,
+      });
+      try {
+        await this.hydrateTimelineFromProvider(registered.id);
+      } catch (error) {
+        await this.closeAgent(registered.id);
+        throw error;
+      }
+      return this.getAgent(registered.id) ?? registered;
+    } finally {
+      if (sourceLock) {
+        this.runs.settleForegroundRun(sourceAgent.id, sourceLock.token);
+      }
+    }
+  }
+
   private async createAgentInternal(
     config: AgentSessionConfig,
     agentId: string | undefined,
@@ -1315,6 +1463,13 @@ export class AgentManager {
     const session = await client.createSession(providerLaunchConfig, launchContext, createOptions);
     await this.requireExternalMcpSupport(session, storedConfig);
     const agent = await this.registerSession(session, storedConfig, resolvedAgentId, {
+      forkedFrom: options.contextForkSourceAgentId
+        ? {
+            agentId: options.contextForkSourceAgentId,
+            forkedAt: new Date().toISOString(),
+            operation: "text-copy",
+          }
+        : undefined,
       labels: options.labels,
       initialTitle: options.initialTitle,
       workspaceId: options.workspaceId,
@@ -1347,6 +1502,9 @@ export class AgentManager {
       createdAt?: Date;
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
+      lastAssistantMessageAt?: Date | null;
+      forkedFrom?: StoredAgentRecord["forkedFrom"];
+      providerSessionIds?: string[];
       labels?: Record<string, string>;
       workspaceId?: string;
       owner?: AgentOwner;
@@ -1379,6 +1537,9 @@ export class AgentManager {
       createdAt?: Date;
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
+      lastAssistantMessageAt?: Date | null;
+      forkedFrom?: StoredAgentRecord["forkedFrom"];
+      providerSessionIds?: string[];
       labels?: Record<string, string>;
       workspaceId?: string;
       owner?: AgentOwner;
@@ -1450,6 +1611,7 @@ export class AgentManager {
   importProviderSession(input: {
     provider: AgentProvider;
     providerHandleId: string;
+    fork?: boolean;
     cwd: string;
     workspaceId: string;
     labels?: Record<string, string>;
@@ -1460,6 +1622,7 @@ export class AgentManager {
   private async importProviderSessionInternal(input: {
     provider: AgentProvider;
     providerHandleId: string;
+    fork?: boolean;
     cwd: string;
     workspaceId: string;
     labels?: Record<string, string>;
@@ -1493,6 +1656,7 @@ export class AgentManager {
     const imported = await client.importSession(
       {
         providerHandleId: input.providerHandleId,
+        fork: input.fork,
         cwd: input.cwd,
       },
       { config: providerLaunchConfig, storedConfig, launchContext },
@@ -1504,6 +1668,18 @@ export class AgentManager {
       );
       const timelineRows = buildImportedTimelineRows(imported.timeline);
       const initialTitle = resolveImportedAgentTitle(importedConfig, timelineRows);
+      const sources =
+        input.fork && this.registry
+          ? (await this.registry.list()).filter(
+              (record) =>
+                record.provider === input.provider &&
+                (record.persistence?.sessionId === input.providerHandleId ||
+                  record.providerSessionIds?.includes(input.providerHandleId)),
+            )
+          : [];
+      // An imported native branch may have multiple managed owners. Keep that
+      // ambiguity instead of attributing the copy to an arbitrary session.
+      const source = sources.length === 1 ? sources[0] : undefined;
 
       handedToRegistration = true;
       const agent = await this.registerSession(imported.session, importedConfig, resolvedAgentId, {
@@ -1512,6 +1688,15 @@ export class AgentManager {
         timelineRows,
         timelineNextSeq: timelineRows.length + 1,
         persistence: imported.persistence,
+        forkedFrom: source
+          ? {
+              agentId: source.id,
+              forkedAt: new Date().toISOString(),
+              operation: "import-copy",
+              sourceProviderSessionId: input.providerHandleId,
+              resultProviderSessionId: imported.persistence.sessionId,
+            }
+          : undefined,
         historyPrimed: true,
         initialTitle,
         publishWhenReady: true,
@@ -1629,6 +1814,9 @@ export class AgentManager {
         createdAt: existing.createdAt,
         updatedAt: existing.updatedAt,
         lastUserMessageAt: existing.lastUserMessageAt,
+        lastAssistantMessageAt: existing.lastAssistantMessageAt,
+        forkedFrom: existing.forkedFrom,
+        providerSessionIds: existing.providerSessionIds,
         historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
         lastUsage: preservedLastUsage,
         lastError: preservedLastError,
@@ -1823,6 +2011,45 @@ export class AgentManager {
     }
   }
 
+  /** Bootstrap reconciliation runs before agents can start; it never resumes them. */
+  async recoverStoredSessionLineage(paseoHome: string): Promise<void> {
+    if (!this.registry) return;
+    const records = await this.registry.list();
+    const initialIds = await readInitialSessionIds(paseoHome);
+    for (const [provider, client] of this.clients) {
+      if (!client.readSessionLineage) continue;
+      const matching = records.filter(
+        (record) => record.provider === provider && record.persistence,
+      );
+      if (!matching.length) continue;
+      try {
+        const recovered = recoverSessionLineage({
+          records: matching,
+          history: await client.readSessionLineage(
+            matching
+              .filter((record) => !record.lastAssistantMessageAt)
+              .map((record) => record.persistence!.sessionId),
+          ),
+          initialIds: initialIds,
+        });
+        for (const record of matching) {
+          const metadata = recovered.get(record.id);
+          if (
+            metadata &&
+            (JSON.stringify(record.providerSessionIds) !==
+              JSON.stringify(metadata.providerSessionIds) ||
+              JSON.stringify(record.forkedFrom) !== JSON.stringify(metadata.forkedFrom) ||
+              record.lastAssistantMessageAt !== metadata.lastAssistantMessageAt)
+          ) {
+            await this.registry.upsert({ ...record, ...metadata });
+          }
+        }
+      } catch (err) {
+        this.logger.warn({ err, provider }, "Unable to recover provider session lineage");
+      }
+    }
+  }
+
   async archiveAgent(agentId: string): Promise<{ archivedAt: string }> {
     return this.runLifecycleMutation(agentId, () => this.archiveAgentUnlocked(agentId));
   }
@@ -2012,6 +2239,11 @@ export class AgentManager {
         persistence: record.persistence ?? null,
         historyPrimed: true,
         lastUserMessageAt: record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null,
+        lastAssistantMessageAt: record.lastAssistantMessageAt
+          ? new Date(record.lastAssistantMessageAt)
+          : null,
+        forkedFrom: record.forkedFrom,
+        providerSessionIds: record.providerSessionIds,
         lastUsage: undefined,
         lastError: record.lastError ?? undefined,
         attention,
@@ -3251,7 +3483,9 @@ export class AgentManager {
     options?: HydrateTimelineOptions,
   ): Promise<void> {
     const agent = this.requireSessionAgent(agentId);
+    const previousReply = agent.lastAssistantMessageAt;
     await this.hydrateTimelineFromLegacyProviderHistory(agent, options);
+    if (agent.lastAssistantMessageAt !== previousReply) this.emitState(agent);
   }
 
   async rewind(agentId: string, messageId: string, mode: RewindMode): Promise<void> {
@@ -3273,13 +3507,34 @@ export class AgentManager {
       await this.cancelAgentRunBefore(agentId, "rewind");
     }
 
+    const previousPersistence = agent.persistence;
+    const previousAliases = agent.providerSessionIds;
+    const previousError = agent.lastError;
+    let mutation: void | { rollback: () => Promise<void> } = undefined;
     const lock = this.runs.createPendingRun(agentId);
     try {
       this.logger.info(
         { agentId, provider: agent.provider, messageId, mode },
         "agent.rewind.start",
       );
-      await invokeRewindCapability(agent.session, { messageId: providerMessageId, mode });
+      this.refreshSessionPersistence(agent);
+      if (agent.persistence && mode !== "files") {
+        agent.persistence = {
+          ...agent.persistence,
+          metadata: {
+            ...agent.persistence.metadata,
+            rewindPending: { messageId: providerMessageId, startedAt: new Date().toISOString() },
+          },
+        };
+        agent.lastError =
+          "Rewind was interrupted before commit; the original branch remains recoverable. Reopen to reload its history.";
+        // Persist intent before replacing either provider identity or canonical history.
+        await this.persistSnapshot(agent);
+      }
+      mutation = await invokeRewindCapability(agent.session, {
+        messageId: providerMessageId,
+        mode,
+      });
       if (mode !== "files") {
         await this.hydrateTimelineFromProvider(agentId, {
           force: true,
@@ -3295,6 +3550,7 @@ export class AgentManager {
       // Rewind stages provider events under the run lock; publish its final state directly.
       this.refreshSessionPersistence(agent);
       await this.refreshSessionState(agent, { emit: false });
+      agent.lastError = previousError;
       await this.persistSnapshot(agent);
       this.emitState(agent, { persist: false });
       this.logger.info(
@@ -3302,6 +3558,21 @@ export class AgentManager {
         "agent.rewind.complete",
       );
     } catch (error) {
+      if (mutation?.rollback) {
+        await mutation.rollback();
+        await this.hydrateTimelineFromProvider(agentId, { force: true, broadcast: true });
+        await this.refreshSessionState(agent, { emit: false });
+        this.dispatch({
+          type: "timeline_replacement",
+          agentId,
+          epoch: this.timelineStore.getEpoch(agentId),
+        });
+      }
+      agent.persistence = previousPersistence;
+      agent.providerSessionIds = previousAliases;
+      agent.lastError = error instanceof Error ? error.message : String(error);
+      await this.persistSnapshot(agent);
+      this.emitState(agent, { persist: false });
       this.logger.warn(
         { err: error, agentId, provider: agent.provider, messageId, mode },
         "agent.rewind.failed",
@@ -3558,6 +3829,9 @@ export class AgentManager {
       createdAt?: Date;
       updatedAt?: Date;
       lastUserMessageAt?: Date | null;
+      lastAssistantMessageAt?: Date | null;
+      forkedFrom?: StoredAgentRecord["forkedFrom"];
+      providerSessionIds?: string[];
       labels?: Record<string, string>;
       timeline?: AgentTimelineItem[];
       timelineRows?: AgentTimelineRow[];
@@ -3618,6 +3892,7 @@ export class AgentManager {
       }
 
       this.assertAcceptingAgentRegistrations();
+      restoreLastAssistantMessageTime(managed, options?.timelineRows);
       this.agents.set(resolvedAgentId, managed);
       registered = true;
       // Initialize previousStatus to track transitions
@@ -3716,6 +3991,10 @@ export class AgentManager {
       | undefined;
   }): Promise<{ durableTimelineHasRows: boolean }> {
     const { agentId, now, options } = params;
+    if (options?.persistence?.metadata?.rewindPending) {
+      await this.deleteCommittedTimeline(agentId);
+      this.timelineStore.delete(agentId);
+    }
     const timelineAlreadyPrimed = this.timelineStore.has(agentId);
     const explicitTimelineSeed = buildExplicitTimelineSeedForRegister(now, options);
     const shouldSeedFromDurable =
@@ -3747,6 +4026,9 @@ export class AgentManager {
           createdAt?: Date;
           updatedAt?: Date;
           lastUserMessageAt?: Date | null;
+          lastAssistantMessageAt?: Date | null;
+          forkedFrom?: StoredAgentRecord["forkedFrom"];
+          providerSessionIds?: string[];
           labels?: Record<string, string>;
           historyPrimed?: boolean;
           lastUsage?: AgentUsage;
@@ -3759,6 +4041,8 @@ export class AgentManager {
       | undefined;
   }): ActiveManagedAgent {
     const { resolvedAgentId, session, config, now, durableTimelineHasRows, options } = params;
+    const { lastAssistantMessageAt, forkedFrom, providerSessionIds } =
+      initialConversationMetadata(options);
     return {
       id: resolvedAgentId,
       provider: config.provider,
@@ -3790,6 +4074,9 @@ export class AgentManager {
       ),
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
+      lastAssistantMessageAt,
+      forkedFrom,
+      providerSessionIds,
       lastUsage: options?.lastUsage,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
@@ -4162,11 +4449,11 @@ export class AgentManager {
       }
     }
     for (const event of historyEvents) {
-      const row = this.recordTimeline(
-        agent.id,
-        event.item,
-        event.timestamp ? { timestamp: event.timestamp } : undefined,
-      );
+      const row = this.recordTimeline(agent.id, event.item, {
+        timestamp: event.timestamp,
+        fromHistory: true,
+        persist: false,
+      });
       if (broadcastTimeline) {
         this.dispatchStream(agent.id, event, {
           seq: row.seq,
@@ -4175,6 +4462,9 @@ export class AgentManager {
         });
       }
     }
+    // A rewind must not clear its durable intent before its replacement history
+    // is committed. Surface write failures to the operation's rollback path.
+    await this.durableTimelineStore?.bulkInsert(agent.id, this.timelineStore.getRows(agent.id));
     this.touchUpdatedAt(agent);
     this.emitState(agent);
   }
@@ -4231,11 +4521,10 @@ export class AgentManager {
       }
     }
     for (const event of historyEvents) {
-      const row = this.recordTimeline(
-        agent.id,
-        event.item,
-        event.timestamp ? { timestamp: event.timestamp } : undefined,
-      );
+      const row = this.recordTimeline(agent.id, event.item, {
+        timestamp: event.timestamp,
+        fromHistory: true,
+      });
       if (deferredBroadcast) {
         timelineEvents.push({ event, row });
       } else if (broadcast) {
@@ -4525,6 +4814,13 @@ export class AgentManager {
   private refreshSessionPersistence(agent: ActiveManagedAgent): void {
     const handle = agent.session.describePersistence();
     if (handle) {
+      agent.providerSessionIds = Array.from(
+        new Set([
+          ...(agent.providerSessionIds ?? []),
+          ...(agent.persistence?.sessionId ? [agent.persistence.sessionId] : []),
+          handle.sessionId,
+        ]),
+      );
       agent.persistence = attachPersistenceCwd(handle, agent.cwd);
     }
   }
@@ -4548,11 +4844,7 @@ export class AgentManager {
         continue;
 
       if (options?.fromHistory) {
-        this.recordTimeline(
-          agent.id,
-          item,
-          event.timestamp ? { timestamp: event.timestamp } : undefined,
-        );
+        this.recordTimeline(agent.id, item, { timestamp: event.timestamp, fromHistory: true });
         continue;
       }
 
@@ -4927,13 +5219,30 @@ export class AgentManager {
     item: AgentTimelineItem,
     options?: {
       timestamp?: string;
+      fromHistory?: boolean;
+      persist?: boolean;
       providerMessageId?: string;
       turnId?: string;
     },
   ): AgentTimelineRow {
     item = limitAgentTimelineItemContent(item);
     const row = this.timelineStore.append(agentId, item, options);
-    this.enqueueDurableTimelineAppend(agentId, row);
+    const agent = this.agents.get(agentId);
+    if (
+      agent &&
+      item.type === "assistant_message" &&
+      (!options?.fromHistory || options.timestamp)
+    ) {
+      const timestamp = new Date(row.timestamp);
+      // Inherited messages belong to the source conversation, before this fork existed.
+      if (
+        (!agent.forkedFrom || timestamp >= new Date(agent.forkedFrom.forkedAt)) &&
+        (!agent.lastAssistantMessageAt || timestamp > agent.lastAssistantMessageAt)
+      ) {
+        agent.lastAssistantMessageAt = timestamp;
+      }
+    }
+    if (options?.persist !== false) this.enqueueDurableTimelineAppend(agentId, row);
     return row;
   }
 

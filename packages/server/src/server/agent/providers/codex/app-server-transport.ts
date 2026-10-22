@@ -217,7 +217,13 @@ export class CodexAppServerClient {
   ) {
     this.stdoutLineReader = createNewlineLineReader(child.stdout, (line) => {
       void this.handleLine(line).catch((error) => {
-        this.logger.warn({ error, line }, "Failed to handle Codex app-server stdout line");
+        this.logger.warn(
+          {
+            errorType: error instanceof Error ? error.name : typeof error,
+            byteLength: Buffer.byteLength(line, "utf8"),
+          },
+          "Failed to handle Codex app-server stdout line",
+        );
       });
     });
 
@@ -357,12 +363,21 @@ export class CodexAppServerClient {
     try {
       raw = JSON.parse(line);
     } catch (error) {
-      this.logger.warn({ error, line }, "Ignoring non-JSON Codex app-server stdout line");
+      this.logger.warn(
+        {
+          errorType: error instanceof Error ? error.name : typeof error,
+          byteLength: Buffer.byteLength(line, "utf8"),
+        },
+        "Ignoring non-JSON Codex app-server stdout line",
+      );
       return;
     }
 
     if (!isRecord(raw)) {
-      this.logger.warn({ line }, "Parsed JSON is not an object");
+      this.logger.warn(
+        { byteLength: Buffer.byteLength(line, "utf8") },
+        "Parsed JSON is not an object",
+      );
       return;
     }
 

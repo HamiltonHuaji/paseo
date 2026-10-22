@@ -206,6 +206,7 @@ const perfNow: () => number =
 const PROJECT_GITHUB_CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 
 interface ImportAgentInputBase {
+  fork?: boolean;
   cwd?: string;
   workspaceId?: string;
   labels?: Record<string, string>;
@@ -475,6 +476,9 @@ export interface CreateAgentRequestOptions extends AgentConfigOverrides {
   autoArchive?: CreateAgentRequestMessage["autoArchive"];
   background?: CreateAgentRequestMessage["background"];
   /** @deprecated Use createWorkspace({ source, agent, idempotencyKey }); rejected by createAgent. */
+  forkFrom?: CreateAgentRequestMessage["forkFrom"];
+  // COMPAT(createAgentWorktree): low-level old callers may still send the
+  // create-agent worktree field. Added in v0.2.0; remove after 2027-01-17.
   worktreeName?: string;
   requestId?: string;
   labels?: Record<string, string>;
@@ -3174,6 +3178,7 @@ export class DaemonClient {
       ...(options.worktree ? { worktree: options.worktree } : {}),
       ...(options.autoArchive !== undefined ? { autoArchive: options.autoArchive } : {}),
       ...(options.background !== undefined ? { background: options.background } : {}),
+      ...(options.forkFrom ? { forkFrom: options.forkFrom } : {}),
       ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
       ...(options.labels && Object.keys(options.labels).length > 0
         ? { labels: options.labels }
@@ -3453,6 +3458,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "import_agent_request",
       requestId,
+      ...(input.fork ? { fork: true } : {}),
       ...("providerId" in input
         ? { providerId: input.providerId, providerHandleId: input.providerHandleId }
         : { provider: input.provider, sessionId: input.sessionId }),

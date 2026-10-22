@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
+  sessionCanvas: sessionCanvas["fr"],
   paneFind: {
     connectionFailure:
       "Impossible de rechercher dans cette conversation. Vérifiez la connexion à l’hôte et réessayez.",
@@ -335,12 +337,18 @@ export const fr: TranslationResources = {
       copyCode: "Copier le code",
       copyTurn: "Copier l’échange",
       copyMessage: "Copier le message",
-      forkMenu: "Forker la conversation à partir d’ici",
-      forkInNewTab: "Forker dans un nouvel onglet",
-      forkInNewWorkspace: "Forker dans un nouvel espace de travail",
-      forkUnavailable: "Mettez à jour l’hôte pour utiliser cette fonction.",
-      forkMissingWorkspace: "Cet agent n’est dans aucun espace de travail.",
-      forkFailed: "Impossible de forker la conversation",
+      forkMenu: "Dupliquer le message",
+      forkImplementationNative: "Duplication native de la conversation",
+      forkImplementationCopiedContext: "Copie l’historique de discussion",
+      forkInNewTab: "Dupliquer dans un nouvel onglet",
+      forkInNewWorkspace: "Dupliquer dans un nouvel espace de travail",
+      forkUnavailable: "Mettez l'hôte à jour pour utiliser ceci.",
+      forkNativeUnavailable:
+        "Mettez à jour le client Paseo et l'hôte pour dupliquer les conversations Codex.",
+      forkWaitForTurn: "Attendez la fin du tour actuel avant de dupliquer.",
+      forkSameHost: "Une duplication native Codex doit rester sur l'hôte source.",
+      forkMissingWorkspace: "Cet agent n'est pas dans un espace de travail.",
+      forkFailed: "Impossible de dupliquer le chat",
       openFile: "Ouvrir le fichier",
       copied: "Copié",
     },
@@ -415,6 +423,8 @@ export const fr: TranslationResources = {
       all: "Tous",
     },
     status: {
+      importCopy: en.importSession.status.importCopy,
+      retryImport: en.importSession.status.retryImport,
       connectHost: "Connectez-vous à un hôte pour importer des sessions",
       updateHost: "Mettez à jour l’hôte pour importer des sessions.",
       noProviders: "Aucun fournisseur importable n’est activé.",
@@ -2438,6 +2448,11 @@ export const fr: TranslationResources = {
           pureBlack: "Noir pur",
           auto: "Système",
         },
+      },
+      workspaceTabs: {
+        title: "Onglets de l’espace de travail",
+        description: "À gauche sur les volets larges ; en haut sur les volets étroits",
+        options: { top: "En haut", left: "À gauche" },
       },
       detailLevel: {
         title: "Niveau de détail",

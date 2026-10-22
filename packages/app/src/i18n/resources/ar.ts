@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ar: TranslationResources = {
+  sessionCanvas: sessionCanvas["ar"],
   paneFind: {
     connectionFailure: "تعذر البحث في هذه المحادثة. تحقق من الاتصال بالمضيف وأعد المحاولة.",
     historyChangedFailure: "تغيّرت المحادثة أثناء البحث. أعد البحث.",
@@ -331,9 +333,14 @@ export const ar: TranslationResources = {
       copyTurn: "نسخ بدوره",
       copyMessage: "انسخ الرسالة",
       forkMenu: "تفريع الرسالة",
+      forkImplementationNative: "تفريع محادثة أصلي",
+      forkImplementationCopiedContext: "ينسخ سجل المحادثة",
       forkInNewTab: "تفريع في تبويب جديد",
       forkInNewWorkspace: "تفريع في مساحة عمل جديدة",
       forkUnavailable: "حدّث المضيف لاستخدام هذا.",
+      forkNativeUnavailable: "حدّث عميل Paseo والمضيف لتفريع محادثات Codex أصليًا.",
+      forkWaitForTurn: "انتظر حتى تنتهي الجولة الحالية قبل التفريع.",
+      forkSameHost: "يجب أن يبقى تفريع Codex الأصلي على المضيف المصدر.",
       forkMissingWorkspace: "هذا الوكيل ليس في مساحة عمل.",
       forkFailed: "فشل تفريع المحادثة",
       openFile: "افتح الملف",
@@ -410,6 +417,8 @@ export const ar: TranslationResources = {
       all: "الجميع",
     },
     status: {
+      importCopy: en.importSession.status.importCopy,
+      retryImport: en.importSession.status.retryImport,
       connectHost: "اتصل بمضيف لاستيراد الجلسات",
       updateHost: "قم بتحديث المضيف لاستيراد الجلسات.",
       noProviders: "لم يتم تمكين أي موفري خدمات قابلين للاستيراد.",
@@ -2422,6 +2431,11 @@ export const ar: TranslationResources = {
           pureBlack: "أسود خالص",
           auto: "نظام",
         },
+      },
+      workspaceTabs: {
+        title: "علامات تبويب مساحة العمل",
+        description: "يُستخدم الجانب الأيسر في الأجزاء العريضة؛ وتعود الأجزاء الضيقة إلى الأعلى",
+        options: { top: "أعلى", left: "اليسار" },
       },
       detailLevel: {
         title: "مستوى التفاصيل",

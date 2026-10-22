@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ko: TranslationResources = {
+  sessionCanvas: sessionCanvas["ko"],
   paneFind: {
     connectionFailure: "이 채팅을 검색할 수 없습니다. 호스트 연결을 확인하고 다시 시도하세요.",
     historyChangedFailure: "검색 중에 채팅이 변경되었습니다. 다시 검색하세요.",
@@ -332,9 +334,15 @@ export const ko: TranslationResources = {
       copyTurn: "턴 복사",
       copyMessage: "메시지 복사",
       forkMenu: "여기에서 채팅 분기",
+      forkImplementationNative: "네이티브 대화 분기",
+      forkImplementationCopiedContext: "채팅 기록 복사",
       forkInNewTab: "새 탭으로 분기",
       forkInNewWorkspace: "새 워크스페이스로 분기",
       forkUnavailable: "이를 사용하려면 호스트를 업데이트하세요.",
+      forkNativeUnavailable:
+        "Codex 대화를 네이티브로 분기하려면 Paseo 클라이언트와 호스트를 업데이트하세요.",
+      forkWaitForTurn: "현재 턴이 끝날 때까지 기다린 후 분기하세요.",
+      forkSameHost: "Codex 네이티브 분기는 원본 호스트에 있어야 합니다.",
       forkMissingWorkspace: "이 에이전트는 워크스페이스에 속해 있지 않습니다.",
       forkFailed: "채팅을 분기하지 못했습니다.",
       openFile: "파일 열기",
@@ -411,6 +419,8 @@ export const ko: TranslationResources = {
       all: "전체",
     },
     status: {
+      importCopy: en.importSession.status.importCopy,
+      retryImport: en.importSession.status.retryImport,
       connectHost: "세션을 가져오려면 호스트에 연결하세요",
       updateHost: "세션을 가져오려면 호스트를 업데이트하세요.",
       noProviders: "가져올 수 있는 프로바이더가 활성화되어 있지 않습니다.",
@@ -2397,6 +2407,11 @@ export const ko: TranslationResources = {
           pureBlack: "순수 검정",
           auto: "시스템",
         },
+      },
+      workspaceTabs: {
+        title: "워크스페이스 탭",
+        description: "넓은 창에서는 왼쪽에 표시하고 좁은 창에서는 위쪽으로 돌아갑니다",
+        options: { top: "위쪽", left: "왼쪽" },
       },
       detailLevel: {
         title: "세부 수준",

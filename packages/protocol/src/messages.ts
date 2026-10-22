@@ -399,6 +399,8 @@ const AgentCapabilityFlagsSchema: z.ZodType<AgentCapabilityFlags> = z
     supportsRewindFiles: z.boolean().optional().default(false),
     // COMPAT(rewind): added in v0.1.X, drop when floor >= v0.1.X.
     supportsRewindBoth: z.boolean().optional().default(false),
+    // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+    supportsNativeConversationFork: z.boolean().optional().default(false),
   })
   .catchall(z.boolean());
 
@@ -829,6 +831,15 @@ const AgentActiveTurnPayloadSchema = z.object({
   startedAt: z.string().nullable(),
 });
 
+export const AgentForkOriginSchema = z.object({
+  agentId: z.string(),
+  forkedAt: z.string(),
+  operation: z.enum(["native-fork", "text-copy", "import-copy"]).optional(),
+  sourceProviderSessionId: z.string().optional(),
+  resultProviderSessionId: z.string().optional(),
+  boundaryMessageId: z.string().optional(),
+});
+
 export const AgentSnapshotPayloadSchema = z.object({
   id: z.string(),
   provider: AgentProviderSchema,
@@ -841,6 +852,8 @@ export const AgentSnapshotPayloadSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   lastUserMessageAt: z.string().nullable(),
+  lastAssistantMessageAt: z.string().nullable().optional(),
+  forkedFrom: AgentForkOriginSchema.optional(),
   status: AgentStatusSchema,
   activeTurn: AgentActiveTurnPayloadSchema.nullable().optional(),
   capabilities: AgentCapabilityFlagsSchema,
@@ -877,6 +890,8 @@ export const AgentListItemPayloadSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   lastUserMessageAt: z.string().nullable(),
+  lastAssistantMessageAt: z.string().nullable().optional(),
+  forkedFrom: AgentForkOriginSchema.optional(),
   archivedAt: z.string().nullable().optional(),
   requiresAttention: z.boolean().optional(),
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
@@ -1136,6 +1151,7 @@ export const TextAttachmentSchema = z
     type: z.literal("text"),
     mimeType: z.literal("text/plain"),
     contextKind: z.string().optional(),
+    sourceAgentId: z.string().optional(),
     title: z.string().nullable().optional(),
     text: z.string(),
     externalResource: ExternalResourceAttachmentMetadataSchema.optional(),
@@ -1708,6 +1724,18 @@ const GitSetupOptionsSchema = z.object({
 
 export type GitSetupOptions = z.infer<typeof GitSetupOptionsSchema>;
 
+export const AgentTimelineCursorSchema = z.object({
+  epoch: z.string(),
+  seq: z.number().int().nonnegative(),
+});
+
+export const AgentConversationForkSourceSchema = z.object({
+  agentId: z.string(),
+  boundaryCursor: AgentTimelineCursorSchema.optional(),
+  boundaryMessageId: z.string().optional(),
+});
+export type AgentConversationForkSource = z.infer<typeof AgentConversationForkSourceSchema>;
+
 export const CreateAgentWorktreeTargetSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("branch-off"),
@@ -1752,6 +1780,8 @@ export const CreateAgentRequestMessageSchema = z.object({
   internal: z.boolean().optional(),
   // Workspace creation intent, rejected when selecting an existing workspace.
   background: z.boolean().optional(),
+  // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+  forkFrom: AgentConversationForkSourceSchema.optional(),
   labels: z.record(z.string(), z.string()).default({}),
   requestId: z.string(),
 });
@@ -1844,6 +1874,7 @@ export const ResumeAgentRequestMessageSchema = z.object({
 });
 
 export const ImportAgentRequestMessageSchema = z.object({
+  fork: z.boolean().optional(),
   type: z.literal("import_agent_request"),
   provider: AgentProviderSchema.optional(),
   providerId: z.string().optional(),
@@ -1881,11 +1912,6 @@ export const ShutdownServerRequestMessageSchema = z.object({
 export const DaemonUpdateRequestMessageSchema = z.object({
   type: z.literal("daemon.update.request"),
   requestId: z.string(),
-});
-
-export const AgentTimelineCursorSchema = z.object({
-  epoch: z.string(),
-  seq: z.number().int().nonnegative(),
 });
 
 export const FetchAgentTimelineRequestMessageSchema = z.object({
@@ -3647,6 +3673,7 @@ export const ServerInfoStatusPayloadSchema = z
         workspaceSetupRun: z.boolean().optional(),
         // COMPAT(workspaceTerminals): added in v0.8.0, remove gate after 2027-09-05.
         workspaceTerminals: z.boolean().optional(),
+        sessionCanvas: z.boolean().optional(),
         // COMPAT(checkoutForgeSetAutoMerge): added in v0.2.0-beta.1. Remove the
         // feature gate and checkoutGithubSetAutoMerge fallback after 2027-01-17
         // once the supported daemon floor is >= v0.2.0.
@@ -3737,6 +3764,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContext: z.boolean().optional(),
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: z.boolean().optional(),
+        // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+        agentConversationFork: z.boolean().optional(),
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: z.boolean().optional(),
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain wire field.
@@ -3767,6 +3796,7 @@ export const ServerInfoStatusPayloadSchema = z
         hopliteProvider: z.boolean().optional(),
         // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
         importSessionWorkspaceTarget: z.boolean().optional(),
+        importSessionFork: z.boolean().optional(),
         // COMPAT(importSessionSearch): added in v0.8.0, remove gate after 2027-03-02.
         importSessionSearch: z.boolean().optional(),
         // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after

@@ -1,4 +1,6 @@
+import { sessionCanvas } from "./session-canvas";
 export const en = {
+  sessionCanvas: sessionCanvas["en"],
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -328,9 +330,14 @@ export const en = {
       copyTurn: "Copy turn",
       copyMessage: "Copy message",
       forkMenu: "Fork chat from here",
+      forkImplementationNative: "Native conversation fork",
+      forkImplementationCopiedContext: "Copies chat history",
       forkInNewTab: "Fork in a new tab",
       forkInNewWorkspace: "Fork in a new workspace",
       forkUnavailable: "Update the host to use this.",
+      forkNativeUnavailable: "Update both the Paseo client and host to fork Codex conversations.",
+      forkWaitForTurn: "Wait for the current turn to finish before forking.",
+      forkSameHost: "A native Codex fork must stay on the source host.",
       forkMissingWorkspace: "This agent is not in a workspace.",
       forkFailed: "Failed to fork chat",
       openFile: "Open file",
@@ -407,6 +414,8 @@ export const en = {
       all: "All",
     },
     status: {
+      importCopy: "Import a copy",
+      retryImport: "Retry original session",
       connectHost: "Connect to a host to import sessions",
       updateHost: "Update the host to import sessions.",
       noProviders: "No importable providers are enabled.",
@@ -2512,6 +2521,11 @@ export const en = {
           pureBlack: "Pure black",
           auto: "System",
         },
+      },
+      workspaceTabs: {
+        title: "Workspace tabs",
+        description: "Left is used on wide panes; narrow panes fall back to the top",
+        options: { top: "Top", left: "Left" },
       },
       detailLevel: {
         title: "Detail level",

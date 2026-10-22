@@ -435,8 +435,10 @@ function mergeModelAdditions(
 // Every session member must cross this boundary, including optional capabilities.
 type ForwardedAgentSession = { [K in keyof Required<AgentSession>]: AgentSession[K] };
 
+const wrappedSessions = new WeakMap<AgentSession, AgentSession>();
+
 export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession): AgentSession {
-  return {
+  const wrapped = {
     provider,
     get id() {
       return inner.id;
@@ -478,6 +480,8 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
     revertBoth: inner.revertBoth?.bind(inner),
     tryHandleOutOfBand: inner.tryHandleOutOfBand?.bind(inner),
   } satisfies ForwardedAgentSession;
+  wrappedSessions.set(wrapped, inner);
+  return wrapped;
 }
 
 function wrapClientProvider(
@@ -531,6 +535,27 @@ function wrapClientProvider(
           { ...options, configuredModelIds },
         ),
       ),
+    forkSession: inner.forkSession
+      ? async (source, input, launchContext) =>
+          wrapSessionProvider(
+            provider,
+            await inner.forkSession!(
+              wrappedSessions.get(source) ?? source,
+              {
+                ...input,
+                targetConfig: {
+                  ...input.targetConfig,
+                  provider: inner.provider,
+                  providerOptions: mergeProviderOptions(
+                    providerOptions,
+                    input.targetConfig.providerOptions,
+                  ),
+                },
+              },
+              launchContext,
+            ),
+          )
+      : undefined,
     fetchCatalog: async (options, context) => {
       const catalog = await inner.fetchCatalog({ ...options, providerOptions }, context);
       return {
@@ -564,6 +589,7 @@ function wrapClientProvider(
             providerOptions: mergeProviderOptions(providerOptions, config.providerOptions),
           })
       : undefined,
+    readSessionLineage: inner.readSessionLineage?.bind(inner),
     listImportableSessions: listImportableSessions
       ? async (options) => await listImportableSessions({ ...options, providerOptions })
       : undefined,

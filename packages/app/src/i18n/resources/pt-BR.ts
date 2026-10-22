@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ptBR: TranslationResources = {
+  sessionCanvas: sessionCanvas["pt-BR"],
   paneFind: {
     connectionFailure:
       "Não foi possível pesquisar nesta conversa. Verifique a conexão com o host e tente novamente.",
@@ -335,9 +337,15 @@ export const ptBR: TranslationResources = {
       copyTurn: "Copiar turno",
       copyMessage: "Copiar mensagem",
       forkMenu: "Bifurcar mensagem",
+      forkImplementationNative: "Bifurcação nativa da conversa",
+      forkImplementationCopiedContext: "Copia o histórico do chat",
       forkInNewTab: "Bifurcar em uma nova aba",
       forkInNewWorkspace: "Bifurcar em um novo workspace",
       forkUnavailable: "Atualize o host para usar isto.",
+      forkNativeUnavailable:
+        "Atualize o cliente e o host do Paseo para bifurcar conversas do Codex.",
+      forkWaitForTurn: "Aguarde o turno atual terminar antes de bifurcar.",
+      forkSameHost: "Uma bifurcação nativa do Codex deve permanecer no host de origem.",
       forkMissingWorkspace: "Este agente não está em um workspace.",
       forkFailed: "Falha ao bifurcar o chat",
       openFile: "Abrir arquivo",
@@ -414,6 +422,8 @@ export const ptBR: TranslationResources = {
       all: "Tudo",
     },
     status: {
+      importCopy: en.importSession.status.importCopy,
+      retryImport: en.importSession.status.retryImport,
       connectHost: "Conecte-se a um host para importar sessões",
       updateHost: "Atualize o host para importar sessões.",
       noProviders: "Nenhum provedor importável está ativado.",
@@ -2421,6 +2431,11 @@ export const ptBR: TranslationResources = {
           pureBlack: "Preto puro",
           auto: "Sistema",
         },
+      },
+      workspaceTabs: {
+        title: "Abas do espaço de trabalho",
+        description: "À esquerda em painéis largos; no topo em painéis estreitos",
+        options: { top: "Superior", left: "Esquerda" },
       },
       detailLevel: {
         title: "Nível de detalhe",

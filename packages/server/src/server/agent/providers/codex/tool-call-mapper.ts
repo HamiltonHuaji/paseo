@@ -549,8 +549,9 @@ function normalizeCollabAgentChildStatus(status: string): ToolCallTimelineItem["
   const normalized = status.trim().toLowerCase();
   switch (normalized) {
     case "error":
-    case "errored":
       return "running";
+    case "errored":
+      return "failed";
     case "shutdown":
       return "canceled";
     case "notfound":

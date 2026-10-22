@@ -24,6 +24,8 @@ import {
   codexMicrosoftStoreBinaryCandidates,
   codexAppServerTurnInputFromPrompt,
   listCodexSkills,
+  readCodexModels,
+  resolveCodexForkBeforeTurnId,
   mapCodexPatchNotificationToToolCall,
   mapCodexPlanUpdateToTodo,
   mapCodexPlanToToolCall,
@@ -7166,4 +7168,118 @@ describe("Codex interactive resume startup", () => {
       }
     },
   );
+});
+
+describe("fork baseline contracts", () => {
+  test("models on later pages retain their service tiers and malformed pages fail", async () => {
+    const fast = { id: "priority", name: "Priority", description: "Fast processing" };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [{ id: "first" }], nextCursor: "page2" })
+      .mockResolvedValueOnce({ data: [{ id: "second", serviceTiers: [fast] }], nextCursor: null });
+    expect(await readCodexModels({ request })).toEqual([
+      { id: "first" },
+      { id: "second", serviceTiers: [fast] },
+    ]);
+    expect(request.mock.calls).toEqual([
+      ["model/list", {}],
+      ["model/list", { cursor: "page2" }],
+    ]);
+    await expect(readCodexModels({ request: async () => ({ data: "invalid" }) })).rejects.toThrow();
+    await expect(
+      readCodexModels({ request: async () => ({ data: [], nextCursor: "repeat" }) }),
+    ).rejects.toThrow("repeated model cursor");
+  });
+
+  test("native fork boundaries cross pages and reject the active turn", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [{ turnId: "completed", item: { id: "answer" } }],
+        nextCursor: "next",
+      })
+      .mockResolvedValueOnce({ data: [{ turnId: "active", item: { id: "prompt" } }] });
+    expect(
+      await resolveCodexForkBeforeTurnId({
+        threadId: "source",
+        boundaryMessageId: "answer",
+        isLatestCompletedTurn: false,
+        activeTurnId: "active",
+        request,
+      }),
+    ).toBe("active");
+    await expect(
+      resolveCodexForkBeforeTurnId({
+        threadId: "source",
+        boundaryMessageId: "answer",
+        isLatestCompletedTurn: false,
+        activeTurnId: "active",
+        request: async () => ({ data: [{ turnId: "active", item: { id: "answer" } }] }),
+      }),
+    ).rejects.toThrow("finish");
+  });
+
+  test("failed rewind history leaves the original native identity and history usable", async () => {
+    let historyUnavailable = true;
+    const appServer = createFakeCodexAppServer({
+      "thread/read": (params) => {
+        if (historyUnavailable && (params as { threadId: string }).threadId === "forked-thread")
+          return { __jsonRpcError: { code: -32603, message: "history unavailable" } };
+        return { thread: { id: "thread-1", historyMode: "legacy", turns: [] } };
+      },
+    });
+    const session = new CodexAppServerAgentSession(
+      createConfig(),
+      null,
+      createTestLogger(),
+      async () => appServer.child,
+    );
+    try {
+      await session.startTurn("remember this");
+      emitCodexUserMessage(appServer, { id: "rewind-user", text: "remember this" });
+      appServer.completeTurn();
+      const original = session.describePersistence()?.sessionId;
+      await expect(session.revertConversation({ messageId: "rewind-user" })).rejects.toThrow(
+        "history unavailable",
+      );
+      expect(session.describePersistence()?.sessionId).toBe(original);
+      historyUnavailable = false;
+      await session.revertConversation({ messageId: "rewind-user" });
+      expect(session.describePersistence()?.sessionId).toBe("forked-thread");
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("turn completion settles an unfinished root tool without completing its child", () => {
+    const session = createSession();
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const access = asInternals(session);
+    access.handleNotification("item/started", {
+      threadId: "test-thread",
+      turnId: "test-turn",
+      item: {
+        id: "root-command",
+        type: "commandExecution",
+        command: "sleep 10",
+        cwd: "/tmp",
+        status: "inProgress",
+      },
+    });
+    access.handleNotification("turn/completed", {
+      threadId: "test-thread",
+      turn: { id: "test-turn", status: "completed" },
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "timeline",
+        item: expect.objectContaining({
+          callId: "root-command",
+          status: "canceled",
+          metadata: expect.objectContaining({ completionUnobserved: true }),
+        }),
+      }),
+    );
+  });
 });

@@ -23,7 +23,7 @@ function buildCodexSpeedFeature(tiers: CodexServiceTier[], value: string): Agent
       value,
       options: [
         { id: "default", label: "Normal", isDefault: true },
-        ...tiers.map((tier) => ({ id: tier.id, label: tier.name })),
+        ...tiers.map((tier) => ({ id: tier.id, label: tier.name, description: tier.description })),
       ],
     },
   ];

@@ -230,6 +230,8 @@ const StoredAgentSnapshotSchema = z.strictObject({
   createdAt: IsoDateSchema,
   updatedAt: IsoDateSchema,
   lastUserMessageAt: IsoDateSchema.nullable(),
+  lastAssistantMessageAt: IsoDateSchema.nullable().optional(),
+  forkedFrom: z.strictObject({ agentId: z.string(), forkedAt: IsoDateSchema }).optional(),
   status: AgentStatusSchema,
   activeTurn: z
     .strictObject({
@@ -608,6 +610,13 @@ function serializeAgentTurn(agent: Agent): NonNullable<StoredAgent["turn"]> {
   };
 }
 
+function serializeConversationMetadata(agent: Agent) {
+  return {
+    lastAssistantMessageAt: agent.lastAssistantMessageAt?.toISOString() ?? null,
+    forkedFrom: agent.forkedFrom,
+  };
+}
+
 function serializeAgent(agent: Agent): StoredAgent {
   const snapshot = {
     id: agent.id,
@@ -619,6 +628,7 @@ function serializeAgent(agent: Agent): StoredAgent {
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt?.toISOString() ?? null,
+    ...serializeConversationMetadata(agent),
     status: agent.status,
     ...(agent.turn.phase === "open" && agent.turn.turnId
       ? {

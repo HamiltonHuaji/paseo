@@ -398,6 +398,7 @@ describe("codex tool-call mapper", () => {
   });
 
   it.each([
+    ["errored", "failed"],
     ["shutdown", "canceled"],
     ["notFound", "failed"],
   ] as const)("maps terminal child state %s to %s", (childStatus, expectedStatus) => {

@@ -183,3 +183,17 @@ describe("Codex app-server transport", () => {
     codex.child.stdin.end();
   });
 });
+
+test("malformed JSON diagnostics omit the payload and still handle the next frame", async () => {
+  const child = createCodexAppServerChildProcess();
+  const logger = createTestLogger();
+  const warnings = vi.spyOn(logger, "warn");
+  const client = new CodexAppServerClient(child, logger);
+  const response = client.request("model/list", {});
+  child.stdout.write('{"secret":"private prompt", broken frame\n');
+  child.stdout.write('{"id":1,"result":{"data":[]}}\n');
+  await expect(response).resolves.toEqual({ data: [] });
+  expect(warnings).toHaveBeenCalled();
+  expect(JSON.stringify(warnings.mock.calls)).not.toContain("private prompt");
+  await client.dispose();
+});

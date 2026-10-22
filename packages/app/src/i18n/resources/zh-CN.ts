@@ -1,7 +1,9 @@
+import { sessionCanvas } from "./session-canvas";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
+  sessionCanvas: sessionCanvas["zh-CN"],
   paneFind: {
     connectionFailure: "无法搜索此聊天。请检查主机连接后重试。",
     historyChangedFailure: "搜索期间聊天已更改。请重新搜索。",
@@ -331,9 +333,14 @@ export const zhCN: TranslationResources = {
       copyTurn: "复制回合",
       copyMessage: "复制消息",
       forkMenu: "分叉消息",
+      forkImplementationNative: "原生会话分叉",
+      forkImplementationCopiedContext: "复制聊天历史",
       forkInNewTab: "分叉到新标签页",
       forkInNewWorkspace: "分叉到新工作区",
       forkUnavailable: "请更新主机以使用此功能。",
+      forkNativeUnavailable: "请同时更新 Paseo 客户端和主机，以原生分叉 Codex 会话。",
+      forkWaitForTurn: "请等待当前 turn 完成后再分叉。",
+      forkSameHost: "Codex 原生分叉必须在源主机上创建。",
       forkMissingWorkspace: "此 Agent 不在工作区中。",
       forkFailed: "分叉聊天失败",
       openFile: "打开文件",
@@ -410,6 +417,8 @@ export const zhCN: TranslationResources = {
       all: "全部",
     },
     status: {
+      importCopy: "导入副本",
+      retryImport: "重试原会话",
       connectHost: "连接到 Host 以导入会话",
       updateHost: "更新 Host 以导入会话。",
       noProviders: "没有已启用的可导入 Provider。",
@@ -2360,6 +2369,11 @@ export const zhCN: TranslationResources = {
           pureBlack: "纯黑",
           auto: "系统",
         },
+      },
+      workspaceTabs: {
+        title: "工作区标签",
+        description: "宽窗格显示在左侧；窄窗格会自动回退到顶部",
+        options: { top: "顶部", left: "左侧" },
       },
       detailLevel: {
         title: "详细程度",

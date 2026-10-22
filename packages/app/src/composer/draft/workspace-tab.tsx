@@ -125,6 +125,7 @@ async function submitDraftCreateRequest(input: {
   client: DaemonClient | null;
   workspaceDirectory: string | null;
   workspaceId: string | null;
+  serverId: string;
   autoSubmitConfig: AutoSubmitConfig | null;
   composerState: {
     selectedProvider: string | null;
@@ -480,6 +481,7 @@ export function WorkspaceDraftAgentTab({
         client,
         workspaceDirectory: draftWorkingDirectory,
         workspaceId: workspaceFields?.id ?? null,
+        serverId,
         autoSubmitConfig,
         composerState,
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),

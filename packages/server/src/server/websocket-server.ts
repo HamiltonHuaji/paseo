@@ -1963,6 +1963,7 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(workspaceSetupRun): added in v0.7.3, remove gate after 2027-09-02.
         workspaceSetupRun: true,
         workspaceSetupObservation: true,
+        sessionCanvas: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
@@ -2053,6 +2054,8 @@ export class VoiceAssistantWebSocketServer {
         agentForkContext: true,
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
         agentForkContextCursor: true,
+        // COMPAT(agentConversationFork): added in v0.6.2, remove after 2027-08-27.
+        agentConversationFork: true,
         // COMPAT(providerSubagents): added in v0.1.107, remove gate after 2027-01-12.
         providerSubagents: true,
         // COMPAT(projectedSubagentTimeline): added after v0.8.0, remove gates after 2027-03-14; retain advertisement.
@@ -2080,6 +2083,7 @@ export class VoiceAssistantWebSocketServer {
         hopliteProvider: this.providerSnapshotManager.supportsConfigRequiredProvider("hoplite"),
         // COMPAT(importSessionWorkspaceTarget): added in v0.1.110, remove gate after 2027-01-16.
         importSessionWorkspaceTarget: true,
+        importSessionFork: true,
         // COMPAT(importSessionSearch): added in v0.7.3, remove gate after 2027-03-02.
         importSessionSearch: true,
         // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after

@@ -85,6 +85,7 @@ import { getCompactionMarkerLabel } from "./message-compaction-label";
 import { PlanCard } from "./plan-card";
 import { ToolCallDetailsContent } from "./tool-call-details";
 import { useToolCallSheet } from "./tool-call-sheet";
+import type { AssistantForkImplementation } from "@/agent-stream/fork-preparation";
 export type { InlinePathTarget } from "@/assistant-file-links";
 export type { AssistantForkTarget };
 
@@ -545,6 +546,7 @@ interface AssistantTurnFooterProps {
   completedAt?: Date;
   durationMs?: number | null;
   onFork?: (target: AssistantForkTarget) => Promise<void> | void;
+  forkImplementation?: AssistantForkImplementation;
 }
 
 const assistantTurnFooterStylesheet = StyleSheet.create((theme) => ({
@@ -589,6 +591,7 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
   completedAt,
   durationMs,
   onFork,
+  forkImplementation = "context_attachment",
 }: AssistantTurnFooterProps) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
@@ -645,7 +648,9 @@ export const AssistantTurnFooter = memo(function AssistantTurnFooter({
         getContent={getContent}
         containerStyle={assistantTurnFooterStylesheet.copyButton}
       />
-      {canFork ? <AssistantForkMenu onFork={handleFork} /> : null}
+      {canFork ? (
+        <AssistantForkMenu implementation={forkImplementation} onFork={handleFork} />
+      ) : null}
       {primaryLabel ? (
         <Pressable
           onPress={handlePress}

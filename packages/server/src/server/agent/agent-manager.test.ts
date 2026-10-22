@@ -12069,3 +12069,261 @@ test.each(["live", "history", "accepted"] as const)(
     }
   },
 );
+
+test("session canvas persists reply timestamps and context-fork provenance without treating other activity as replies", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-canvas-metadata-"));
+  const storage = new AgentStorage(workdir, logger);
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    registry: storage,
+    logger,
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-10-01T10:00:00Z"));
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-a",
+      contextForkSourceAgentId: "source-agent",
+      labels: { [PARENT_AGENT_ID_LABEL]: "delegating-agent" },
+    });
+    expect(agent.forkedFrom).toMatchObject({
+      agentId: "source-agent",
+      forkedAt: "2026-10-01T10:00:00.000Z",
+    });
+    expect(agent.lastAssistantMessageAt).toBeNull();
+    vi.setSystemTime(new Date("2026-10-01T10:01:00Z"));
+    await manager.appendTimelineItem(agent.id, { type: "assistant_message", text: "An answer" });
+    vi.setSystemTime(new Date("2026-10-01T10:02:00Z"));
+    await manager.appendTimelineItem(agent.id, { type: "user_message", text: "A later question" });
+    await manager.appendTimelineItem(agent.id, { type: "reasoning", text: "Thinking" });
+    await manager.flush();
+    const record = await storage.get(agent.id);
+    expect(record?.lastAssistantMessageAt).toBe("2026-10-01T10:01:00.000Z");
+    expect(record?.forkedFrom).toEqual(agent.forkedFrom);
+    const payload = toAgentPayload(manager.getAgent(agent.id)!);
+    expect(payload.lastAssistantMessageAt).toBe(record?.lastAssistantMessageAt);
+    await manager.reloadAgentSession(agent.id);
+    expect(manager.getAgent(agent.id)?.forkedFrom).toEqual(agent.forkedFrom);
+    expect(manager.getAgent(agent.id)?.lastAssistantMessageAt?.toISOString()).toBe(
+      record?.lastAssistantMessageAt,
+    );
+  } finally {
+    vi.useRealTimers();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flush();
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("session canvas records native fork ancestry and excludes inherited replies", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-native-canvas-"));
+  class ForkSession extends TestAgentSession {
+    override readonly capabilities = {
+      ...TEST_CAPABILITIES,
+      supportsNativeConversationFork: true,
+      supportsRewindConversation: true,
+    };
+    private threadId = this.id;
+    async revertConversation() {
+      this.threadId = randomUUID();
+    }
+    override describePersistence() {
+      return { provider: this.provider, sessionId: this.threadId };
+    }
+    override async getRuntimeInfo() {
+      return { ...(await super.getRuntimeInfo()), sessionId: this.threadId };
+    }
+    override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+      yield {
+        type: "timeline",
+        provider: "codex",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        item: { type: "assistant_message", text: "Inherited", messageId: "reply-1" },
+      };
+    }
+  }
+  const client = new (class extends TestAgentClient {
+    override readonly capabilities = { ...TEST_CAPABILITIES, supportsNativeConversationFork: true };
+    override async createSession(config: AgentSessionConfig) {
+      return new ForkSession(config);
+    }
+    async forkSession(
+      _source: AgentSession,
+      input: import("./agent-sdk-types.js").AgentConversationForkInput,
+    ) {
+      return new ForkSession(input.targetConfig);
+    }
+    async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+      expect(input.fork).toBe(true);
+      const session = new ForkSession(context.config);
+      return {
+        session,
+        config: context.config,
+        persistence: session.describePersistence(),
+        timeline: [],
+      };
+    }
+  })();
+  const storage = new AgentStorage(workdir, logger);
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const source = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    await manager.appendTimelineItem(source.id, {
+      type: "assistant_message",
+      text: "Source response",
+      messageId: "reply-1",
+    });
+    const fork = await manager.forkAgentFromConversation(
+      { agentId: source.id, boundaryMessageId: "reply-1" },
+      { provider: "codex", cwd: workdir },
+      undefined,
+      { workspaceId: "workspace-a" },
+    );
+    expect(fork.forkedFrom?.agentId).toBe(source.id);
+    expect(fork.lastAssistantMessageAt).toBeNull();
+    const origin = fork.forkedFrom;
+    const sourceThread = source.persistence!.sessionId;
+    const forkThread = fork.persistence!.sessionId;
+    await manager.rewind(source.id, "reply-1", "conversation");
+    await manager.rewind(fork.id, "reply-1", "conversation");
+    const intermediateForkThread = manager.getAgent(fork.id)!.persistence!.sessionId;
+    await manager.rewind(fork.id, "reply-1", "conversation");
+    expect(manager.getAgent(fork.id)?.forkedFrom).toEqual(origin);
+    expect(manager.getAgent(source.id)?.forkedFrom).toBeUndefined();
+    const savedSource = await storage.get(source.id);
+    const savedFork = await storage.get(fork.id);
+    expect(savedSource?.providerSessionIds).toEqual([
+      sourceThread,
+      manager.getAgent(source.id)!.persistence!.sessionId,
+    ]);
+    expect(savedFork?.providerSessionIds).toEqual([
+      forkThread,
+      intermediateForkThread,
+      manager.getAgent(fork.id)!.persistence!.sessionId,
+    ]);
+    expect(savedFork?.forkedFrom).toEqual(origin);
+
+    expect(manager.getAgent(source.id)?.lastAssistantMessageAt).toBeInstanceOf(Date);
+    await manager.flush();
+    expect((await storage.get(fork.id))?.forkedFrom).toEqual(fork.forkedFrom);
+    expect(fork.labels[PARENT_AGENT_ID_LABEL]).toBeUndefined();
+    const copy = await manager.importProviderSession({
+      provider: "codex",
+      providerHandleId: sourceThread,
+      fork: true,
+      cwd: workdir,
+      workspaceId: "workspace-a",
+    });
+    expect(copy.forkedFrom).toMatchObject({
+      agentId: source.id,
+      operation: "import-copy",
+      sourceProviderSessionId: sourceThread,
+      resultProviderSessionId: copy.persistence?.sessionId,
+    });
+    expect(copy.labels[PARENT_AGENT_ID_LABEL]).toBeUndefined();
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    await manager.flush();
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test.each(["snapshot", "timeline"])(
+  "rewind rolls back native identity and history when %s persistence fails",
+  async (failure) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-rewind-failure-"));
+    class RewindSession extends TestAgentSession {
+      override readonly capabilities = { ...TEST_CAPABILITIES, supportsRewindConversation: true };
+      private threadId = "original";
+      async revertConversation() {
+        this.threadId = "rewound";
+        return {
+          rollback: async () => {
+            this.threadId = "original";
+          },
+        };
+      }
+      override describePersistence() {
+        return { provider: this.provider, sessionId: this.threadId };
+      }
+      override async getRuntimeInfo() {
+        return { ...(await super.getRuntimeInfo()), sessionId: this.threadId };
+      }
+      override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+        yield {
+          type: "timeline",
+          provider: "codex",
+          item: { type: "assistant_message", text: this.threadId },
+        };
+      }
+    }
+    const client = new (class extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig) {
+        return new RewindSession(config);
+      }
+    })();
+    const storage = new AgentStorage(workdir, logger);
+    const timeline = new RecordingTimelineStore();
+    const manager = new AgentManager({
+      clients: { codex: client },
+      registry: storage,
+      durableTimelineStore: timeline,
+      logger,
+    });
+    try {
+      const source = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+        workspaceId: "workspace-a",
+      });
+      await manager.hydrateTimelineFromProvider(source.id);
+      await manager.flush();
+      let fail = true;
+      if (failure === "snapshot") {
+        const apply = storage.applySnapshot.bind(storage);
+        vi.spyOn(storage, "applySnapshot").mockImplementation(async (agent, options) => {
+          if (fail && agent.persistence?.sessionId === "rewound") {
+            fail = false;
+            throw new Error("snapshot unavailable");
+          }
+          await apply(agent, options);
+        });
+      } else {
+        const insert = timeline.bulkInsert.bind(timeline);
+        vi.spyOn(timeline, "bulkInsert").mockImplementation(async (id, rows) => {
+          if (
+            fail &&
+            rows.some((row) => row.item.type === "assistant_message" && row.item.text === "rewound")
+          ) {
+            fail = false;
+            throw new Error("timeline unavailable");
+          }
+          await insert(id, rows);
+        });
+      }
+      await expect(manager.rewind(source.id, "user", "conversation")).rejects.toThrow(
+        "unavailable",
+      );
+      await manager.flush();
+      expect(manager.getAgent(source.id)?.persistence?.sessionId).toBe("original");
+      expect((await new AgentStorage(workdir, logger).get(source.id))?.persistence?.sessionId).toBe(
+        "original",
+      );
+      expect(manager.getTimeline(source.id)).toEqual([
+        { type: "assistant_message", text: "original" },
+      ]);
+      expect((await timeline.getCommittedRows(source.id)).map((row) => row.item)).toEqual(
+        manager.getTimeline(source.id),
+      );
+      await manager.rewind(source.id, "user", "conversation");
+      expect(manager.getAgent(source.id)?.persistence?.sessionId).toBe("rewound");
+    } finally {
+      await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+      await manager.flush();
+      await storage.flush();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  },
+);

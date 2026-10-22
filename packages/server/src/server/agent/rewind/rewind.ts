@@ -12,14 +12,13 @@ export class RewindCapabilityError extends Error {
 export async function invokeRewindCapability(
   session: AgentSession,
   input: { messageId: string; mode: RewindMode },
-): Promise<void> {
+): Promise<void | { rollback: () => Promise<void> }> {
   switch (input.mode) {
     case "conversation":
       if (!session.capabilities.supportsRewindConversation || !session.revertConversation) {
         throw new RewindCapabilityError(input.mode);
       }
-      await session.revertConversation({ messageId: input.messageId });
-      return;
+      return session.revertConversation({ messageId: input.messageId });
     case "files":
       if (!session.capabilities.supportsRewindFiles || !session.revertFiles) {
         throw new RewindCapabilityError(input.mode);

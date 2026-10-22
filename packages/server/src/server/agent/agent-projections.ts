@@ -90,6 +90,14 @@ export function toStoredAgentRecord(
     updatedAt: agent.updatedAt.toISOString(),
     lastActivityAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
+    lastAssistantMessageAt: agent.lastAssistantMessageAt?.toISOString() ?? null,
+    forkedFrom: agent.forkedFrom,
+    providerSessionIds: Array.from(
+      new Set([
+        ...(agent.providerSessionIds ?? []),
+        ...(persistence?.sessionId ? [persistence.sessionId] : []),
+      ]),
+    ),
     title: options?.title ?? null,
     labels: agent.labels,
     lastStatus: agent.lifecycle,
@@ -132,6 +140,8 @@ export function toAgentPayload(
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
+    lastAssistantMessageAt: agent.lastAssistantMessageAt?.toISOString() ?? null,
+    forkedFrom: agent.forkedFrom,
     status: agent.lifecycle,
     activeTurn: agent.activeTurnId
       ? {
@@ -246,6 +256,8 @@ export function buildStoredAgentPayload(
     createdAt: createdAt.toISOString(),
     updatedAt: updatedAt.toISOString(),
     lastUserMessageAt: lastUserMessageAt ? lastUserMessageAt.toISOString() : null,
+    ...projectStoredConversation(record),
+    forkedFrom: record.forkedFrom,
     status: record.lastStatus,
     capabilities: defaultCapabilities,
     currentModeId: record.lastModeId ?? null,
@@ -278,6 +290,8 @@ export function toAgentListItemPayload(agent: AgentSnapshotPayload): AgentListIt
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
     lastUserMessageAt: agent.lastUserMessageAt,
+    lastAssistantMessageAt: agent.lastAssistantMessageAt,
+    forkedFrom: agent.forkedFrom,
     archivedAt: agent.archivedAt ?? null,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
@@ -574,4 +588,8 @@ function sanitizeRuntimeInfo(
     sanitized.extra = extra;
   }
   return sanitized;
+}
+
+function projectStoredConversation(record: StoredAgentRecord) {
+  return { lastAssistantMessageAt: record.lastAssistantMessageAt ?? null };
 }
