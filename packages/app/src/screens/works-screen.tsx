@@ -12,7 +12,7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
 import { useFetchQuery } from "@/data/query";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { Button } from "@/components/ui/button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { BoardCanvas } from "@/components/board-canvas";
 import {
   arrangeLineageTrees,
@@ -434,10 +434,10 @@ interface BoardToolbarProps {
   restoreLayout: () => void;
 }
 function BoardToolbar(props: BoardToolbarProps) {
-  const viewOptions = useMemo(
+  const viewOptions = useMemo<SegmentedControlOption<BoardToolbarProps["mode"]>[]>(
     () => [
-      { value: "canvas" as const, label: "Canvas", icon: Grid2X2 },
-      { value: "list" as const, label: "List", icon: List },
+      { value: "canvas", label: "Canvas", icon: (iconProps) => <Grid2X2 {...iconProps} /> },
+      { value: "list", label: "List", icon: (iconProps) => <List {...iconProps} /> },
     ],
     [],
   );

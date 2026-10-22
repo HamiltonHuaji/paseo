@@ -32,7 +32,7 @@ import { MenuHeader } from "@/components/headers/menu-header";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { getIsElectron } from "@/constants/platform";
 import {
@@ -339,10 +339,10 @@ function ExperimentsBoard({
     });
     return () => handler.remove();
   }, [active, clearSelection, embedded, selectedExperiment]);
-  const viewOptions = useMemo(
+  const viewOptions = useMemo<SegmentedControlOption<ExperimentViewMode>[]>(
     () => [
-      { value: "list" as const, label: "List", icon: List },
-      { value: "canvas" as const, label: "Canvas", icon: Grid2X2 },
+      { value: "list", label: "List", icon: (iconProps) => <List {...iconProps} /> },
+      { value: "canvas", label: "Canvas", icon: (iconProps) => <Grid2X2 {...iconProps} /> },
     ],
     [],
   );
