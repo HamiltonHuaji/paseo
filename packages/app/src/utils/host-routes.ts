@@ -500,6 +500,7 @@ export const SETTINGS_SECTION_SLUGS = [
   "files",
   "shortcuts",
   "integrations",
+  "skill-repositories",
   "notifications",
   "permissions",
   "diagnostics",
@@ -523,6 +524,7 @@ export const HOST_SECTION_SLUGS = [
   "usage",
   "terminals",
   "plugins",
+  "skill-repositories",
   "host",
 ] as const;
 

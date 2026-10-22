@@ -403,8 +403,8 @@ describe("skills controller", () => {
     await rm(harness.targets.agentsDir, { force: true });
 
     expect(await harness.controller.status()).toEqual({
-      state: "drift",
-      ops: [{ kind: "add", name: "paseo" }],
+      state: "up-to-date",
+      ops: [],
       available: BUNDLED_SKILLS,
       installed: ["paseo"],
       selection: { mode: "custom", skills: ["paseo"] },
@@ -1224,11 +1224,15 @@ describe("skills controller", () => {
     });
   });
 
-  it("updates a drifted install without touching the saved selection", async () => {
+  it("preserves an edited install and its saved selection", async () => {
     await harness.controller.save({ mode: "custom", skills: ["paseo"] });
     await writeFile(path.join(harness.targets.agentsDir, "paseo", "SKILL.md"), "stale");
 
-    expect(await harness.controller.update()).toEqual({
+    await harness.controller.update();
+    expect(await readFile(path.join(harness.targets.agentsDir, "paseo", "SKILL.md"), "utf8")).toBe(
+      "stale",
+    );
+    expect(await harness.controller.status()).toEqual({
       state: "up-to-date",
       ops: [],
       available: BUNDLED_SKILLS,

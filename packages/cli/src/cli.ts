@@ -1,3 +1,4 @@
+import { createSkillRepositoryCommand } from "./commands/skill-repository.js";
 import { createHostCommand } from "./commands/host/index.js";
 import { pairCommand } from "./commands/daemon/pair.js";
 import { Command, Option } from "commander";
@@ -156,6 +157,7 @@ export function createCli(): Command {
   program.addCommand(createProviderCommand());
   program.addCommand(createUsageCommand());
   program.addCommand(createPluginCommand());
+  program.addCommand(createSkillRepositoryCommand());
 
   // Speech model commands
   program.addCommand(createSpeechCommand());

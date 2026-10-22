@@ -70,6 +70,7 @@ import {
   mountServerDataPushRouter,
 } from "@/data/push-router";
 import { mountBrowserAutomationDaemonClientHandler } from "@/desktop/browser/automation/handler";
+import { mountSkillRepositoryExecutor } from "@/skill-repositories/executor";
 import { schedulesQueryBaseKey } from "@/schedules/aggregated-schedules";
 import { dispatchComposerAgentMessage, sendQueuedComposerMessageNow } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
@@ -660,14 +661,19 @@ function createDefaultDeps(
         queryClient,
         serverId: host.serverId,
       });
+      const unmountSkillRepositories = mountSkillRepositoryExecutor(client, host.serverId);
       if (!browserAutomationCapabilities) {
-        return unmountServerData;
+        return () => {
+          unmountSkillRepositories();
+          unmountServerData();
+        };
       }
       const unmountBrowserAutomation = mountBrowserAutomationDaemonClientHandler(client, {
         serverId: host.serverId,
       });
       return () => {
         unmountBrowserAutomation();
+        unmountSkillRepositories();
         unmountServerData();
       };
     },

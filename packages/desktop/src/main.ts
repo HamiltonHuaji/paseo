@@ -1,3 +1,4 @@
+import { registerSkillRepositoryIpc } from "./features/skill-repositories/ipc.js";
 import { protectConsoleStreams } from "./diagnostics/console-streams.js";
 protectConsoleStreams();
 
@@ -974,6 +975,7 @@ async function bootstrap(): Promise<void> {
   ipcMain.handle("paseo:opener:openUrl", (_event, value: unknown) => openExternalUrl(value));
   registerTunnelHandlers();
   registerEditorTargetHandlers();
+  registerSkillRepositoryIpc();
   registerBrowserAutomationIpc();
 
   // In-app "Open in new window": opens a window that lands on the given project

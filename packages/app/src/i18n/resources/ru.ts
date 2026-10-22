@@ -2177,6 +2177,7 @@ export const ru: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "Настройки",
     loading: "Загрузка настроек...",
     groups: {
@@ -2211,6 +2212,7 @@ export const ru: TranslationResources = {
       permissions: "Разрешения",
       diagnostics: "Диагностика",
       about: "О приложении",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

@@ -4,6 +4,7 @@ import { isIP } from "node:net";
 import { createWorkViewerRouter } from "./work-objects/viewer-http.js";
 import { ViewerDirectoryCursorError } from "./experiments/viewer-directory.js";
 import { renderExperimentViewerIndex } from "./experiments/viewer-index.js";
+import { SkillRepositoryService } from "./skill-repositories/service.js";
 import type { PluginRegistries } from "@getpaseo/protocol/plugin-registry";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import express from "express";
@@ -1025,6 +1026,7 @@ export async function createPaseoDaemon(
     path.join(config.paseoHome, "projects", "workspaces.json"),
     logger,
   );
+  const skillRepositoryService = await SkillRepositoryService.open(config.paseoHome);
   const workspaceLabelService = createWorkspaceLabelService({
     paseoHome: config.paseoHome,
     workspaceRegistry,
@@ -1093,6 +1095,16 @@ export async function createPaseoDaemon(
     resolvePaseoToolPolicy: (provider) =>
       resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
+  });
+  agentManager.subscribe((event) => {
+    if (
+      event.type === "agent_stream" &&
+      (event.event.type === "turn_completed" ||
+        event.event.type === "turn_failed" ||
+        event.event.type === "turn_canceled")
+    ) {
+      skillRepositoryService.clearTurnOrigin(event.agentId, event.event.turnId);
+    }
   });
   const syncPluginProviders = () => {
     agentManager.updateProviderRegistry(
@@ -1554,6 +1566,7 @@ export async function createPaseoDaemon(
     projectRegistry,
     experimentService,
     workService,
+    skillRepositoryService,
     createDirectoryWorkspace: async (cwd, title, projectId, context) => {
       const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
         cwd,
@@ -2123,6 +2136,7 @@ export async function createPaseoDaemon(
               pluginRuntime,
               orchestrationSkills,
               workspaceLabelService,
+              skillRepositoryService,
               { experiments: experimentService, works: workService },
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);

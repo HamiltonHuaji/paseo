@@ -1,5 +1,6 @@
 import { ExperimentService } from "./experiments/service.js";
 import { WorkService } from "./work-objects/service.js";
+import type { SkillRepositoryService } from "./skill-repositories/service.js";
 import { currentDaemonDistribution } from "./session/daemon/distribution.js";
 import {
   createAgentMessageDelivery,
@@ -562,6 +563,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly creationService: CreationService;
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
+  private readonly skillRepositoryService?: SkillRepositoryService;
   private readonly workspaceLabelService: WorkspaceLabelService | null;
   private readonly scheduleService: ScheduleService;
   private readonly checkoutDiffManager: CheckoutDiffManager;
@@ -686,6 +688,7 @@ export class VoiceAssistantWebSocketServer {
     pluginRuntime?: SessionOptions["pluginRuntime"],
     orchestrationSkills?: SessionOptions["orchestrationSkills"],
     workspaceLabelService?: WorkspaceLabelService,
+    skillRepositoryService?: SkillRepositoryService,
     private readonly workDomain?: { experiments: ExperimentService; works: WorkService },
   ) {
     this.logger = logger.child({ module: "websocket-server" });
@@ -740,6 +743,7 @@ export class VoiceAssistantWebSocketServer {
     );
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
     this.workspaceRegistry = workspaceRegistry ?? createNoopWorkspaceRegistry();
+    this.skillRepositoryService = skillRepositoryService;
     this.workspaceLabelService = workspaceLabelService ?? null;
     const requiredServices = requireWebSocketServices({
       scheduleService,
@@ -1609,6 +1613,7 @@ export class VoiceAssistantWebSocketServer {
       workService: this.workDomain?.works,
       workspaceRegistry: this.workspaceRegistry,
       workspaceLabelService: this.workspaceLabelService ?? undefined,
+      skillRepositoryService: this.skillRepositoryService,
       directorySync: this.directorySync,
       scheduleService: this.scheduleService,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -1967,6 +1972,9 @@ export class VoiceAssistantWebSocketServer {
         hostMultiplexing: true,
         usageSources: true,
         ownedSubscriptions: true,
+        ...(this.skillRepositoryService
+          ? { skillRepositories: true, skillRepositoryManagement: true }
+          : {}),
         agentRequestReceipts: true,
         workspaceRequestReceipts: true,
         creationLifecycle: true,

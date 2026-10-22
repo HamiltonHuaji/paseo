@@ -100,6 +100,26 @@ export {
 import { TerminalProfileSchema } from "./terminal-profile.js";
 export { TerminalProfileSchema, type TerminalProfile } from "./terminal-profile.js";
 import { z } from "zod";
+import {
+  SkillRepositoryGetStateRequestSchema,
+  SkillRepositoryConfigureRequestSchema,
+  SkillRepositorySyncRequestSchema,
+  SkillRepositoryUpsertRequestSchema,
+  SkillRepositoryGetStateResponseSchema,
+  SkillRepositoryConfigureResponseSchema,
+  SkillRepositorySyncResponseSchema,
+  SkillRepositoryUpsertResponseSchema,
+  SkillRepositoryListRequestSchema,
+  SkillRepositoryListResponseSchema,
+  SkillRepositoryRemoveRequestSchema,
+  SkillRepositoryRemoveResponseSchema,
+  SkillRepositoryExecutorRegisterRequestSchema,
+  SkillRepositoryExecutorRegisterResponseSchema,
+  SkillRepositoryExecutorRefreshRequestSchema,
+  SkillRepositoryExecutorRefreshResponseSchema,
+  SkillRepositoryExecutorJobRequestSchema,
+  SkillRepositoryExecutorJobResponseSchema,
+} from "./skill-repositories.js";
 import { TerminalActivitySchema } from "./terminal-activity.js";
 import { CLIENT_CAPS } from "./client-capabilities.js";
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
@@ -3352,6 +3372,15 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WorkViewersResolveRequestSchema,
   WorkSubscribeRequestSchema,
   WorkUnsubscribeRequestSchema,
+  SkillRepositoryGetStateRequestSchema,
+  SkillRepositoryConfigureRequestSchema,
+  SkillRepositorySyncRequestSchema,
+  SkillRepositoryUpsertRequestSchema,
+  SkillRepositoryListRequestSchema,
+  SkillRepositoryRemoveRequestSchema,
+  SkillRepositoryExecutorRegisterRequestSchema,
+  SkillRepositoryExecutorRefreshRequestSchema,
+  SkillRepositoryExecutorJobResponseSchema,
 
   HostsListRequestSchema,
   HostsAddRequestSchema,
@@ -3927,6 +3956,8 @@ export const ServerInfoStatusPayloadSchema = z
         viewerHttpFramingV2: z.boolean().optional(),
         viewerHttpFlowControl: z.boolean().optional(),
         experimentViewerListenControl: z.boolean().optional(),
+        skillRepositories: z.boolean().optional(),
+        skillRepositoryManagement: z.boolean().optional(),
         workspaceSetupObservation: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
@@ -7112,6 +7143,15 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkUnsubscribeResponseSchema,
   WorkSubscribeResponseSchema,
   WorkProjectChangedSchema,
+  SkillRepositoryGetStateResponseSchema,
+  SkillRepositoryConfigureResponseSchema,
+  SkillRepositorySyncResponseSchema,
+  SkillRepositoryUpsertResponseSchema,
+  SkillRepositoryListResponseSchema,
+  SkillRepositoryRemoveResponseSchema,
+  SkillRepositoryExecutorRegisterResponseSchema,
+  SkillRepositoryExecutorRefreshResponseSchema,
+  SkillRepositoryExecutorJobRequestSchema,
 
   HostsListResponseSchema,
   HostsChangedSchema,

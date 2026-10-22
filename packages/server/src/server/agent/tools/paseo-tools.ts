@@ -8,6 +8,7 @@ import {
   UpdateExperimentInputSchema,
   ViewerConfigSchema,
 } from "@getpaseo/protocol/experiments";
+import type { SkillRepositoryService } from "../../skill-repositories/service.js";
 import type { AgentMessageDelivery } from "../agent-messages/index.js";
 import {
   createHostResolver,
@@ -150,6 +151,7 @@ export interface PaseoToolHostDependencies {
   emitWorkspaceUpdatesForWorkspaceIds?: ArchiveDependencies["emitWorkspaceUpdatesForWorkspaceIds"];
   workspaceRegistry?: Pick<WorkspaceRegistry, "get" | "list" | "upsert">;
   projectRegistry?: Pick<ProjectRegistry, "get" | "list">;
+  skillRepositoryService?: SkillRepositoryService;
   createDirectoryWorkspace?: (
     cwd: string,
     title?: string | null,
@@ -653,6 +655,8 @@ function createToolCatalog(
   const { experimentService, workspaceRegistry } = options;
   const childLogger = logger.child({ module: "agent", component: "paseo-tool-catalog" });
   const callerContext = callerAgentId ? (resolveCallerContext?.(callerAgentId) ?? null) : null;
+  const getSkillRepositoryOrigin = (): object | null =>
+    callerAgentId ? (options.skillRepositoryService?.getTurnOrigin(callerAgentId) ?? null) : null;
 
   const resolveCallerProjectId = async (): Promise<string> => {
     if (!callerAgentId) throw new Error("Experiment tools require an agent-scoped caller");
@@ -853,6 +857,90 @@ function createToolCatalog(
       handler: handler as PaseoToolDefinition["handler"],
     });
   };
+
+  if (options.skillRepositoryService) {
+    const service = options.skillRepositoryService;
+    registerTool(
+      "list_skill_repositories",
+      {
+        title: "List subscribed skill repositories",
+        description: "List this daemon's Git-backed skill checkouts and their receive policy.",
+        inputSchema: {},
+      },
+      async () => ({
+        content: [],
+        structuredContent: ensureValidJson({
+          repositories: await Promise.all(
+            service.list().map(async (subscription) => {
+              const status = await service.status(subscription.repositoryId);
+              return {
+                repositoryId: subscription.repositoryId,
+                label: subscription.label,
+                checkoutPath: status.checkoutPath,
+                branch: subscription.branch,
+                initialized: status.localHead !== null,
+                autoReceive: subscription.autoReceive,
+                agentPublishAllowed: subscription.agentPublishAllowed,
+              };
+            }),
+          ),
+        }),
+      }),
+    );
+    registerTool(
+      "get_skill_repository_status",
+      {
+        title: "Get skill repository status",
+        description:
+          "Inspect local and last-fetched Git state for one subscribed skill repository.",
+        inputSchema: { repositoryId: z.string().min(1) },
+      },
+      async ({ repositoryId }) => ({
+        content: [],
+        structuredContent: ensureValidJson({ ...(await service.status(repositoryId)) }),
+      }),
+    );
+    registerTool(
+      "fetch_skill_repository",
+      {
+        title: "Fetch skill repository",
+        description: "Ask a connected capable client to fetch a subscribed skill repository.",
+        inputSchema: { repositoryId: z.string().min(1), allowRewrite: z.boolean().optional() },
+      },
+      async ({ repositoryId, allowRewrite }) => ({
+        content: [],
+        structuredContent: ensureValidJson({
+          ...(await service.fetch(
+            repositoryId,
+            callerAgentId ? service.getTurnOrigin(callerAgentId) : null,
+            allowRewrite ?? false,
+          )),
+        }),
+      }),
+    );
+    registerTool(
+      "publish_skill_repository",
+      {
+        title: "Publish skill repository commit",
+        description:
+          "Publish the committed checkout HEAD through an eligible client, or queue it locally.",
+        inputSchema: { repositoryId: z.string().min(1), expectedHead: z.string().min(1) },
+      },
+      async ({ repositoryId, expectedHead }) => {
+        if (!callerAgentId) throw new Error("Publication requires an agent-scoped tool session");
+        return {
+          content: [],
+          structuredContent: ensureValidJson({
+            ...(await service.publish(
+              repositoryId,
+              expectedHead,
+              service.getTurnOrigin(callerAgentId),
+            )),
+          }),
+        };
+      },
+    );
+  }
   const toCatalog = (): PaseoToolCatalog => ({
     tools,
     getTool(name: string): PaseoToolDefinition | undefined {
@@ -1694,6 +1782,12 @@ function createToolCatalog(
           detached: resolvedArgs.detached,
           callerAgentId,
           callerContext,
+          onCreated: ({ agentId }) => {
+            options.skillRepositoryService?.setTurnOrigin(
+              agentId,
+              callerAgentId ? options.skillRepositoryService.getTurnOrigin(callerAgentId) : null,
+            );
+          },
         },
       );
 
@@ -2027,7 +2121,16 @@ function createToolCatalog(
           logger: childLogger,
         });
       }
+      const promptOrigin = getSkillRepositoryOrigin();
       function confirmDispatch(disposition: PromptDispatchDisposition): void {
+        if (disposition === "turn_started") {
+          options.skillRepositoryService?.setTurnOrigin(
+            agentId,
+            promptOrigin,
+            agentManager.getAgent(agentId)?.activeForegroundTurnId ?? undefined,
+          );
+        }
+
         // A new turn must ignore outcomes from the displaced turn. Its iterator
         // has not started yet, so rearm here; steering keeps the early observer.
         if (disposition !== "turn_started") {

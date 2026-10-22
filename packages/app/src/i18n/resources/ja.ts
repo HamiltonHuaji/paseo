@@ -2165,6 +2165,7 @@ export const ja: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "設定",
     loading: "設定を読み込み中...",
     groups: {
@@ -2199,6 +2200,7 @@ export const ja: TranslationResources = {
       permissions: "権限",
       diagnostics: "診断",
       about: "アプリ情報",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

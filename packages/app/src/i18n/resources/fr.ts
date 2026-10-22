@@ -2192,6 +2192,7 @@ export const fr: TranslationResources = {
     },
   },
   settings: {
+    skillRepos: en.settings.skillRepos,
     title: "Paramètres",
     loading: "Chargement des paramètres…",
     groups: {
@@ -2226,6 +2227,7 @@ export const fr: TranslationResources = {
       permissions: "Autorisations",
       diagnostics: "Diagnostic",
       about: "À propos",
+      skillRepositories: en.settings.sections.skillRepositories,
     },
     layout: en.settings.layout,
     editor: {

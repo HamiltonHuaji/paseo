@@ -2,6 +2,11 @@ import { Platform } from "react-native";
 import { getElectronHost } from "@/desktop/electron/host";
 import type { BrowserKeyboardPolicy } from "@/desktop/browser/shortcuts";
 import type { SessionInboundMessage, SessionOutboundMessage } from "@getpaseo/protocol/messages";
+import type {
+  SkillRepositoryExecutorJobRequest,
+  SkillRepositoryExecutorJobResponse,
+  SkillRepositorySubscription,
+} from "@getpaseo/protocol/skill-repositories";
 
 type BrowserAutomationExecuteRequest = Extract<
   SessionOutboundMessage,
@@ -228,6 +233,12 @@ export interface DesktopHostBridge {
   webUtils?: DesktopWebUtilsBridge;
   menu?: DesktopMenuBridge;
   browser?: DesktopBrowserBridge;
+  skillRepositories?: {
+    execute: (input: {
+      job: SkillRepositoryExecutorJobRequest;
+      subscription: SkillRepositorySubscription;
+    }) => Promise<SkillRepositoryExecutorJobResponse["payload"]>;
+  };
 }
 
 declare global {
