@@ -3138,7 +3138,6 @@ new file mode 100644
 +    }
 +  }
 +}
-
 diff --git a/node_modules/react-native-enriched-markdown/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt b/node_modules/react-native-enriched-markdown/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
 --- a/node_modules/react-native-enriched-markdown/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
 +++ b/node_modules/react-native-enriched-markdown/android/src/math/java/com/swmansion/enriched/markdown/renderer/MathInlineRenderer.kt
