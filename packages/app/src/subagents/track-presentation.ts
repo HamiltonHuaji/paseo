@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import { i18n } from "@/i18n/i18next";
 import type { ComposerTrackPillSegment } from "@/composer/tracks";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
 import { deriveSidebarStateBucket, STATUS_BUCKET_ORDER } from "@/utils/sidebar-agent-state";
@@ -11,7 +12,7 @@ function presentationStatus(row: SubagentRow) {
     if (row.turn.phase === "open") return "running";
     return row.status === "running" ? "idle" : row.status;
   }
-  return providerSubagentLifecycleStatus(row.status);
+  return providerSubagentLifecycleStatus(row.status, row.executionStatus);
 }
 
 export interface SubagentRowPresentationData {
@@ -32,16 +33,21 @@ export function buildSubagentRowPresentationData(row: SubagentRow): SubagentRowP
   const providerSubtitle = row.kind === "provider" ? resolveRowLabel(row.subtitle) : null;
   const subtitle = providerSubtitle ?? (description ? title : null);
   const status = presentationStatus(row);
+  const unknown = row.kind === "provider" && row.executionStatus === "unknown";
   return {
     key: `${row.kind}_subagent_${row.id}`,
     kind: "agent",
     label: label ?? "",
-    subtitle: subtitle ?? "",
+    subtitle: unknown
+      ? [subtitle, i18n.t("subagents.executionUnknown")].filter(Boolean).join(" · ")
+      : (subtitle ?? ""),
     titleState: label ? "ready" : "loading",
-    statusBucket: deriveSidebarStateBucket({
-      status,
-      requiresAttention: false,
-    }),
+    statusBucket: unknown
+      ? null
+      : deriveSidebarStateBucket({
+          status,
+          requiresAttention: false,
+        }),
   };
 }
 

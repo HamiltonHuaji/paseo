@@ -1939,6 +1939,7 @@ export const en = {
     backdrop: "Menu backdrop",
   },
   subagents: {
+    executionUnknown: "Execution status unknown",
     title: "Subagents",
     pillLabelOne: "1 subagent",
     pillLabelMany: "{{count}} subagents",

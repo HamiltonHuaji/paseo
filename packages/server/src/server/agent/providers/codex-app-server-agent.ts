@@ -1896,11 +1896,13 @@ function settleHistoricalSubAgentActivity(
   item: ToolCallTimelineItem,
   kind: CodexSubAgentActivity["kind"],
 ): ToolCallTimelineItem {
-  // thread/read returns completed parent items, not a live child snapshot.
-  // Only an explicit interruption remains non-completed when replayed.
+  // Historical interaction is not evidence that the child finished or is still alive.
+  // COMPAT(childExecutionStatus): added in v0.13, remove after 2027-04-22 once old clients
+  // accept unknown in the status enum. Until then the optional marker owns this distinction.
   return {
     ...item,
     status: kind === "interrupted" ? "canceled" : "completed",
+    metadata: { ...item.metadata, executionStatus: kind === "interrupted" ? null : "unknown" },
     error: null,
   };
 }
@@ -6052,7 +6054,10 @@ export class CodexAppServerAgentSession implements AgentSession {
     let nextStatus: ToolCallTimelineItem["status"] | undefined = "running";
     if (activity.kind === "interrupted") {
       nextStatus = "canceled";
-    } else if (isTerminalSubAgentStatus(state.toolCall.status)) {
+    } else if (
+      isTerminalSubAgentStatus(state.toolCall.status) &&
+      state.toolCall.metadata?.executionStatus !== "unknown"
+    ) {
       nextStatus = undefined;
     }
     this.emitSubAgentActivityUpdate(callId, nextStatus);
@@ -6164,15 +6169,14 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (
       status === "running" &&
       !options?.reopen &&
-      isTerminalSubAgentStatus(state.toolCall.status)
+      isTerminalSubAgentStatus(state.toolCall.status) &&
+      state.toolCall.metadata?.executionStatus !== "unknown"
     ) {
       resolvedStatus = state.toolCall.status;
     }
-    for (const childThreadId of state.childThreadIds) {
-      this.emitProviderSubagentUpsert(childThreadId, state, resolvedStatus);
-    }
     const baseToolCall = {
       ...state.toolCall,
+      ...(status ? { metadata: { ...state.toolCall.metadata, executionStatus: null } } : {}),
       detail: {
         ...state.toolCall.detail,
         log,
@@ -6191,6 +6195,9 @@ export class CodexAppServerAgentSession implements AgentSession {
             error: null,
           };
     state.toolCall = nextToolCall;
+    for (const childThreadId of state.childThreadIds) {
+      this.emitProviderSubagentUpsert(childThreadId, state, resolvedStatus);
+    }
     if (state.parentCallId && state.parentCallId !== callId) {
       this.upsertSubAgentChildItem(state.parentCallId, state.callId, nextToolCall);
       this.emitSubAgentActivityUpdate(state.parentCallId);
@@ -6225,6 +6232,7 @@ export class CodexAppServerAgentSession implements AgentSession {
         title: detail.subAgentType ?? "Codex subagent",
         description: detail.description ?? null,
         status: providerStatus,
+        executionStatus: state.toolCall.metadata?.executionStatus === "unknown" ? "unknown" : null,
         toolCallId: state.callId,
         parentSubagentId: state.parentSubagentId,
       },

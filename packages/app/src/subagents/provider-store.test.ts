@@ -23,6 +23,31 @@ afterEach(() => {
 });
 
 describe("provider subagent client store", () => {
+  test("unknown execution is retained and cannot be dismissed as finished", () => {
+    const store = useProviderSubagentStore.getState();
+    const descriptor: ProviderSubagentDescriptorPayload = {
+      id: SUBAGENT_ID,
+      parentAgentId: PARENT_ID,
+      provider: "codex",
+      title: "Historical child",
+      description: null,
+      toolCallId: "call-1",
+      status: "completed",
+      executionStatus: "unknown",
+      createdAt: "2026-10-22T00:00:00.000Z",
+      updatedAt: "2026-10-22T00:00:00.000Z",
+    };
+    store.replaceList(SERVER_ID, PARENT_ID, [descriptor]);
+    store.hideFromTrack(SERVER_ID, PARENT_ID, [SUBAGENT_ID]);
+    const key = providerSubagentKey(SERVER_ID, PARENT_ID, SUBAGENT_ID);
+    expect(useProviderSubagentStore.getState().hiddenFromTrack.has(key)).toBe(false);
+    store.applyUpdate(SERVER_ID, {
+      kind: "upsert",
+      subagent: { ...descriptor, executionStatus: null },
+    });
+    store.hideFromTrack(SERVER_ID, PARENT_ID, [SUBAGENT_ID]);
+    expect(useProviderSubagentStore.getState().hiddenFromTrack.has(key)).toBe(true);
+  });
   test("builds a shared stream model from ordered provider updates", () => {
     const subagents = useProviderSubagentStore.getState();
     subagents.applyUpdate(SERVER_ID, {

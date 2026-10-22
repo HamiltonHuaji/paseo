@@ -37,6 +37,7 @@ export interface ArchiveFinishedSubagents {
 
 export function isFinishedSubagent(row: SubagentRow): boolean {
   if (row.kind === "paseo") return row.status === "idle" || row.status === "error";
+  if (row.executionStatus === "unknown") return false;
   return row.status === "completed" || row.status === "failed" || row.status === "canceled";
 }
 

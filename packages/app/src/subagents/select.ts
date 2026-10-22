@@ -36,6 +36,7 @@ export interface ProviderSubagentRow {
   /** Compact provider-owned context. The app displays it without interpreting its contents. */
   subtitle: string | null;
   status: ProviderSubagentDescriptorPayload["status"];
+  executionStatus?: "unknown" | null;
   requiresAttention: boolean;
   createdAt: Date;
 }
@@ -160,6 +161,7 @@ export function selectProviderSubagentsForParent(
       description: subagent.description,
       subtitle: subagent.subtitle ?? null,
       status: subagent.status,
+      executionStatus: subagent.executionStatus,
       requiresAttention: subagent.status === "failed",
       createdAt: new Date(subagent.createdAt),
     });

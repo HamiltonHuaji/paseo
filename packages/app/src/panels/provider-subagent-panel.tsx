@@ -104,13 +104,26 @@ function useProviderSubagentDescriptor(
     tooltip: label,
     titleState: descriptor ? "ready" : "loading",
     icon: useProviderIcon(provider, context.serverId),
-    statusBucket: descriptor
-      ? deriveSidebarStateBucket({
-          status: providerSubagentLifecycleStatus(descriptor.status),
-          requiresAttention: descriptor.status === "failed",
-        })
-      : null,
+    statusBucket:
+      descriptor && descriptor.executionStatus !== "unknown"
+        ? deriveSidebarStateBucket({
+            status: providerSubagentLifecycleStatus(descriptor.status),
+            requiresAttention: descriptor.status === "failed",
+          })
+        : null,
   };
+}
+
+function executionSubtitle(
+  descriptor: { subtitle?: string | null; executionStatus?: "unknown" | null } | null,
+  unknownLabel: string,
+): string {
+  return [
+    descriptor?.subtitle?.trim(),
+    descriptor?.executionStatus === "unknown" ? unknownLabel : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function ProviderSubagentPanel() {
@@ -209,14 +222,16 @@ function ProviderSubagentPanel() {
   const firstTimelineSeq = timeline?.cursor?.startSeq ?? null;
   const progressKey =
     timeline?.epoch && firstTimelineSeq !== null ? `${timeline.epoch}:${firstTimelineSeq}` : null;
-  const subtitle = descriptor?.subtitle?.trim();
+  const subtitle = executionSubtitle(descriptor, t("subagents.executionUnknown"));
 
   const streamContext = useMemo<AgentScreenAgent>(
     () => ({
       serverId,
       id: streamId,
       provider: descriptor?.provider ?? parent?.provider,
-      status: descriptor ? providerSubagentLifecycleStatus(descriptor.status) : "initializing",
+      status: descriptor
+        ? providerSubagentLifecycleStatus(descriptor.status, descriptor.executionStatus)
+        : "initializing",
       cwd: descriptor?.cwd ?? parent?.cwd ?? "",
       workspaceId: parent?.workspaceId,
       projectPlacement: parent?.projectPlacement,
@@ -234,12 +249,12 @@ function ProviderSubagentPanel() {
   );
   const turnPresentation = useMemo<TurnPresentation>(
     () => ({
-      isActive: descriptor?.status === "running",
+      isActive: descriptor?.status === "running" && descriptor?.executionStatus !== "unknown",
       isCancelling: false,
       startedAt: null,
       turnId: null,
     }),
-    [descriptor?.status],
+    [descriptor?.status, descriptor?.executionStatus],
   );
 
   if (serverInfo && !supported) {

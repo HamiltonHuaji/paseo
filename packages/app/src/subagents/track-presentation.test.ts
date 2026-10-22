@@ -208,6 +208,17 @@ describe("buildSubagentRowPresentationData", () => {
 });
 
 describe("buildSubagentRowPresentationData for provider rows", () => {
+  it("labels unknown execution without a running or done mark or finished dismissal", () => {
+    const unknown = {
+      ...providerRow({ status: "completed" }),
+      executionStatus: "unknown" as const,
+    };
+    expect(buildSubagentRowPresentationData(unknown)).toMatchObject({
+      statusBucket: null,
+      subtitle: expect.stringContaining("Execution status unknown"),
+    });
+    expect(countFinishedSubagents([unknown])).toBe(0);
+  });
   function providerRow(overrides: Partial<ProviderSubagentRow> = {}): ProviderSubagentRow {
     return {
       kind: "provider",

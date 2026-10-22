@@ -4954,6 +4954,8 @@ export const ProviderSubagentDescriptorPayloadSchema = z.object({
   title: z.string().nullable(),
   description: z.string().nullable(),
   status: z.enum(["running", "completed", "failed", "canceled"]),
+  // Absence retains the status contract; unknown means history supplied no execution evidence.
+  executionStatus: z.literal("unknown").nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   toolCallId: z.string().nullable(),

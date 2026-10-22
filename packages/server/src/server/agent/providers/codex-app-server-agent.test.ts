@@ -4968,85 +4968,138 @@ describe("Codex app-server provider", () => {
     ]);
   });
 
-  test("coalesces persisted MultiAgentV2 activity for one child into one terminal card", async () => {
-    const session = createSession();
-    session.client = {
-      request: vi.fn(async (method: string, params: unknown) => {
-        if (method !== "thread/read") {
-          return {};
-        }
-        if ((params as { threadId?: string }).threadId !== "test-thread") {
-          return { thread: { turns: [] } };
-        }
-        return {
-          thread: {
-            turns: [
-              {
-                items: [
-                  {
-                    type: "subAgentActivity",
-                    id: "child-started-history",
-                    kind: "started",
-                    agentThreadId: "history-child-thread",
-                    agentPath: "/root/history-child",
-                    timestamp: "2026-07-09T10:00:00.000Z",
-                  },
-                  {
-                    type: "subAgentActivity",
-                    id: "child-interacted-history",
-                    kind: "interacted",
-                    agentThreadId: "history-child-thread",
-                    agentPath: "/root/history-child",
-                    timestamp: "2026-07-09T10:01:00.000Z",
-                  },
-                  {
-                    type: "subAgentActivity",
-                    id: "child-interrupted-history",
-                    kind: "interrupted",
-                    agentThreadId: "history-child-thread",
-                    agentPath: "/root/history-child",
-                    timestamp: "2026-07-09T10:02:00.000Z",
-                  },
-                ],
-              },
-            ],
-          },
-        };
-      }),
-    };
-
-    await asInternals(session).loadPersistedHistory(session.client);
-
-    const history: AgentStreamEvent[] = [];
-    for await (const event of session.streamHistory()) {
-      history.push(event);
-    }
-    expect(history).toEqual([
-      {
-        type: "provider_subagent",
-        provider: "codex",
-        event: expect.objectContaining({
-          type: "upsert",
-          id: "history-child-thread",
-          status: "canceled",
+  test.each([false, true])(
+    "coalesces persisted MultiAgentV2 activity with interruption=%s",
+    async (interrupted) => {
+      const session = createSession();
+      session.client = {
+        request: vi.fn(async (method: string, params: unknown) => {
+          if (method !== "thread/read") {
+            return {};
+          }
+          if ((params as { threadId?: string }).threadId !== "test-thread") {
+            return { thread: { turns: [] } };
+          }
+          return {
+            thread: {
+              turns: [
+                {
+                  items: [
+                    {
+                      type: "subAgentActivity",
+                      id: "child-started-history",
+                      kind: "started",
+                      agentThreadId: "history-child-thread",
+                      agentPath: "/root/history-child",
+                      timestamp: "2026-07-09T10:00:00.000Z",
+                    },
+                    {
+                      type: "subAgentActivity",
+                      id: "child-interacted-history",
+                      kind: "interacted",
+                      agentThreadId: "history-child-thread",
+                      agentPath: "/root/history-child",
+                      timestamp: "2026-07-09T10:01:00.000Z",
+                    },
+                    ...(interrupted
+                      ? [
+                          {
+                            type: "subAgentActivity",
+                            id: "child-interrupted-history",
+                            kind: "interrupted",
+                            agentThreadId: "history-child-thread",
+                            agentPath: "/root/history-child",
+                            timestamp: "2026-07-09T10:02:00.000Z",
+                          },
+                        ]
+                      : []),
+                  ],
+                },
+              ],
+            },
+          };
         }),
-      },
-      {
-        type: "timeline",
-        provider: "codex",
-        timestamp: "2026-07-09T10:00:00.000Z",
-        item: expect.objectContaining({
-          type: "tool_call",
-          callId: "child-started-history",
-          status: "canceled",
-          detail: expect.objectContaining({
-            type: "sub_agent",
-            description: "history-child",
+      };
+
+      await asInternals(session).loadPersistedHistory(session.client);
+
+      const history: AgentStreamEvent[] = [];
+      for await (const event of session.streamHistory()) {
+        history.push(event);
+      }
+      expect(history).toEqual([
+        {
+          type: "provider_subagent",
+          provider: "codex",
+          event: expect.objectContaining({
+            type: "upsert",
+            id: "history-child-thread",
+            status: interrupted ? "canceled" : "completed",
+            executionStatus: interrupted ? null : "unknown",
           }),
-        }),
-      },
-    ]);
-  });
+        },
+        {
+          type: "timeline",
+          provider: "codex",
+          timestamp: "2026-07-09T10:00:00.000Z",
+          item: expect.objectContaining({
+            type: "tool_call",
+            callId: "child-started-history",
+            status: interrupted ? "canceled" : "completed",
+            metadata: expect.objectContaining({ executionStatus: interrupted ? null : "unknown" }),
+            detail: expect.objectContaining({
+              type: "sub_agent",
+              description: "history-child",
+            }),
+          }),
+        },
+      ]);
+      if (!interrupted) {
+        const live: AgentStreamEvent[] = [];
+        session.subscribe((event) => live.push(event));
+        asInternals(session).handleNotification("turn/completed", {
+          threadId: "test-thread",
+          turn: { status: "completed" },
+        });
+        expect(
+          live.some(
+            (event) =>
+              event.type === "provider_subagent" &&
+              event.event.type === "upsert" &&
+              event.event.executionStatus !== "unknown",
+          ),
+        ).toBe(false);
+        asInternals(session).handleNotification("turn/started", {
+          threadId: "history-child-thread",
+          turn: { id: "live-child-turn" },
+        });
+        expect(live).toContainEqual(
+          expect.objectContaining({
+            type: "provider_subagent",
+            event: expect.objectContaining({
+              id: "history-child-thread",
+              status: "running",
+              executionStatus: null,
+            }),
+          }),
+        );
+        asInternals(session).handleNotification("turn/completed", {
+          threadId: "history-child-thread",
+          turn: { id: "live-child-turn", status: "completed" },
+        });
+        expect(live).toContainEqual(
+          expect.objectContaining({
+            type: "provider_subagent",
+            event: expect.objectContaining({
+              id: "history-child-thread",
+              status: "completed",
+              executionStatus: null,
+            }),
+          }),
+        );
+      }
+    },
+  );
 
   test("does not import a parent interaction from child history as another sub-agent", async () => {
     const appServer = createFakeCodexAppServer({

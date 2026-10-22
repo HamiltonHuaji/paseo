@@ -166,8 +166,11 @@ loads, resumes, or unarchives a native thread, including legacy records whose na
 ACP providers spawn the CLI, replay the session through `session/load`, and terminate the process
 before returning. A Codex history session opens an interactive connection when an explicit prompt,
 rewind, compact, or goal operation needs it. Interactive resume remains responsible for repairing
-a provider session archived outside Paseo while its Paseo agent is active. Historical turn events
-alone do not establish whether a separate provider execution is still alive.
+a provider session archived outside Paseo while its Paseo agent is active. Historical child
+started/interacted events carry an unknown execution status until live evidence replaces it;
+an explicit interruption remains canceled. Unknown children show a neutral label and are excluded
+from finished-child dismissal. Older clients retain their legacy status interpretation because the
+wire status enum remains unchanged.
 
 Provider session connection owns every process it spawns until the session is registered with
 `AgentManager`. If initialization, persisted-session resume, or initial history hydration fails,

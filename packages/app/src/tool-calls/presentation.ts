@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@getpaseo/protocol/agent-message";
+import { i18n } from "@/i18n/i18next";
 import { buildAgentMessageDisplay } from "@getpaseo/protocol/paseo-tool-presentation/index";
 import type { PlanOutcome } from "@/components/plan-card";
 import type { ComponentType } from "react";
@@ -81,7 +82,10 @@ export function buildToolCallPresentation(
   return {
     detail,
     displayName: displayModel.displayName,
-    summary: displayModel.summary,
+    summary:
+      input.metadata?.executionStatus === "unknown"
+        ? [displayModel.summary, i18n.t("subagents.executionUnknown")].filter(Boolean).join(" · ")
+        : displayModel.summary,
     errorText: displayModel.errorText,
     icon: input.resolveIcon(input.toolName, detail, input.agentMessage),
     isLoadingDetails,

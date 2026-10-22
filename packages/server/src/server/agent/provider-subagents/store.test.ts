@@ -2,6 +2,22 @@ import { describe, expect, test } from "vitest";
 import { ProviderSubagentStore } from "./store.js";
 
 describe("ProviderSubagentStore", () => {
+  test("keeps unknown historical execution until a live status replaces it", () => {
+    const store = new ProviderSubagentStore();
+    store.apply("parent", "codex", {
+      type: "upsert",
+      id: "child",
+      status: "completed",
+      executionStatus: "unknown",
+    });
+    store.apply("parent", "codex", { type: "upsert", id: "child", title: "Historical child" });
+    expect(store.get("parent", "child")?.executionStatus).toBe("unknown");
+    store.apply("parent", "codex", { type: "upsert", id: "child", status: "running" });
+    expect(store.get("parent", "child")).toMatchObject({
+      status: "running",
+      executionStatus: null,
+    });
+  });
   test("keeps provider children and their timelines scoped to the parent agent", () => {
     const subagents = new ProviderSubagentStore();
 

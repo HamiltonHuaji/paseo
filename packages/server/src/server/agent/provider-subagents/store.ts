@@ -18,6 +18,7 @@ export interface ProviderSubagentDescriptor {
   title: string | null;
   description: string | null;
   status: ProviderSubagentStatus;
+  executionStatus?: "unknown" | null;
   createdAt: string;
   updatedAt: string;
   toolCallId: string | null;
@@ -36,6 +37,7 @@ export type ProviderSubagentInputEvent =
        * child is still running, and must not revert a finished one.
        */
       status?: ProviderSubagentStatus;
+      executionStatus?: "unknown" | null;
       toolCallId?: string | null;
       cwd?: string | null;
       subtitle?: string | null;
@@ -120,6 +122,10 @@ export class ProviderSubagentStore {
       title: stickyField(event.title, previous?.title),
       description: stickyField(event.description, previous?.description),
       status: event.status ?? previous?.status ?? "running",
+      executionStatus:
+        event.executionStatus === undefined && event.status !== undefined
+          ? null
+          : stickyField(event.executionStatus, previous?.executionStatus),
       createdAt: previous?.createdAt ?? timestamp,
       updatedAt: timestamp,
       toolCallId: stickyField(event.toolCallId, previous?.toolCallId),

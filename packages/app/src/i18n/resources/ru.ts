@@ -1945,6 +1945,7 @@ export const ru: TranslationResources = {
     backdrop: "Фон меню",
   },
   subagents: {
+    executionUnknown: "Состояние выполнения неизвестно",
     title: "Субагенты",
     pillLabelOne: "1 субагент",
     pillLabelMany: "Субагентов: {{count}}",

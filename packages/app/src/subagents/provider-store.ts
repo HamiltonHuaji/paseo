@@ -63,7 +63,9 @@ export function providerSubagentKey(
 
 export function providerSubagentLifecycleStatus(
   status: ProviderSubagentDescriptorPayload["status"],
+  executionStatus?: "unknown" | null,
 ): AgentLifecycleStatus {
+  if (executionStatus === "unknown") return "closed";
   if (status === "running") return "running";
   if (status === "failed") return "error";
   return "idle";
@@ -139,7 +141,7 @@ const EMPTY_TIMELINE: ProviderSubagentTimelineState = {
 function providerSubagentTerminalEvent(
   subagent: ProviderSubagentDescriptorPayload,
 ): AgentStreamEventPayload | null {
-  if (subagent.status === "running") {
+  if (subagent.status === "running" || subagent.executionStatus === "unknown") {
     return null;
   }
   if (subagent.status === "failed") {
@@ -185,7 +187,9 @@ export const useProviderSubagentStore = create<ProviderSubagentState>((set) => (
       const hiddenFromTrack = new Set(state.hiddenFromTrack);
       for (const subagentId of subagentIds) {
         const key = providerSubagentKey(serverId, parentAgentId, subagentId);
-        if (state.descriptors.get(key)?.status !== "running") hiddenFromTrack.add(key);
+        const descriptor = state.descriptors.get(key);
+        if (descriptor?.status !== "running" && descriptor?.executionStatus !== "unknown")
+          hiddenFromTrack.add(key);
       }
       return { hiddenFromTrack };
     });
@@ -200,7 +204,7 @@ export const useProviderSubagentStore = create<ProviderSubagentState>((set) => (
       for (const subagent of subagents) {
         const key = providerSubagentKey(serverId, parentAgentId, subagent.id);
         descriptors.set(key, subagent);
-        if (subagent.status === "running") {
+        if (subagent.status === "running" || subagent.executionStatus === "unknown") {
           hiddenFromTrack.delete(key);
         }
       }
@@ -212,7 +216,11 @@ export const useProviderSubagentStore = create<ProviderSubagentState>((set) => (
         const key = providerSubagentKey(serverId, parentAgentId, subagent.id);
         const current = timelines.get(key);
         const previous = state.descriptors.get(key);
-        if (current && previous?.status !== subagent.status) {
+        if (
+          current &&
+          (previous?.status !== subagent.status ||
+            previous?.executionStatus !== subagent.executionStatus)
+        ) {
           timelines.set(key, settleTimeline(current, subagent));
         }
       }
@@ -231,12 +239,19 @@ export const useProviderSubagentStore = create<ProviderSubagentState>((set) => (
         const hiddenFromTrack = new Set(state.hiddenFromTrack);
         const previous = descriptors.get(key);
         descriptors.set(key, payload.subagent);
-        if (payload.subagent.status === "running") {
+        if (
+          payload.subagent.status === "running" ||
+          payload.subagent.executionStatus === "unknown"
+        ) {
           hiddenFromTrack.delete(key);
         }
         let timelines = state.timelines;
         const current = state.timelines.get(key);
-        if (current && previous?.status !== payload.subagent.status) {
+        if (
+          current &&
+          (previous?.status !== payload.subagent.status ||
+            previous?.executionStatus !== payload.subagent.executionStatus)
+        ) {
           timelines = new Map(state.timelines);
           timelines.set(key, settleTimeline(current, payload.subagent));
         }

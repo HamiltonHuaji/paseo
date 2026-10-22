@@ -2392,7 +2392,9 @@ export const ToolCall = memo(function ToolCall({
       onToggle={presentation.canOpenDetails ? handleToggle : undefined}
       onOpenFile={handleOpenFile}
       renderDetails={presentation.canOpenDetails && shouldRenderInline ? renderDetails : undefined}
-      isLoading={status === "running" || status === "executing"}
+      isLoading={
+        metadata?.executionStatus !== "unknown" && (status === "running" || status === "executing")
+      }
       isError={status === "failed"}
       isLastInSequence={isLastInSequence}
       disableOuterSpacing={disableOuterSpacing}

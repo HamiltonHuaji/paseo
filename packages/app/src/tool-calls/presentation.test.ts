@@ -32,6 +32,18 @@ function fakeResolveIcon(
 }
 
 describe("tool-call presentation", () => {
+  it("shows unknown historical execution beside the subagent description", () => {
+    const presentation = buildToolCallPresentation({
+      toolName: "sub_agent",
+      status: "completed",
+      error: null,
+      detail: { type: "sub_agent", description: "Inspect sources", log: "" },
+      metadata: { executionStatus: "unknown" },
+      resolveIcon: fakeResolveIcon,
+    });
+    expect(presentation.summary).toContain("Execution status unknown");
+    expect(presentation.isLoadingDetails).toBe(false);
+  });
   it("builds badge, detail, icon, and file-open policy in one model", () => {
     const presentation = buildToolCallPresentation({
       toolName: "read_file",
