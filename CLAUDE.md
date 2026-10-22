@@ -21,6 +21,11 @@ This is an npm workspace monorepo:
 
 At the start of non-trivial work, list `docs/` and skim anything relevant to the task.
 
+For this fork baseline migration, read [the behavior contracts](docs/contracts/README.md) and
+[the overlay workflow](docs/fork-overlay.md). Verify every applicable ID and preserve deferred
+items. Session/state design drafts are excluded. VS Code was retired by the user on 2026-10-22.
+The pinned `docs/refactors/experiment-viewer-transport-spec.md` must not be changed without explicit approval.
+
 | Doc                                                                  | What's in it                                                                                                                   |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | [docs/product.md](docs/product.md)                                   | What Paseo is, who it's for, where it's going                                                                                  |
