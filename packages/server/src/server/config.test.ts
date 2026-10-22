@@ -64,6 +64,7 @@ describe("server config", () => {
     const config = loadConfig(paseoHome, {
       env: {
         PASEO_LISTEN: "127.0.0.1:7000",
+        PASEO_EXPERIMENT_VIEWER_LISTEN: "0.0.0.0:17779",
         PASEO_PASSWORD: "secret",
         PASEO_RELAY_ENDPOINT: "relay.example.test:443",
         PASEO_TRUSTED_PROXIES: "true",
@@ -76,6 +77,7 @@ describe("server config", () => {
 
     expect(config.configReload?.overrideControlledPaths).toEqual([
       "daemon.auth.password",
+      "daemon.experimentViewer.listen",
       "daemon.listen",
       "daemon.relay.endpoint",
       "daemon.relay.useTls",
@@ -85,6 +87,7 @@ describe("server config", () => {
       "log.file.path",
     ]);
     expect(config.listen).toBe("127.0.0.1:7000");
+    expect(config.experimentViewer?.listen).toBe("0.0.0.0:17779");
     expect(config.trustedProxies).toBe(true);
     expect(config.log?.file?.path).toBe("custom.log");
     expect(config.voiceLlmProvider).toBe("codex");
