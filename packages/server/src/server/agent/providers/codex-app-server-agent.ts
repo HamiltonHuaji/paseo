@@ -1,3 +1,4 @@
+import { withPaseoAgentCliEnvironment } from "../paseo-cli-environment.js";
 import { validateProviderOptions } from "../provider-options.js";
 import {
   getAgentStreamEventTurnId,
@@ -3417,10 +3418,11 @@ export function buildCodexAppServerEnv(
   runtimeSettings?: ProviderRuntimeSettings,
   launchEnv?: Record<string, string>,
 ) {
-  return createProviderEnv({
+  const env = createProviderEnv({
     runtimeSettings,
     overlays: [launchEnv],
   });
+  return launchEnv?.PASEO_AGENT_ID ? withPaseoAgentCliEnvironment(env) : env;
 }
 
 function buildCodexAppServerInitializeParams(): {

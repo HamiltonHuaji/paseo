@@ -438,3 +438,86 @@ describe("migrateProviderSettings", () => {
     });
   });
 });
+
+describe("managed Paseo CLI environment", () => {
+  test.skipIf(process.platform === "win32")(
+    "keeps the source CLI in ordinary and login Bash without changing user profiles",
+    async () => {
+      const { spawnSync } = await import("node:child_process");
+      const { mkdirSync, readFileSync, statSync } = await import("node:fs");
+      const { withPaseoAgentCliEnvironment } = await import("./paseo-cli-environment.js");
+      const { resolvePaseoCliExecutablePath } = await import("../session/daemon/cli-path.js");
+      const root = mkdtempSync(path.join(tmpdir(), "paseo CLI 中文 ' "));
+      tempDirs.push(root);
+      const foreignBin = path.join(root, "foreign bin");
+      mkdirSync(foreignBin);
+      writeFileSync(path.join(foreignBin, "paseo"), "#!/bin/sh\nprintf 'foreign CLI\\n'\n", {
+        mode: 0o755,
+      });
+      const originalHook = path.join(root, "original ' bash-env");
+      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      const hookContents = `export PASEO_TEST_BASH_ENV=preserved\nexport PATH=${quote(foreignBin)}:${quote(path.dirname(process.execPath))}:/usr/bin:/bin\n`;
+      writeFileSync(originalHook, hookContents);
+      const env = withPaseoAgentCliEnvironment(
+        createProviderEnv({
+          overlays: [
+            {
+              PASEO_HOME: path.join(root, "private home"),
+              PASEO_AGENT_ID: "managed-agent-id",
+              BASH_ENV: originalHook,
+            },
+          ],
+        }),
+      );
+      expect(env.BASH_ENV.startsWith(path.join(root, "private home", "agent-shell"))).toBe(true);
+      expect(statSync(env.BASH_ENV).mode & 0o777).toBe(0o600);
+      expect(withPaseoAgentCliEnvironment(env).BASH_ENV).toBe(env.BASH_ENV);
+      for (const mode of ["-c", "-lc"]) {
+        const result = spawnSync(
+          "/bin/bash",
+          [
+            mode,
+            'set -e; command -v paseo; paseo --version; printf \'%s\\n\' "$PASEO_AGENT_ID" "$PASEO_TEST_BASH_ENV"',
+          ],
+          { env, encoding: "utf8" },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        const lines = result.stdout.trim().split("\n");
+        expect(lines).toEqual([
+          resolvePaseoCliExecutablePath(),
+          "0.13.1",
+          "managed-agent-id",
+          "preserved",
+        ]);
+      }
+      expect(readFileSync(originalHook, "utf8")).toBe(hookContents);
+    },
+  );
+
+  test("source CLI resolution does not search an enclosing checkout or global shim", async () => {
+    const { mkdirSync } = await import("node:fs");
+    const { resolveDistributionPaseoCliEntrypoint } = await import("../session/daemon/cli-path.js");
+    const root = mkdtempSync(path.join(tmpdir(), "paseo-source-cli-"));
+    tempDirs.push(root);
+    const distribution = {
+      kind: "source" as const,
+      packageName: "@hamiltonhuaji/paseo-fork" as const,
+      version: "0.13.1",
+      serverVersion: "0.13.0-beta.1",
+      packageRoot: root,
+    };
+    const outerBin = path.join(root, "node_modules", ".bin");
+    mkdirSync(outerBin, { recursive: true });
+    writeFileSync(path.join(outerBin, "paseo"), "foreign shim");
+    expect(resolveDistributionPaseoCliEntrypoint(distribution)).toBeNull();
+    const cliRoot = path.join(root, "packages", "cli");
+    mkdirSync(path.join(cliRoot, "bin"), { recursive: true });
+    mkdirSync(path.join(cliRoot, "dist"), { recursive: true });
+    writeFileSync(path.join(cliRoot, "bin", "paseo"), "source shim");
+    expect(resolveDistributionPaseoCliEntrypoint(distribution)).toBeNull();
+    writeFileSync(path.join(cliRoot, "dist", "index.js"), "source CLI");
+    expect(resolveDistributionPaseoCliEntrypoint(distribution)).toBe(
+      path.join(cliRoot, "bin", "paseo"),
+    );
+  });
+});

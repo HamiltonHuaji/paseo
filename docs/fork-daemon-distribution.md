@@ -21,9 +21,16 @@ The outer package is `@hamiltonhuaji/paseo-fork`; its executable stays `paseo`. 
 bundled internal workspace before loading the CLI, so an official package elsewhere in the global
 npm prefix cannot satisfy a missing fork dependency.
 
-The bundled daemon also injects that outer `paseo` executable into agent terminals and hooks. It
-must not resolve a separately installed `@getpaseo/cli`; otherwise a restart from an agent can
-replace the running fork daemon with the official daemon.
+Agent terminals and managed Codex tools use the CLI from the running distribution. Build the CLI
+before starting Codex from a source checkout; a missing source or bundled CLI must not resolve to an
+outer checkout or separately installed package. A restart through the wrong CLI can replace the
+running fork daemon.
+
+Bash login profiles can replace the inherited `PATH`. Managed Codex tools retain the distribution's
+CLI after those profiles run, using a private hook under `PASEO_HOME/agent-shell`. Your existing
+`BASH_ENV` file still runs first; user shell profiles and global installations are unchanged. The
+login-shell guarantee is currently verified on Linux/Bash. Other shell startup files require their
+own verification.
 
 The generated distribution manifest records the fork version, official daemon baseline, and
 install URL. Daemon self-update reads that manifest, runs npm directly with `--force`, and updates

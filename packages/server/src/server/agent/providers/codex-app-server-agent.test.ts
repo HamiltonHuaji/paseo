@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, onTestFinished, test, vi } from "vitest";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { type Dirent, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -3072,10 +3072,13 @@ describe("Codex app-server provider", () => {
     }
   });
 
-  test("builds app-server env from launch-context env overrides", () => {
+  test("builds app-server env from launch-context env overrides", async () => {
+    const paseoHome = await mkdtemp(path.join(tmpdir(), "codex-launch-env-"));
+    onTestFinished(() => rmSync(paseoHome, { recursive: true, force: true }));
     const launchContext: AgentLaunchContext = {
       env: {
         PASEO_AGENT_ID: "00000000-0000-4000-8000-000000000301",
+        PASEO_HOME: paseoHome,
         PASEO_TEST_FLAG: "codex-launch-value",
       },
     };
@@ -3091,6 +3094,8 @@ describe("Codex app-server provider", () => {
 
     expect(env.PASEO_AGENT_ID).toBe(launchContext.env?.PASEO_AGENT_ID);
     expect(env.PASEO_TEST_FLAG).toBe(launchContext.env?.PASEO_TEST_FLAG);
+    expect(env.PASEO_CLI).toMatch(/packages[\\/]cli[\\/]bin[\\/]paseo$/);
+    if (process.platform !== "win32") expect(env.BASH_ENV.startsWith(paseoHome)).toBe(true);
   });
 
   test("projects request_user_input into a question permission and running timeline tool call", () => {
