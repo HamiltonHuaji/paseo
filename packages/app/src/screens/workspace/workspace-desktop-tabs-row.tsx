@@ -1,3 +1,4 @@
+import type { TabDropPreview } from "@/components/split-container-tab-drop-preview";
 import type { DragOrientation } from "@/components/drag-orientation";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { TreeChevron, treeRowPaddingLeft } from "@/components/tree-primitives";
@@ -626,6 +627,7 @@ export interface WorkspaceDesktopTabsRowProps {
   externalDndContext?: boolean;
   activeDragTabId?: string | null;
   tabDropPreviewIndex?: number | null;
+  verticalDropIndicator?: TabDropPreview["verticalIndicator"];
   showPaneSplitActions?: boolean;
   showPaneMaximizeAction?: boolean;
   paneMaximized?: boolean;
@@ -1690,7 +1692,7 @@ function ResolvedWorkspaceDesktopTabsRail({
   onReorderTabs,
   externalDndContext = false,
   activeDragTabId = null,
-  tabDropPreviewIndex = null,
+  verticalDropIndicator,
   showPaneSplitActions = false,
   showPaneMaximizeAction = false,
   paneMaximized = false,
@@ -1928,11 +1930,14 @@ function ResolvedWorkspaceDesktopTabsRail({
       const item = tabItemsById.get(row.leaf.tabId);
       if (!item) return <View />;
       const index = tabIndexesById.get(row.leaf.tabId) ?? 0;
-      const showDropIndicatorBefore = activeDragTabId !== null && tabDropPreviewIndex === index;
+      const showDropIndicatorBefore =
+        activeDragTabId !== null &&
+        verticalDropIndicator?.tabId === item.tab.tabId &&
+        verticalDropIndicator.edge === "before";
       const showDropIndicatorAfter =
         activeDragTabId !== null &&
-        tabDropPreviewIndex === tabs.length &&
-        index === tabs.length - 1;
+        verticalDropIndicator?.tabId === item.tab.tabId &&
+        verticalDropIndicator.edge === "after";
       return (
         <ResolvedDesktopTabChip
           key={`${item.tab.key}:${item.tab.kind}`}
@@ -1992,7 +1997,7 @@ function ResolvedWorkspaceDesktopTabsRail({
       onReloadAgent,
       onRenameTab,
       setHoveredCloseTabKey,
-      tabDropPreviewIndex,
+      verticalDropIndicator,
       tabMenuLabels,
       tabs.length,
       tabIndexesById,

@@ -5,6 +5,9 @@ export interface TabDropPreview {
   paneId: string;
   insertionIndex: number;
   indicatorIndex: number;
+  // Tree headers can separate adjacent tab indexes. Anchor the rail line to the
+  // hovered leaf so an after-target preview does not move inside the next group.
+  verticalIndicator?: { tabId: string; edge: "before" | "after" };
 }
 
 interface ComputeTabDropPreviewInput {
@@ -61,5 +64,13 @@ export function computeTabDropPreview(input: ComputeTabDropPreviewInput): TabDro
     paneId: input.overPaneId,
     insertionIndex,
     indicatorIndex,
+    ...(vertical
+      ? {
+          verticalIndicator: {
+            tabId: input.overTabId,
+            edge: insertAfterTarget ? ("after" as const) : ("before" as const),
+          },
+        }
+      : {}),
   };
 }

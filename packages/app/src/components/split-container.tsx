@@ -740,6 +740,9 @@ const SplitPaneView = memo(function SplitPaneView({
       onReorderTabs={handleReorderTabs}
       externalDndContext
       activeDragTabId={activeDragTabId}
+      verticalDropIndicator={
+        tabDropPreview?.paneId === pane.id ? tabDropPreview.verticalIndicator : undefined
+      }
       tabDropPreviewIndex={
         tabDropPreview?.paneId === pane.id ? tabDropPreview.indicatorIndex : null
       }

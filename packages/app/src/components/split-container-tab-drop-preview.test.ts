@@ -34,9 +34,39 @@ describe("computeTabDropPreview", () => {
           activeRect: { left: 1000, width: 100, top: activeTop, height: 36 },
           overRect: { left: 0, width: 220, top: 200, height: 36 },
         }),
-      ).toEqual({ paneId: "target", insertionIndex: expectedIndex, indicatorIndex: expectedIndex });
+      ).toEqual({
+        paneId: "target",
+        insertionIndex: expectedIndex,
+        indicatorIndex: expectedIndex,
+        verticalIndicator: { tabId: "c", edge: expectedIndex === 2 ? "before" : "after" },
+      });
     },
   );
+
+  it("anchors an after-leaf line before the next tree group while correcting same-pane order", () => {
+    const result = computeTabDropPreview({
+      activePaneId: "pane",
+      activeTabId: "source",
+      overPaneId: "pane",
+      overTabId: "import-copy",
+      targetTabs: [
+        tab("source"),
+        tab("fork"),
+        tab("import-copy"),
+        tab("research/train/a"),
+        tab("research/train/b"),
+      ],
+      orientation: "vertical",
+      activeRect: { left: 0, width: 220, top: 84, height: 36 },
+      overRect: { left: 0, width: 220, top: 72, height: 36 },
+    });
+    expect(result).toEqual({
+      paneId: "pane",
+      insertionIndex: 2,
+      indicatorIndex: 3,
+      verticalIndicator: { tabId: "import-copy", edge: "after" },
+    });
+  });
 
   it("returns a before-target insertion index for cross-pane drops on the left half", () => {
     expect(
