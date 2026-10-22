@@ -1,3 +1,4 @@
+import { currentDaemonDistribution } from "./session/daemon/distribution.js";
 import {
   createAgentMessageDelivery,
   type AgentMessageDelivery,
@@ -1933,6 +1934,13 @@ export class VoiceAssistantWebSocketServer {
       serverId: this.serverId,
       hostname: getHostName(),
       version: this.daemonVersion,
+      distribution: {
+        packageName: currentDaemonDistribution.packageName,
+        version:
+          currentDaemonDistribution.kind !== "official"
+            ? currentDaemonDistribution.version
+            : this.daemonVersion,
+      },
       sourceId: session.getHostSourceId(),
       permissions: session.getPermissions(),
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.

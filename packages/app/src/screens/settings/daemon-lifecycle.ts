@@ -42,22 +42,30 @@ export async function updateDaemonFromSettings(
     }>;
   },
 ): Promise<{ workerVersion: string }> {
-  const previous = await readSelectedWorker(hostServerId, deps);
-  const installed = await deps.updateDaemon();
+  let previous: WorkerStatus;
+  try {
+    previous = await readSelectedWorker(hostServerId, deps);
+  } catch (error) {
+    throw new Error(`Daemon status check failed before installation started. ${String(error)}`, {
+      cause: error,
+    });
+  }
+  let installed: Awaited<ReturnType<typeof deps.updateDaemon>>;
+  try {
+    installed = await deps.updateDaemon();
+  } catch (error) {
+    if (!isReconnectFailure(error)) throw error;
+    const worker = await observeReplacement(previous, deps);
+    return { workerVersion: worker.version ?? "unknown" };
+  }
   if (!installed.success) throw new Error(installed.error ?? "Package installation failed");
   try {
     const worker = await observeReplacement(previous, deps);
-    if (!worker.version || !installed.newVersion || worker.version !== installed.newVersion) {
-      throw new Error(
-        `Expected installed version ${installed.newVersion ?? "unknown"}; observed worker ${worker.version}.`,
-      );
-    }
-    return { workerVersion: worker.version };
+    return { workerVersion: worker.version ?? "unknown" };
   } catch (error) {
-    throw new Error(
-      `Package installed; replacement worker version was not confirmed. ${String(error)}`,
-      { cause: error },
-    );
+    throw new Error(`Package installed; replacement worker was not confirmed. ${String(error)}`, {
+      cause: error,
+    });
   }
 }
 

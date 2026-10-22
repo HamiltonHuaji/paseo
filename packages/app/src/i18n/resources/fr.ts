@@ -1487,6 +1487,7 @@ export const fr: TranslationResources = {
         idle: "Les mises à jour n’ont pas encore été vérifiées.",
       },
       installError: "Impossible d’installer la mise à jour de l’application de bureau.",
+      official: { switchFailed: "Unable to switch to the official Paseo build." },
       callout: {
         installingTitle: "Installation de la mise à jour",
         failedTitle: "Échec de la mise à jour",
@@ -2386,6 +2387,14 @@ export const fr: TranslationResources = {
       },
       updates: {
         label: "Mises à jour de l’application",
+        forkLabel: "Fork updates",
+        android: {
+          available: "Signed APK {{version}} is available.",
+          latest: "This device is up to date at {{version}}.",
+          unavailable: "Fork APK release status is unavailable.",
+          checkFailed: "Unable to check the fork APK release.",
+          download: "Download APK",
+        },
         readyToInstall: "Prête à installer : {{version}}",
         installTitle: "Installer la mise à jour de l’app de bureau",
         installMessage: "Paseo sera mis à jour sur cet ordinateur",
@@ -2397,6 +2406,22 @@ export const fr: TranslationResources = {
         checking: "Vérification…",
         alertTitle: "Erreur",
         alertMessage: "Impossible d’ouvrir la boîte de dialogue de confirmation de mise à jour.",
+        official: {
+          label: "Official Paseo",
+          checking: "Checking official releases...",
+          newerAvailable:
+            "This fork is based on {{baseVersion}}; official {{latestVersion}} is available.",
+          latest: "This fork is based on the latest official release, {{version}}.",
+          unavailable: "Official release status is unavailable.",
+          check: "Check official",
+          viewRelease: "View release",
+          switchTo: "Switch to {{version}}",
+          switching: "Switching...",
+          switchTitle: "Switch to official Paseo?",
+          switchMessage:
+            "This will stop running agents and terminal sessions, then replace this fork with the official build. Returning to the fork requires manually installing it from HamiltonHuaji/paseo Releases.",
+          switchConfirm: "Switch to official",
+        },
       },
     },
     appearance: {

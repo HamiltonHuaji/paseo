@@ -57,8 +57,8 @@ import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { isVersionMismatch } from "@/desktop/updates/desktop-updates";
-import { resolveAppVersion } from "@/utils/app-version";
+import { isVersionOlder } from "@/desktop/updates/desktop-updates";
+import { resolveAppVersion, resolveForkDistributionVersion } from "@/utils/app-version";
 import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons";
 import { formatLatency } from "@/utils/latency";
 import { ICON_SIZE } from "@/styles/theme";
@@ -176,7 +176,10 @@ function HostStatusBadges({ serverId }: { serverId: string }) {
   const { theme } = useUnistyles();
   const snapshot = useHostRuntimeSnapshot(serverId);
   const daemonVersion = useSessionStore(
-    (state) => state.sessions[serverId]?.serverInfo?.version ?? null,
+    (state) =>
+      state.sessions[serverId]?.serverInfo?.distribution?.version ??
+      state.sessions[serverId]?.serverInfo?.version ??
+      null,
   );
 
   const connectionStatus = snapshot?.connectionStatus ?? "connecting";
@@ -668,9 +671,76 @@ function RestartDaemonCard({ host }: { host: HostProfile }) {
 
 type DaemonUpdateState =
   | { status: "idle" }
-  | { status: "complete"; workerVersion: string }
-  | { status: "updating"; phase: string }
-  | { status: "failed"; title: string; message: string };
+  | { status: "complete"; workerVersion: string; output?: string }
+  | { status: "updating"; phase: string; output: string }
+  | { status: "failed"; title: string; message: string; output?: string };
+
+// Status collection includes provider availability and can take more than a relay round trip.
+const MAX_DAEMON_UPDATE_OUTPUT_CHARS = 8192;
+const MAX_DAEMON_UPDATE_OUTPUT_LINES = 8;
+
+function appendDaemonUpdateOutput(current: string, chunk: string | undefined): string {
+  if (!chunk) return current;
+  const bounded = `${current}${chunk}`
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .slice(-MAX_DAEMON_UPDATE_OUTPUT_CHARS);
+  return bounded.split("\n").slice(-MAX_DAEMON_UPDATE_OUTPUT_LINES).join("\n");
+}
+
+function daemonUpdatePhaseLabel(t: TFunction, phase: string): string | null {
+  switch (phase) {
+    case "starting":
+      return t("settings.host.daemon.update.phaseStarting");
+    case "downloading":
+      return t("settings.host.daemon.update.phaseDownloading");
+    case "installing":
+      return t("settings.host.daemon.update.phaseInstalling");
+    case "complete":
+      return t("settings.host.daemon.update.phaseComplete");
+    default:
+      return null;
+  }
+}
+
+function daemonUpdateHint(t: TFunction, desktopManaged: boolean): string {
+  return desktopManaged
+    ? t("settings.host.daemon.update.desktopManagedHint")
+    : t("settings.host.daemon.update.hint");
+}
+
+function DaemonUpdateFeedback({ state, t }: { state: DaemonUpdateState; t: TFunction }) {
+  return (
+    <>
+      {state.status === "complete" ? (
+        <InlineAlert
+          variant="success"
+          title={t("desktop.daemon.lifecycle.workerUpdated", {
+            version: state.workerVersion,
+          })}
+          description={t("desktop.daemon.lifecycle.supervisorRefresh")}
+        />
+      ) : null}
+      {"output" in state && state.output ? (
+        <View style={styles.updateOutput}>
+          <Text selectable style={styles.updateOutputText}>
+            {state.output}
+          </Text>
+        </View>
+      ) : null}
+      {state.status === "failed" ? (
+        <View style={styles.updateFailure}>
+          <InlineAlert
+            variant="error"
+            title={state.title}
+            description={state.message}
+            testID="host-page-update-error"
+          />
+        </View>
+      ) : null}
+    </>
+  );
+}
 
 function UpdateDaemonCard({ host }: { host: HostProfile }) {
   const { t } = useTranslation();
@@ -680,19 +750,15 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
   const [updateState, setUpdateState] = useState<DaemonUpdateState>({ status: "idle" });
   const isMountedRef = useRef(true);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const updateOutputRef = useRef("");
 
-  const daemonVersion = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
-  );
-  const supportsSelfUpdate = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.features?.daemonSelfUpdate === true,
-  );
-  const desktopManaged = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.desktopManaged === true,
-  );
+  const serverInfo = useSessionStore((state) => state.sessions[host.serverId]?.serverInfo ?? null);
+  const daemonVersion = serverInfo?.distribution?.version ?? serverInfo?.version ?? null;
+  const supportsSelfUpdate = serverInfo?.features?.daemonSelfUpdate === true;
+  const desktopManaged = serverInfo?.desktopManaged === true;
 
-  const appVersion = resolveAppVersion();
-  const hasVersionMismatch = isVersionMismatch(appVersion, daemonVersion);
+  const appVersion = resolveForkDistributionVersion() ?? resolveAppVersion();
+  const hasDaemonUpdate = isVersionOlder(daemonVersion, appVersion);
 
   useEffect(() => {
     return () => {
@@ -735,48 +801,47 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
         setUpdateState({
           status: "updating",
           phase: t("settings.host.daemon.update.phaseStarting"),
+          output: "",
         });
+        updateOutputRef.current = "";
         const requestId = `settings_daemon_update_${host.serverId}`;
 
         const unsubscribe = daemonClient.on("daemon.update.progress", (message) => {
           if (message.payload.requestId !== requestId) return;
           if (!isMountedRef.current) return;
-          const { phase } = message.payload;
-          if (phase === "starting")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseStarting"),
-            });
-          else if (phase === "downloading")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseDownloading"),
-            });
-          else if (phase === "installing")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseInstalling"),
-            });
-          else if (phase === "complete")
-            setUpdateState({
-              status: "updating",
-              phase: t("settings.host.daemon.update.phaseComplete"),
-            });
+          const phase = daemonUpdatePhaseLabel(t, message.payload.phase);
+          if (phase) {
+            updateOutputRef.current = appendDaemonUpdateOutput(
+              updateOutputRef.current,
+              message.payload.output,
+            );
+            setUpdateState({ status: "updating", phase, output: updateOutputRef.current });
+          }
         });
         unsubscribeRef.current = unsubscribe;
 
         void updateDaemonFromSettings(host.serverId, {
           updateDaemon: () => daemonClient.updateDaemon(requestId),
-          getStatus: async () => ({
-            ...(await daemonClient.getDaemonStatus()),
-            serverId: daemonClient.getLastServerInfoMessage()?.serverId ?? "",
-            version: daemonClient.getLastServerInfoMessage()?.version ?? null,
-          }),
+          getStatus: async () => {
+            const status = await daemonClient.getDaemonStatus();
+            const latestServerInfo = daemonClient.getLastServerInfoMessage();
+            return {
+              ...status,
+              serverId: latestServerInfo?.serverId ?? "",
+              version: latestServerInfo?.distribution?.version ?? latestServerInfo?.version ?? null,
+            };
+          },
         })
           .then(({ workerVersion }) => {
             unsubscribeRef.current = null;
             unsubscribe();
-            if (isMountedRef.current) setUpdateState({ status: "complete", workerVersion });
+            if (isMountedRef.current) {
+              setUpdateState({
+                status: "complete",
+                workerVersion,
+                ...(updateOutputRef.current ? { output: updateOutputRef.current } : {}),
+              });
+            }
             return undefined;
           })
           .catch((error) => {
@@ -790,6 +855,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
               message: t("settings.host.daemon.update.requestFailedMessage", {
                 error: error instanceof Error ? error.message : "Unknown error",
               }),
+              ...(updateOutputRef.current ? { output: updateOutputRef.current } : {}),
             });
           });
         return;
@@ -805,7 +871,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
       });
   }, [daemonClient, host.label, host.serverId, isHostConnected, t]);
 
-  const shouldShowUpdate = hasVersionMismatch && (supportsSelfUpdate || desktopManaged);
+  const shouldShowUpdate = supportsSelfUpdate || (desktopManaged && hasDaemonUpdate);
   if (!shouldShowUpdate && updateState.status !== "complete") {
     return null;
   }
@@ -818,11 +884,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
       <View style={settingsStyles.row}>
         <View style={settingsStyles.rowContent}>
           <Text style={settingsStyles.rowTitle}>{t("settings.host.daemon.update.title")}</Text>
-          <Text style={settingsStyles.rowHint}>
-            {desktopManaged
-              ? t("settings.host.daemon.update.desktopManagedHint")
-              : t("settings.host.daemon.update.hint")}
-          </Text>
+          <Text style={settingsStyles.rowHint}>{daemonUpdateHint(t, desktopManaged)}</Text>
         </View>
         <Button
           variant="outline"
@@ -835,27 +897,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
           {buttonLabel}
         </Button>
       </View>
-      {updateState.status === "complete" ? (
-        <InlineAlert
-          size="sm"
-          variant="success"
-          title={t("desktop.daemon.lifecycle.workerUpdated", {
-            version: updateState.workerVersion,
-          })}
-          description={t("desktop.daemon.lifecycle.supervisorRefresh")}
-        />
-      ) : null}
-      {updateState.status === "failed" ? (
-        <View style={styles.updateFailure}>
-          <InlineAlert
-            size="sm"
-            variant="error"
-            title={updateState.title}
-            description={updateState.message}
-            testID="host-page-update-error"
-          />
-        </View>
-      ) : null}
+      <DaemonUpdateFeedback state={updateState} t={t} />
     </View>
   );
 }
@@ -1700,6 +1742,20 @@ const terminalProfileStyles = StyleSheet.create((theme) => ({
 }));
 
 const styles = StyleSheet.create((theme) => ({
+  updateOutput: {
+    maxHeight: 180,
+    marginHorizontal: theme.spacing[4],
+    marginBottom: theme.spacing[4],
+    padding: theme.spacing[3],
+    overflow: "hidden",
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.surface2,
+  },
+  updateOutputText: {
+    color: theme.colors.foregroundMuted,
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.sm,
+  },
   updateFailure: {
     marginHorizontal: theme.spacing[4],
     marginBottom: theme.spacing[4],

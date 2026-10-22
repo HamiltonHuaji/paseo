@@ -12,11 +12,10 @@ const DEFAULT_BACKOFF_MS = 15_000;
 
 function uploadAsset({ release, file, repo }) {
   const command = process.platform === "win32" ? "gh.exe" : "gh";
-  const result = spawnSync(
-    command,
-    ["release", "upload", release, file, "--clobber", "--repo", repo],
-    { shell: process.platform === "win32", stdio: "inherit" },
-  );
+  const result = spawnSync(command, ["release", "upload", release, file, "--repo", repo], {
+    shell: process.platform === "win32",
+    stdio: "inherit",
+  });
 
   if (result.error) {
     console.error(`Failed to start gh: ${result.error.message}`);

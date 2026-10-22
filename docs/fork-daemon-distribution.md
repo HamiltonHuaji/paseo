@@ -30,7 +30,8 @@ install URL. Daemon self-update reads that manifest, runs npm directly with `--f
 the same distribution. It never resolves `paseo` from `PATH`. `server_info.version` remains the
 internal server compatibility version; `server_info.distribution.version` is the exact fork release
 and is the value clients use for display and post-update reporting. An official installation
-without a manifest keeps using `@getpaseo/cli@latest`.
+without a manifest keeps using `@getpaseo/cli@latest`. A fork source checkout reports its
+canonical fork identity and refuses npm self-update; rebuild and restart that checkout explicitly.
 
 Self-update restarts the worker through its existing supervisor. The replacement worker inherits
 the supervisor's startup environment and loads code from the updated package path. The supervisor

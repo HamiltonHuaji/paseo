@@ -13,6 +13,7 @@ import {
   type CommandResult,
   type NpmGlobalPaseoInstall,
 } from "./npm-global-cli.js";
+import { OFFICIAL_PASEO_DISTRIBUTION } from "./distribution.js";
 
 interface TestLogger {
   errors: Array<{ obj: object; msg?: string }>;
@@ -63,6 +64,7 @@ function createRuntime(input: {
 }): DaemonSelfUpdateRuntime {
   const calls = input.calls ?? [];
   return {
+    distribution: OFFICIAL_PASEO_DISTRIBUTION,
     npm: {
       async inspect() {
         calls.push("inspect");
@@ -132,6 +134,7 @@ describe("DaemonSelfUpdater", () => {
     });
     const { result } = await runUpdate({
       runtime: {
+        distribution: OFFICIAL_PASEO_DISTRIBUTION,
         npm,
         installOrigin: {
           resolveCurrentServerPackageRoot: () =>
@@ -255,6 +258,7 @@ describe("DaemonSelfUpdater", () => {
       installStartedResolve = resolve;
     });
     const runtime: DaemonSelfUpdateRuntime = {
+      distribution: OFFICIAL_PASEO_DISTRIBUTION,
       npm: {
         async inspect() {
           calls.push("inspect");
@@ -298,4 +302,36 @@ describe("DaemonSelfUpdater", () => {
     await expect(firstUpdate).resolves.toMatchObject({ success: true });
     expect(calls).toEqual(["inspect", "installLatest", "inspect"]);
   });
+});
+
+test("an explicit fork update reinstalls the fork even when the running tree was replaced", async () => {
+  const calls: RuntimeCall[] = [];
+  const runtime = createRuntime({ calls, inspections: [npmGlobalPaseoInstall("0.13.1")] });
+  runtime.distribution = {
+    kind: "bundled",
+    packageName: "@hamiltonhuaji/paseo-fork",
+    version: "0.13.1",
+    serverVersion: "0.13.0-beta.1",
+    installSpec: "https://github.com/HamiltonHuaji/paseo/releases/latest/download/paseo-fork.tgz",
+    packageRoot: "/replaced/package",
+  };
+  const { result } = await runUpdate({ runtime, daemonVersion: "0.13.0-beta.1" });
+  expect(calls).toEqual(["installLatest", "inspect"]);
+  expect(result).toEqual({ success: true, error: null, newVersion: "0.13.1" });
+});
+
+test("a source preview never installs a global package", async () => {
+  const calls: RuntimeCall[] = [];
+  const runtime = createRuntime({ calls, inspections: [] });
+  runtime.distribution = {
+    kind: "source",
+    packageName: "@hamiltonhuaji/paseo-fork",
+    version: "0.13.1",
+    serverVersion: "0.13.0-beta.1",
+    packageRoot: "/checkout",
+  };
+  const { result } = await runUpdate({ runtime });
+  expect(result.success).toBe(false);
+  expect(result.error).toMatch(/source checkout/);
+  expect(calls).toEqual([]);
 });

@@ -118,8 +118,17 @@ describe("DefaultNpmGlobalPaseoCli", () => {
     expect(calls).toEqual([
       {
         command: "npm",
-        args: ["install", "-g", "@getpaseo/cli@latest"],
-        timeout: 300_000,
+        args: [
+          "install",
+          "-g",
+          "--force",
+          "--no-audit",
+          "--no-fund",
+          "--prefer-offline",
+          "--color=false",
+          "@getpaseo/cli@latest",
+        ],
+        timeout: undefined,
         maxBuffer: 10 * 1024 * 1024,
       },
     ]);
@@ -146,4 +155,31 @@ describe("DefaultNpmGlobalPaseoCli", () => {
       "@getpaseo/cli is not installed with npm -g on this host",
     );
   });
+});
+
+test("fork reinstall preserves its distribution, npm prefix and streamed diagnostics", async () => {
+  const calls: string[][] = [];
+  const output: string[] = [];
+  const installSpec =
+    "https://github.com/HamiltonHuaji/paseo/releases/latest/download/paseo-fork.tgz";
+  const cli = new DefaultNpmGlobalPaseoCli(
+    async (_command, args, options) => {
+      calls.push(args);
+      options?.onOutput?.("\u001b[32minstalling fork\u001b[0m");
+      return { exitCode: 0, stdout: "installed", stderr: "" };
+    },
+    {
+      kind: "bundled",
+      packageName: "@hamiltonhuaji/paseo-fork",
+      version: "0.13.1",
+      serverVersion: "0.13.0-beta.1",
+      installSpec,
+      packageRoot: "/fork",
+    },
+  );
+  await cli.installLatest({ prefix: "/fork prefix" }, (chunk) => output.push(chunk));
+  expect(calls[0]).toContain(installSpec);
+  expect(calls[0]).not.toContain("@getpaseo/cli@latest");
+  expect(calls[0].slice(-2)).toEqual(["--prefix", "/fork prefix"]);
+  expect(output.join("")).toBe("installing fork");
 });

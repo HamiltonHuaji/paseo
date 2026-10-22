@@ -26,6 +26,9 @@ import {
   type AppUpdateCheckIntent,
   type AppReleaseChannel,
 } from "../features/auto-updater.js";
+import { FORK_VERSION, FORK_UPSTREAM_BASE_VERSION } from "../features/fork-build-info.js";
+import { forkDebUpdateService } from "../features/fork-deb-update-electron.js";
+import { officialReleaseService } from "../features/official-release-electron.js";
 import {
   getBundledCliShimPath,
   getCliInstallStatus,
@@ -197,23 +200,7 @@ function statusFromDaemonProbe(
 }
 
 function resolveDesktopAppVersion(): string {
-  if (app.isPackaged) {
-    return app.getVersion();
-  }
-
-  try {
-    const packageJsonPath = path.join(__dirname, "..", "..", "package.json");
-    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
-      version?: unknown;
-    };
-    if (typeof pkg.version === "string" && pkg.version.trim().length > 0) {
-      return pkg.version.trim();
-    }
-  } catch {
-    // Fall back to Electron's default version if the package metadata is unavailable.
-  }
-
-  return app.getVersion();
+  return FORK_VERSION;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,19 +244,6 @@ export async function resolveDesktopDaemonStatus(): Promise<DesktopDaemonStatus>
   }
 }
 
-function normalizeVersion(version: string | null): string | null {
-  const trimmed = version?.trim();
-  if (!trimmed) return null;
-  return trimmed.replace(/^v/i, "");
-}
-
-function shouldRestartForVersion(current: DesktopDaemonStatus): boolean {
-  if (!current.ownedByDesktop) return false;
-  const appVersion = normalizeVersion(resolveDesktopAppVersion());
-  const daemonVersion = normalizeVersion(current.version);
-  return Boolean(appVersion && daemonVersion && appVersion !== daemonVersion);
-}
-
 function assertBuiltInDaemonManagementEnabled(settings: DesktopSettings): void {
   if (!settings.daemon.manageBuiltInDaemon) {
     throw new Error("Built-in daemon management is disabled.");
@@ -289,15 +263,7 @@ async function startDaemon(): Promise<DesktopDaemonStatus> {
     desktopManaged: current.desktopManaged,
   });
   if (current.status === "running" || current.status === "starting") {
-    if (shouldRestartForVersion(current)) {
-      logDesktopDaemonLifecycle("daemon version mismatch, restarting", {
-        appVersion: normalizeVersion(resolveDesktopAppVersion()),
-        daemonVersion: normalizeVersion(current.version),
-      });
-      await stopDesktopDaemon("version_mismatch");
-    } else {
-      return current;
-    }
+    return current;
   }
 
   const home = getPaseoHome();
@@ -404,6 +370,8 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     desktop_get_runtime_info: () => ({
       appVersion: resolveDesktopAppVersion(),
       runningUnderARM64Translation: isRunningUnderARM64Translation(),
+      distribution: "fork",
+      upstreamBaseVersion: FORK_UPSTREAM_BASE_VERSION,
     }),
     desktop_daemon_status: () => resolveDesktopDaemonStatus(),
     desktop_local_credential: async (args) => {
@@ -451,21 +419,45 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
     },
     check_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
+      const releaseChannel = await resolveRequestedReleaseChannel(args);
+      if (process.platform === "linux") {
+        return forkDebUpdateService.checkForAppUpdate({
+          currentVersion,
+          releaseChannel,
+          intent: parseAppUpdateCheckIntent(args),
+        });
+      }
       return checkForAppUpdate({
         currentVersion,
-        releaseChannel: await resolveRequestedReleaseChannel(args),
+        releaseChannel,
         intent: parseAppUpdateCheckIntent(args),
       });
     },
     install_app_update: async (args) => {
       const currentVersion = resolveDesktopAppVersion();
-      return downloadAndInstallUpdate(
-        { currentVersion, releaseChannel: await resolveRequestedReleaseChannel(args) },
+      const releaseChannel = await resolveRequestedReleaseChannel(args);
+      const beforeInstall = async () => {
+        await stopDesktopDaemon("app_update");
+      };
+      if (process.platform === "linux") {
+        return forkDebUpdateService.downloadAndInstallUpdate(
+          { currentVersion, releaseChannel },
+          beforeInstall,
+        );
+      }
+      return downloadAndInstallUpdate({ currentVersion, releaseChannel }, beforeInstall);
+    },
+    check_official_app_release: (args) =>
+      officialReleaseService.check({
+        releaseChannel: parseReleaseChannel(args) ?? "stable",
+      }),
+    switch_to_official_app: (args) =>
+      officialReleaseService.switchToOfficial(
+        { releaseChannel: parseReleaseChannel(args) ?? "stable" },
         async () => {
           await stopDesktopDaemon("app_update");
         },
-      );
-    },
+      ),
     get_local_daemon_version: () => getLocalDaemonVersion(),
     install_cli: () => installCli(),
     get_cli_install_status: () => getCliInstallStatus(),

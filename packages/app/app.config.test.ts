@@ -59,3 +59,14 @@ describe("Android app config", () => {
     30_000,
   );
 });
+
+it("default fork config isolates application identity and disables official OTA", async () => {
+  const { exp } = await getPrebuildConfigAsync(__dirname, { platforms: ["android"] });
+  expect(exp.android.package).toBe("io.github.hamiltonhuaji.paseo");
+  expect(exp.scheme).toBe("paseo-fork");
+  expect(exp.updates.enabled).toBe(false);
+  expect(exp.android.googleServicesFile).toBeUndefined();
+  expect(exp.extra.distribution).toBe("fork");
+  expect(exp.extra.forkBuild.upstreamBaseVersion).toBe("0.13.0-beta.1");
+  expect(exp.version).toBe(exp.extra.forkBuild.version);
+});

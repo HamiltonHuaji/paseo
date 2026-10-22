@@ -3607,6 +3607,10 @@ export const ServerInfoStatusPayloadSchema = z
     serverId: z.string().trim().min(1),
     hostname: ServerInfoHostnameSchema.optional(),
     version: ServerInfoVersionSchema.optional(),
+    // COMPAT(daemonDistribution): added in fork v0.13.1; remove after 2027-10-22.
+    distribution: z
+      .object({ packageName: z.string().min(1), version: z.string().nullable() })
+      .optional(),
     // Authenticated producer for host registration ownership, separate from admission authority.
     sourceId: z.string().optional(),
     // COMPAT(sessionPermissions): optional while clients support older daemons.
@@ -6605,6 +6609,7 @@ export const DaemonUpdateProgressMessageSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     phase: z.enum(["starting", "downloading", "installing", "complete"]),
+    output: z.string().max(4096).optional(),
   }),
 });
 

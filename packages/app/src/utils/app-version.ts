@@ -15,6 +15,9 @@ function toVersionOrNull(value: unknown): string | null {
 }
 
 export function resolveAppVersion(): string | null {
+  const forkVersion = resolveForkDistributionVersion();
+  if (forkVersion) return forkVersion;
+
   const packageVersion = toVersionOrNull(appPackage?.version);
   if (packageVersion) {
     return packageVersion;
@@ -33,4 +36,11 @@ export function resolveAppVersion(): string | null {
   }
 
   return null;
+}
+
+export function resolveForkDistributionVersion(): string | null {
+  const extra = Constants.expoConfig?.extra as
+    | { distribution?: string; forkBuild?: { version?: unknown } }
+    | undefined;
+  return extra?.distribution === "fork" ? toVersionOrNull(extra.forkBuild?.version) : null;
 }

@@ -5,9 +5,12 @@ import {
   validateDaemonInstallOrigin,
   type DaemonInstallOriginRuntime,
 } from "./install-origin.js";
+import { currentDaemonDistribution, type PaseoDaemonDistribution } from "./distribution.js";
 import { npmGlobalPaseoCli, type NpmGlobalPaseoCli } from "./npm-global-cli.js";
 
 export type DaemonSelfUpdatePhase = "starting" | "downloading" | "installing" | "complete";
+
+const INSTALL_PROGRESS_INTERVAL_MS = 15_000;
 
 export interface DaemonSelfUpdateResult {
   success: boolean;
@@ -18,7 +21,7 @@ export interface DaemonSelfUpdateResult {
 export interface DaemonSelfUpdateInput {
   daemonVersion: string | null;
   desktopManaged: boolean;
-  onProgress: (phase: DaemonSelfUpdatePhase) => void;
+  onProgress: (phase: DaemonSelfUpdatePhase, output?: string) => void;
   logger: DaemonSelfUpdateLogger;
 }
 
@@ -30,6 +33,7 @@ export interface DaemonSelfUpdateLogger {
 export interface DaemonSelfUpdateRuntime {
   npm: NpmGlobalPaseoCli;
   installOrigin: DaemonInstallOriginRuntime;
+  distribution: PaseoDaemonDistribution;
 }
 
 export class DaemonSelfUpdateInProgressError extends Error {
@@ -42,6 +46,7 @@ export class DaemonSelfUpdateInProgressError extends Error {
 const defaultRuntime: DaemonSelfUpdateRuntime = {
   npm: npmGlobalPaseoCli,
   installOrigin: daemonInstallOriginRuntime,
+  distribution: currentDaemonDistribution,
 };
 
 const DESKTOP_MANAGED_UPDATE_ERROR =
@@ -53,6 +58,14 @@ export class DaemonSelfUpdater {
   constructor(private readonly runtime: DaemonSelfUpdateRuntime = defaultRuntime) {}
 
   async update(input: DaemonSelfUpdateInput): Promise<DaemonSelfUpdateResult> {
+    if (this.runtime.distribution.kind === "source") {
+      return {
+        success: false,
+        error:
+          "This daemon runs from a source checkout. Rebuild this checkout and restart its isolated daemon explicitly.",
+        newVersion: null,
+      };
+    }
     if (input.desktopManaged) {
       return { success: false, error: DESKTOP_MANAGED_UPDATE_ERROR, newVersion: null };
     }
@@ -69,20 +82,35 @@ export class DaemonSelfUpdater {
           this.runtime.installOrigin.resolveCurrentServerPackageRoot(),
         ),
       };
-      const install = await this.runtime.npm.inspect(npmOptions);
-      const unsupportedReason = validateDaemonInstallOrigin(
-        install,
-        input.daemonVersion,
-        this.runtime.installOrigin,
-      );
-      if (unsupportedReason) {
-        return { success: false, error: unsupportedReason, newVersion: null };
+      if (this.runtime.distribution.kind === "official") {
+        const install = await this.runtime.npm.inspect(npmOptions);
+        const unsupportedReason = validateDaemonInstallOrigin(
+          install,
+          input.daemonVersion,
+          this.runtime.distribution,
+          this.runtime.installOrigin,
+        );
+        if (unsupportedReason) {
+          return { success: false, error: unsupportedReason, newVersion: null };
+        }
       }
 
+      // A fork worker may still be running from a package tree npm has already replaced.
+      // An explicit update must install the configured fork release even in that state.
       input.onProgress("downloading");
       input.onProgress("installing");
 
-      const result = await this.runtime.npm.installLatest(npmOptions);
+      const progressInterval = setInterval(
+        () => input.onProgress("installing"),
+        INSTALL_PROGRESS_INTERVAL_MS,
+      );
+      const result = await this.runtime.npm
+        .installLatest(npmOptions, (output) => {
+          input.onProgress("installing", output);
+        })
+        .finally(() => {
+          clearInterval(progressInterval);
+        });
       if (result.exitCode !== 0) {
         const error =
           result.stderr.trim() || result.stdout.trim() || `npm exited with code ${result.exitCode}`;

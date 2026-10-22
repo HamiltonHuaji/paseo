@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { relative as relativePath } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 
 const repoRoot = new URL("../", import.meta.url);
@@ -76,7 +77,7 @@ function filesUnder(relativeDirectory, predicate) {
   return readdirSync(directory, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) =>
-      [relativeDirectory, relativePath(directory.pathname, entry.parentPath), entry.name]
+      [relativeDirectory, relativePath(fileURLToPath(directory), entry.parentPath), entry.name]
         .filter(Boolean)
         .join("/")
         .replaceAll("\\", "/"),
@@ -106,10 +107,7 @@ test("gated checks are statically named jobs with real job-level gating", () => 
 });
 
 test("pull-request checks run for every base branch, including stacked PRs", () => {
-  for (const workflowPath of [
-    ciWorkflowPath,
-    new URL(".github/workflows/desktop-packages.yml", repoRoot),
-  ]) {
+  for (const workflowPath of [ciWorkflowPath]) {
     const trigger = readFileSync(workflowPath, "utf8").split("jobs:", 1)[0];
     const pullRequest = trigger.match(/^  pull_request:\n((?:    .*\n)*)/m);
     assert.ok(pullRequest, `${workflowPath.pathname} runs on pull requests`);
@@ -310,50 +308,20 @@ test("packaging runs on main without allocating pull-request runners", () => {
   for (const workflowPath of [dockerWorkflowPath, nixWorkflowPath]) {
     const source = readFileSync(workflowPath, "utf8");
     const trigger = source.split("jobs:", 1)[0];
-    assert.match(trigger, /push:\s*\n\s+branches: \[main\]/);
+    assert.match(trigger, /push:\s*\n\s+branches: \[(?:main|overlay, paseo-network)\]/);
     assert.doesNotMatch(trigger, /pull_request/);
     assert.doesNotMatch(source, /dorny\/paths-filter/);
   }
 });
 
-test("desktop packaging smokes main pushes and only the pull requests that touch packaging", () => {
-  const source = readFileSync(new URL(".github/workflows/desktop-packages.yml", repoRoot), "utf8");
-  const trigger = source.split("jobs:", 1)[0];
-  assert.match(trigger, /push:\s*\n\s+branches: \[main\]/);
-  assert.match(trigger, /pull_request:\s*\n\s+paths:/);
-  assert.match(trigger, /- "packages\/desktop\/\*\*"/);
-  assert.doesNotMatch(source, /dorny\/paths-filter/);
-  for (const action of ["actions/checkout", "actions/setup-node", "actions/upload-artifact"]) {
-    assert.match(source, new RegExp(`${action}@[0-9a-f]{40} # v\\d+\\.\\d+\\.\\d+`));
+test("fork release workflows publish only immutable fork assets", () => {
+  for (const name of ["fork-desktop-release", "fork-daemon-release", "fork-android-release"]) {
+    const source = readFileSync(new URL(`.github/workflows/${name}.yml`, repoRoot), "utf8");
+    assert.match(source, /workflow_dispatch/);
+    assert.match(source, /HamiltonHuaji\/paseo/);
+    assert.match(source, /checkout_ref must be a full commit SHA/);
+    assert.doesNotMatch(source, /--clobber|npm publish|eas submit/);
   }
-});
-
-test("stable iOS releases upload once and distribute to external testers before App Store review", () => {
-  const source = readFileSync(
-    new URL("packages/app/.eas/workflows/release-mobile.yml", repoRoot),
-    "utf8",
-  );
-  const jobs = jobBlocks(source);
-  const uploads = [...jobs.entries()].filter(
-    ([, lines]) =>
-      lines.some((line) => /^    type: (submit|testflight)$/.test(line)) &&
-      lines.some((line) => line.includes("needs.build_ios.outputs.build_id")),
-  );
-  assert.equal(uploads.length, 1, "the iOS binary must be uploaded exactly once");
-  const [distributionId, distributionLines] = uploads[0];
-  const distribution = distributionLines.join("\n");
-  assert.match(distribution, /^    type: testflight$/m);
-  assert.match(distribution, /external_groups:\s*\n\s+- Paseo Beta/);
-  assert.match(distribution, /^      submit_beta_review: true$/m);
-
-  const review = jobs.get("submit_ios_for_review").join("\n");
-  assert.match(review, new RegExp(`needs: \\[build_ios, ${distributionId}\\]`));
-  assert.match(review, /APP_VERSION="\$\{\{ needs\.build_ios\.outputs\.app_version \}\}"/);
-  assert.match(
-    review,
-    /APP_BUILD_VERSION="\$\{\{ needs\.build_ios\.outputs\.app_build_version \}\}"/,
-  );
-  assert.match(review, /bundle exec fastlane ios submit_review/);
 });
 
 test("eight Playwright shards share two-worker coverage", () => {

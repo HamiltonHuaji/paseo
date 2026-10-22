@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 import {
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -91,7 +92,12 @@ import { BrowserDataSection } from "@/desktop/browser/settings/browser-data-sect
 import { IntegrationsSection } from "@/desktop/components/integrations-section";
 import { isElectronRuntime } from "@/desktop/host";
 import { useDesktopAppUpdater } from "@/desktop/updates/use-desktop-app-updater";
-import { formatVersionWithPrefix } from "@/desktop/updates/desktop-updates";
+import { useOfficialRelease } from "@/desktop/updates/use-official-release";
+import {
+  formatVersionWithPrefix,
+  type OfficialReleaseCheckResult,
+} from "@/desktop/updates/desktop-updates";
+import { openExternalUrl } from "@/utils/open-external-url";
 import { resolveAppVersion } from "@/utils/app-version";
 import { openChangelog } from "@/changelog";
 import { useAppDiagnosticStore } from "@/diagnostics/store";
@@ -137,6 +143,8 @@ import {
 import { useLastWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { returnFromSettings, type SettingsView } from "@/navigation/settings-navigation";
 import { isNative, isWeb } from "@/constants/platform";
+import { isForkBuild } from "@/constants/build-profile";
+import { checkForkAndroidRelease, type ForkAndroidRelease } from "@/updates/fork-android-release";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -480,6 +488,7 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
           </View>
           <WhatsNewRow />
           {isDesktopApp ? <DesktopAppUpdateRow /> : null}
+          <ForkAndroidUpdateRow currentVersion={appVersion} />
         </View>
       </SettingsSection>
       <ConnectedHostsSection clientVersion={appVersion} />
@@ -487,6 +496,81 @@ function AboutSection({ appVersion, appVersionText, isDesktopApp }: AboutSection
         <CommunityLinks />
       </View>
     </>
+  );
+}
+
+function ForkAndroidUpdateRow({ currentVersion }: { currentVersion: string | null }) {
+  const { t } = useTranslation();
+  const [release, setRelease] = useState<ForkAndroidRelease | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [hasCheckError, setHasCheckError] = useState(false);
+  const isAvailable = Platform.OS === "android" && isForkBuild && currentVersion !== null;
+
+  const checkForUpdate = useCallback(async () => {
+    if (!isAvailable || !currentVersion) return;
+    setIsChecking(true);
+    setHasCheckError(false);
+    try {
+      setRelease(await checkForkAndroidRelease(currentVersion));
+    } catch (error) {
+      console.error("[Settings] Failed to check fork Android release", error);
+      setHasCheckError(true);
+    } finally {
+      setIsChecking(false);
+    }
+  }, [currentVersion, isAvailable]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isAvailable) void checkForUpdate();
+      return undefined;
+    }, [checkForUpdate, isAvailable]),
+  );
+
+  const handleOpenRelease = useCallback(() => {
+    const url = release?.hasUpdate && release.apkUrl ? release.apkUrl : release?.releaseUrl;
+    if (url) void openExternalUrl(url);
+  }, [release]);
+
+  if (!isAvailable) return null;
+
+  let statusText = t("settings.about.updates.android.unavailable");
+  if (isChecking && !release) {
+    statusText = t("settings.about.updates.checking");
+  } else if (release?.hasUpdate) {
+    statusText = t("settings.about.updates.android.available", {
+      version: formatVersionWithPrefix(release.latestVersion),
+    });
+  } else if (release) {
+    statusText = t("settings.about.updates.android.latest", {
+      version: formatVersionWithPrefix(release.latestVersion),
+    });
+  }
+
+  return (
+    <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.forkLabel")}</Text>
+        <Text style={settingsStyles.rowHint}>{statusText}</Text>
+        {hasCheckError ? (
+          <Text style={styles.aboutErrorText}>
+            {t("settings.about.updates.android.checkFailed")}
+          </Text>
+        ) : null}
+      </View>
+      <View style={styles.aboutUpdateActions}>
+        <Button variant="outline" size="sm" onPress={checkForUpdate} disabled={isChecking}>
+          {isChecking ? t("settings.about.updates.checking") : t("settings.about.updates.check")}
+        </Button>
+        {release ? (
+          <Button variant="default" size="sm" onPress={handleOpenRelease}>
+            {release.hasUpdate && release.apkUrl
+              ? t("settings.about.updates.android.download")
+              : t("settings.about.updates.official.viewRelease")}
+          </Button>
+        ) : null}
+      </View>
+    </View>
   );
 }
 
@@ -613,6 +697,110 @@ function getUpdateButtonLabel(
   return t("settings.about.updates.update");
 }
 
+function getOfficialReleaseStatusText(
+  t: TFunction,
+  isChecking: boolean,
+  release: OfficialReleaseCheckResult | null,
+): string {
+  if (isChecking && !release) {
+    return t("settings.about.updates.official.checking");
+  }
+  if (release?.hasNewerUpstream) {
+    return t("settings.about.updates.official.newerAvailable", {
+      baseVersion: formatVersionWithPrefix(release.upstreamBaseVersion),
+      latestVersion: formatVersionWithPrefix(release.latestVersion),
+    });
+  }
+  if (release?.latestVersion) {
+    return t("settings.about.updates.official.latest", {
+      version: formatVersionWithPrefix(release.latestVersion),
+    });
+  }
+  return t("settings.about.updates.official.unavailable");
+}
+
+function OfficialAppReleaseRow() {
+  const { t } = useTranslation();
+  const { isDesktopApp, release, isChecking, isSwitching, checkNow, switchToOfficial } =
+    useOfficialRelease();
+
+  const handleCheck = useCallback(() => {
+    void checkNow();
+  }, [checkNow]);
+
+  const handleViewRelease = useCallback(() => {
+    if (release?.releaseUrl) {
+      void openExternalUrl(release.releaseUrl);
+    }
+  }, [release?.releaseUrl]);
+
+  const handleSwitch = useCallback(() => {
+    void confirmDialog({
+      title: t("settings.about.updates.official.switchTitle"),
+      message: t("settings.about.updates.official.switchMessage"),
+      confirmLabel: t("settings.about.updates.official.switchConfirm"),
+      cancelLabel: t("common.actions.cancel"),
+    })
+      .then((confirmed) => {
+        if (!confirmed) return undefined;
+        void switchToOfficial().catch(() => undefined);
+        return undefined;
+      })
+      .catch((error) => {
+        console.error("[Settings] Failed to open official build confirmation", error);
+        Alert.alert(
+          t("settings.about.updates.alertTitle"),
+          t("settings.about.updates.alertMessage"),
+        );
+      });
+  }, [switchToOfficial, t]);
+
+  if (!isDesktopApp) return null;
+
+  return (
+    <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+      <View style={settingsStyles.rowContent}>
+        <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.official.label")}</Text>
+        <Text style={settingsStyles.rowHint}>
+          {getOfficialReleaseStatusText(t, isChecking, release)}
+        </Text>
+        {release?.errorMessage ? (
+          <Text style={styles.aboutErrorText}>{release.errorMessage}</Text>
+        ) : null}
+      </View>
+      <View style={styles.aboutUpdateActions}>
+        <Button
+          variant="outline"
+          size="sm"
+          onPress={handleCheck}
+          disabled={isChecking || isSwitching}
+        >
+          {isChecking
+            ? t("settings.about.updates.checking")
+            : t("settings.about.updates.official.check")}
+        </Button>
+        {release?.releaseUrl ? (
+          <Button variant="outline" size="sm" onPress={handleViewRelease} disabled={isSwitching}>
+            {t("settings.about.updates.official.viewRelease")}
+          </Button>
+        ) : null}
+        <Button
+          variant="default"
+          size="sm"
+          onPress={handleSwitch}
+          disabled={isChecking || isSwitching || release?.canSwitch !== true}
+        >
+          {isSwitching
+            ? t("settings.about.updates.official.switching")
+            : t("settings.about.updates.official.switchTo", {
+                version: formatVersionWithPrefix(release?.latestVersion),
+              })}
+        </Button>
+      </View>
+    </View>
+  );
+}
+
 function DesktopAppUpdateRow() {
   const { t } = useTranslation();
   const { settings, updateSettings } = useSettings();
@@ -710,7 +898,7 @@ function DesktopAppUpdateRow() {
       </View>
       <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
         <View style={settingsStyles.rowContent}>
-          <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.label")}</Text>
+          <Text style={settingsStyles.rowTitle}>{t("settings.about.updates.forkLabel")}</Text>
           <Text style={settingsStyles.rowHint}>{statusText}</Text>
           {readyUpdateVersion ? (
             <Text style={settingsStyles.rowHint}>
@@ -740,6 +928,7 @@ function DesktopAppUpdateRow() {
           </Button>
         </View>
       </View>
+      <OfficialAppReleaseRow />
     </>
   );
 }
@@ -1555,7 +1744,9 @@ const styles = StyleSheet.create((theme) => ({
   },
   aboutUpdateActions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "flex-end",
     gap: theme.spacing[2],
   },
   placeholder: {

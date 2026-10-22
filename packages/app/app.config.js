@@ -5,13 +5,19 @@ const withAndroidAsyncStorageSize = require("./plugins/with-android-async-storag
 const withAndroidOptionalCamera = require("./plugins/with-android-optional-camera");
 const withAndroidProfileable = require("./plugins/with-android-profileable");
 const withFdroidAutolinking = require("./plugins/with-fdroid-autolinking");
+const withForkHermesFlags = require("./plugins/with-fork-hermes-flags");
 const withPasteInput = require("./plugins/with-paste-input");
 const withAndroidScroll = require("./modules/paseo-scroll/app.plugin");
+const forkBuildMetadata = require("../desktop/src/features/fork-build-info.json");
 const { getNativeReleaseVersion } = require("./native-release-version");
-const appVariant = process.env.APP_VARIANT ?? "production";
+const appVariant = process.env.APP_VARIANT ?? "fork";
 const isFdroidBuild = process.env.PASEO_FDROID_BUILD === "1";
 const isWatchdogBuild = process.env.PASEO_WATCHDOG_BUILD === "1";
 const isProfileBuild = process.env.PASEO_PROFILE_BUILD === "1";
+const isForkBuild = appVariant === "fork";
+const officialEasProjectId = "0e7f65ce-0367-46c8-a238-2b65963d235a";
+const forkEasProjectId = process.env.PASEO_FORK_EAS_PROJECT_ID?.trim();
+const forkEasOwner = process.env.PASEO_FORK_EAS_OWNER?.trim();
 
 const buildProfile = isFdroidBuild
   ? {
@@ -92,21 +98,35 @@ const variants = {
       fallbackRelativePath: "./.secrets/GoogleService-Info.debug.plist",
     }),
   },
+  fork: {
+    name: "Paseo Fork",
+    packageId: "io.github.hamiltonhuaji.paseo",
+    scheme: "paseo-fork",
+  },
 };
 
 const variant = variants[appVariant] ?? variants.production;
-const nativeReleaseVersion = getNativeReleaseVersion(pkg.version);
+const nativeReleaseVersion = getNativeReleaseVersion(
+  isForkBuild ? forkBuildMetadata.version : pkg.version,
+);
+const easProjectId = isForkBuild ? forkEasProjectId : officialEasProjectId;
+const easOwner = isForkBuild ? forkEasOwner : "getpaseo";
 
 export default {
   expo: {
     name: variant.name,
-    slug: "voice-mobile",
+    slug: isForkBuild ? "paseo-fork" : "voice-mobile",
     version: nativeReleaseVersion.appVersion,
     orientation: "portrait",
     icon: "./assets/images/icon.png",
-    scheme: "paseo",
+    scheme: variant.scheme ?? "paseo",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
+    updates: isForkBuild
+      ? { enabled: false }
+      : {
+          url: `https://u.expo.dev/${officialEasProjectId}`,
+        },
     ios: {
       supportsTablet: true,
       infoPlist: {
@@ -182,6 +202,7 @@ export default {
         },
       ],
       ...buildProfile.fdroidPlugins,
+      ...(isForkBuild ? [withForkHermesFlags] : []),
       ...(isProfileBuild || isWatchdogBuild ? [withAndroidProfileable] : []),
     ],
     experiments: {
@@ -195,11 +216,15 @@ export default {
       watchdogBuild: isWatchdogBuild,
       diagnosticRevision: process.env.PASEO_DIAGNOSTIC_REVISION,
       diagnosticBuildTime: process.env.PASEO_DIAGNOSTIC_BUILD_TIME,
-      router: {},
-      eas: {
-        projectId: "0e7f65ce-0367-46c8-a238-2b65963d235a",
+      distribution: isForkBuild ? "fork" : "official",
+      forkBuild: {
+        version: forkBuildMetadata.version,
+        upstreamBaseVersion: forkBuildMetadata.upstreamBaseVersion,
+        revision: forkBuildMetadata.forkRevision,
       },
+      router: {},
+      ...(easProjectId ? { eas: { projectId: easProjectId } } : {}),
     },
-    owner: "getpaseo",
+    ...(easOwner ? { owner: easOwner } : {}),
   },
 };

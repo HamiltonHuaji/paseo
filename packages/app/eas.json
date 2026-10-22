@@ -15,32 +15,20 @@
       }
     },
     "production": {
-      "env": {
-        "APP_VARIANT": "production"
-      },
-      "android": {
-        "resourceClass": "large",
-        "gradleCommand": ":app:bundleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel"
-      }
+      "extends": "fork-apk"
     },
     "production-apk": {
-      "extends": "production",
+      "extends": "fork-apk"
+    },
+    "fork-apk": {
       "distribution": "internal",
-      "android": {
-        "resourceClass": "large",
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel"
-      }
-    }
-  },
-  "submit": {
-    "production": {
-      "ios": {
-        "ascAppId": "6758887924"
+      "env": {
+        "APP_VARIANT": "fork"
       },
       "android": {
-        "track": "production",
-        "releaseStatus": "completed"
+        "buildType": "apk",
+        "credentialsSource": "remote",
+        "gradleCommand": ":app:createBundleReleaseJsAndAssets :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=1 -Dorg.gradle.parallel=false -Dorg.gradle.jvmargs=-Xmx2048m -x lint -x lintVitalAnalyzeRelease -x lintVitalRelease -x generateReleaseLintModel -x generateReleaseLintVitalModel"
       }
     }
   }

@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { getReleaseInfoFromSourceTag } from "./release-version-utils.mjs";
+import { readForkBuildMetadata } from "./fork-version-utils.mjs";
 
 function usageAndExit(code = 1) {
   process.stderr.write(`Usage: node scripts/emit-release-env.mjs --source-tag <tag>\n`);
@@ -30,6 +32,23 @@ function parseArgs(argv) {
 
 const sourceTag = parseArgs(process.argv.slice(2));
 const info = getReleaseInfoFromSourceTag(sourceTag);
+const fork = readForkBuildMetadata();
+
+if (info.version !== fork.version) {
+  throw new Error(
+    `Release tag ${info.releaseTag} does not match the canonical fork version v${fork.version}`,
+  );
+}
+
+const tagCommit = spawnSync("git", ["rev-parse", `refs/tags/${info.releaseTag}^{commit}`], {
+  encoding: "utf8",
+});
+if (tagCommit.status === 0) {
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
+  if (head.status !== 0 || head.stdout.trim() !== tagCommit.stdout.trim()) {
+    throw new Error(`Published tag ${info.releaseTag} belongs to another commit.`);
+  }
+}
 
 const entries = [
   ["SOURCE_TAG", info.sourceTag],
@@ -43,6 +62,9 @@ const entries = [
   ["RELEASE_CHANNEL", info.releaseChannel],
   ["DESKTOP_VERSION", info.version],
   ["IS_SMOKE_TAG", info.isSmokeTag ? "true" : "false"],
+  ["FORK_VERSION", fork.version],
+  ["FORK_UPSTREAM_BASE_VERSION", fork.upstreamBaseVersion],
+  ["FORK_REVISION", String(fork.forkRevision)],
 ];
 
 for (const [key, value] of entries) {

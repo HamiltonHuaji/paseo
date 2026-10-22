@@ -16,7 +16,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const app = path.join(root, "packages/app");
 const env = {
   ...process.env,
-  APP_VARIANT: "production",
+  APP_VARIANT: "fork",
   PASEO_WATCHDOG_BUILD: "1",
   PASEO_DIAGNOSTIC_BUILD_TIME: new Date().toISOString(),
   PASEO_DIAGNOSTIC_REVISION:
