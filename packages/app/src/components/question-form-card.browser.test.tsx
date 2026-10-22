@@ -1,3 +1,5 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ToastProvider } from "@/contexts/toast-context";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { within } from "@testing-library/dom";
@@ -52,14 +54,19 @@ function mountCard(question: Record<string, unknown>) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  const queryClient = new QueryClient();
   act(() =>
     root.render(
-      <QuestionFormCard
-        permission={buildPermission(question)}
-        onRespond={onRespond}
-        isResponding={false}
-        responseError={null}
-      />,
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <QuestionFormCard
+            permission={buildPermission(question)}
+            onRespond={onRespond}
+            isResponding={false}
+            responseError={null}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
     ),
   );
   mounted.push({ root, container });

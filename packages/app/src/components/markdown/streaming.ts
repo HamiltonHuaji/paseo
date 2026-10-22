@@ -9,7 +9,7 @@ import type { Nodes } from "mdast";
 function needsDocumentContext(node: Nodes): boolean {
   if (node.type === "html" || node.type === "definition") return true;
   if (node.type === "linkReference" || node.type === "imageReference") return true;
-  if (node.type === "text" && node.value.includes("[")) return true;
+  if (node.type === "text" && /[[$]/.test(node.value)) return true;
   return "children" in node && node.children.some(needsDocumentContext);
 }
 

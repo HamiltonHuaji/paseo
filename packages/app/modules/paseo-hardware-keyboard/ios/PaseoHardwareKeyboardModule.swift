@@ -2,6 +2,7 @@ import ExpoModulesCore
 import UIKit
 
 private let hardwareSubmitEventName = "onHardwareKeyboardSubmit"
+private let hardwareQueueEventName = "onHardwareKeyboardQueue"
 
 private weak var activeModule: PaseoHardwareKeyboardModule?
 private var isHardwareSubmitEnabled = false
@@ -17,7 +18,7 @@ public class PaseoHardwareKeyboardModule: Module {
   public func definition() -> ModuleDefinition {
     Name("PaseoHardwareKeyboard")
 
-    Events(hardwareSubmitEventName)
+    Events(hardwareSubmitEventName, hardwareQueueEventName)
 
     OnCreate {
       activeModule = self
@@ -40,6 +41,10 @@ public class PaseoHardwareKeyboardModule: Module {
   fileprivate func emitHardwareKeyboardSubmit() {
     sendEvent(hardwareSubmitEventName, [:])
   }
+
+  fileprivate func emitHardwareKeyboardQueue() {
+    sendEvent(hardwareQueueEventName, [:])
+  }
 }
 
 private final class PaseoHardwareKeyboardRootViewController: UIViewController {
@@ -48,15 +53,29 @@ private final class PaseoHardwareKeyboardRootViewController: UIViewController {
       return super.keyCommands
     }
 
-    let command = UIKeyCommand(
-      input: "\r",
-      modifierFlags: [],
-      action: #selector(handleHardwareKeyboardSubmit(_:))
-    )
+    let commands = [
+      UIKeyCommand(
+        input: "\r",
+        modifierFlags: .command,
+        action: #selector(handleHardwareKeyboardSubmit(_:))
+      ),
+      UIKeyCommand(
+        input: "\r",
+        modifierFlags: .control,
+        action: #selector(handleHardwareKeyboardSubmit(_:))
+      ),
+      UIKeyCommand(
+        input: "\t",
+        modifierFlags: [],
+        action: #selector(handleHardwareKeyboardQueue(_:))
+      ),
+    ]
     if #available(iOS 15.0, *) {
-      command.wantsPriorityOverSystemBehavior = true
+      for command in commands {
+        command.wantsPriorityOverSystemBehavior = true
+      }
     }
-    return (super.keyCommands ?? []) + [command]
+    return (super.keyCommands ?? []) + commands
   }
 
   @objc
@@ -65,6 +84,14 @@ private final class PaseoHardwareKeyboardRootViewController: UIViewController {
       return
     }
     activeModule?.emitHardwareKeyboardSubmit()
+  }
+
+  @objc
+  private func handleHardwareKeyboardQueue(_ sender: UIKeyCommand) {
+    guard canSubmitCurrentTextInput() else {
+      return
+    }
+    activeModule?.emitHardwareKeyboardQueue()
   }
 
   private func canSubmitCurrentTextInput() -> Bool {

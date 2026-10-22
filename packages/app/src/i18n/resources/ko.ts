@@ -1,9 +1,11 @@
 import { sessionCanvas } from "./session-canvas";
+import { heartbeatSettings } from "./heartbeat-settings";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ko: TranslationResources = {
   sessionCanvas: sessionCanvas["ko"],
+  heartbeats: heartbeatSettings["ko"],
   paneFind: {
     connectionFailure: "이 채팅을 검색할 수 없습니다. 호스트 연결을 확인하고 다시 시도하세요.",
     historyChangedFailure: "검색 중에 채팅이 변경되었습니다. 다시 검색하세요.",
@@ -2257,14 +2259,7 @@ export const ko: TranslationResources = {
       },
       defaultSend: {
         label: "기본 전송",
-        descriptions: {
-          interrupt:
-            "에이전트가 실행 중일 때 Enter는 중단합니다. Command/Ctrl+Enter는 대기열에 추가합니다.",
-          steer:
-            "에이전트가 실행 중일 때 Enter는 현재 턴에 지시합니다. Command/Ctrl+Enter는 대기열에 추가합니다.",
-          queue:
-            "에이전트가 실행 중일 때 Enter는 대기열에 추가합니다. Command/Ctrl+Enter는 제출합니다.",
-        },
+        descriptions: en.settings.general.defaultSend.descriptions,
         options: {
           interrupt: "중단",
           steer: "지시",

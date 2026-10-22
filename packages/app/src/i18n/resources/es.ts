@@ -1,9 +1,11 @@
 import { sessionCanvas } from "./session-canvas";
+import { heartbeatSettings } from "./heartbeat-settings";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const es: TranslationResources = {
   sessionCanvas: sessionCanvas["es"],
+  heartbeats: heartbeatSettings["es"],
   paneFind: {
     connectionFailure:
       "No se pudo buscar en este chat. Comprueba la conexión con el host y vuelve a intentarlo.",
@@ -2297,14 +2299,7 @@ export const es: TranslationResources = {
       },
       defaultSend: {
         label: "Envío predeterminado",
-        descriptions: {
-          interrupt:
-            "Cuando el agente se está ejecutando, Enter interrumpe. Command/Ctrl+Enter pone en cola.",
-          steer:
-            "Cuando el agente se está ejecutando, Enter dirige el turno activo. Command/Ctrl+Enter pone en cola.",
-          queue:
-            "Cuando el agente se está ejecutando, Enter pone en cola. Command/Ctrl+Enter envía.",
-        },
+        descriptions: en.settings.general.defaultSend.descriptions,
         options: {
           interrupt: "Interrumpir",
           steer: "Dirigir",

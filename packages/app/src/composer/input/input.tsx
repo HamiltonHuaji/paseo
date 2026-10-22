@@ -86,13 +86,14 @@ import {
   resolveComposerSurfacePresentation,
   resolveComposerSurfaceText,
   resolveRetainedSelection,
-  runAlternateSendAction,
+  resolveComposerHardwareKeyAction,
   runDefaultSendAction,
   runMessageInputKeyboardAction,
   stopRealtimeVoice,
 } from "./state";
 
-const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["Enter"]];
+const DEFAULT_SEND_KEYS: ShortcutKey[][] = [["mod", "Enter"]];
+const QUEUE_KEYS: ShortcutKey[][] = [["Tab"]];
 const COMPOSER_INPUT_DATASET = { composerInput: "" } as const;
 
 export interface AttachmentMenuItem {
@@ -158,7 +159,7 @@ export interface MessageInputProps {
   voiceAgentId?: string;
   /** When true and there's sendable content, calls onQueue instead of onSubmit */
   isAgentRunning?: boolean;
-  /** Controls what the default send action (Enter, send button, dictation) does when the agent is
+  /** Controls what the default send action (send button, dictation) does when the agent is
    *  running. "interrupt" and "steer" send immediately, "queue" queues. Required so the default
    *  lives only in DEFAULT_CLIENT_SETTINGS. */
   defaultSendBehavior: "interrupt" | "steer" | "queue";
@@ -395,14 +396,13 @@ function SendButtonContent({
 interface DesktopKeyPressContext {
   onKeyPressCallback: ((event: ComposerKeyPressEvent) => boolean) | undefined;
   input: ComposerKeyPressEvent["input"];
-  submitOnEnter: boolean;
   isAgentRunning: boolean;
   onQueue: ((payload: MessagePayload) => void) | undefined;
   isSubmitDisabled: boolean;
   isSubmitLoading: boolean;
   disabled: boolean;
-  handleAlternateSendAction: () => void;
-  handleDefaultSendAction: () => void;
+  handleQueueMessage: () => void;
+  handleSendMessage: () => void;
 }
 
 function handleDesktopKeyPressImpl(
@@ -420,22 +420,12 @@ function handleDesktopKeyPressImpl(
     if (handled) return;
   }
 
-  const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
-
-  if (event.nativeEvent.key !== "Enter") return;
-  if (!ctx.submitOnEnter) return;
-  if (shiftKey) return;
-
-  if ((metaKey || ctrlKey) && ctx.isAgentRunning && ctx.onQueue) {
-    if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
-    event.preventDefault();
-    ctx.handleAlternateSendAction();
-    return;
-  }
-
-  if (ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
+  const action = resolveComposerHardwareKeyAction(event.nativeEvent);
+  if (!action || ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
+  if (action === "queue" && (!ctx.isAgentRunning || !ctx.onQueue)) return;
   event.preventDefault();
-  ctx.handleDefaultSendAction();
+  if (action === "queue") ctx.handleQueueMessage();
+  else ctx.handleSendMessage();
 }
 
 function getTextInputNativeElement(current: ComposerTextInputHandle | null): HTMLElement | null {
@@ -1691,16 +1681,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       });
     }, [defaultSendBehavior, isAgentRunning, onQueue, handleQueueMessage, handleSendMessage]);
 
-    const handleAlternateSendAction = useCallback(() => {
-      runAlternateSendAction({
-        defaultSendBehavior,
-        isAgentRunning,
-        onQueue,
-        handleSendMessage,
-        handleQueueMessage,
-      });
-    }, [defaultSendBehavior, isAgentRunning, handleSendMessage, handleQueueMessage, onQueue]);
-
     usePasteImagesEffect({
       textarea: webTextArea,
       isConnected,
@@ -1721,7 +1701,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     );
 
     const shouldHandleWebKeyPress = isWeb;
-    const shouldSubmitOnEnter = isWeb && !isCompact;
 
     const handleDesktopKeyPress = useCallback(
       (event: WebTextInputKeyPressEvent) => {
@@ -1733,27 +1712,25 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             valueRef.current,
             selectionRef.current,
           ),
-          submitOnEnter: shouldSubmitOnEnter,
           isAgentRunning,
           onQueue,
           isSubmitDisabled,
           isSubmitLoading,
           disabled,
-          handleAlternateSendAction,
-          handleDefaultSendAction,
+          handleQueueMessage,
+          handleSendMessage,
         });
       },
       [
         shouldHandleWebKeyPress,
         onKeyPressCallback,
-        shouldSubmitOnEnter,
         isAgentRunning,
         onQueue,
         isSubmitDisabled,
         isSubmitLoading,
         disabled,
-        handleAlternateSendAction,
-        handleDefaultSendAction,
+        handleQueueMessage,
+        handleSendMessage,
       ],
     );
 
@@ -1778,7 +1755,10 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
       });
     useIosHardwareKeyboardSubmit({
       isEnabled: isInputFocused && !isSendButtonDisabled,
-      onSubmit: handleDefaultSendAction,
+      onSubmit: handleSendMessage,
+      onQueue: () => {
+        if (isAgentRunning) handleQueueMessage();
+      },
     });
     const submitAccessibilityLabel = resolveSubmitAccessibilityLabel({
       submitButtonAccessibilityLabel,
@@ -1956,7 +1936,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
           submitLabel={submitLabel}
           submitButtonTestID={submitButtonTestID}
           buttonIconSize={buttonIconSize}
-          sendKeys={DEFAULT_SEND_KEYS}
+          sendKeys={defaultActionQueues ? QUEUE_KEYS : DEFAULT_SEND_KEYS}
           sendTooltipLabel={sendTooltipLabel}
         />
       ),
@@ -1976,6 +1956,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         submitButtonTestID,
         buttonIconSize,
         sendTooltipLabel,
+        defaultActionQueues,
       ],
     );
     const textSurface = useMemo(

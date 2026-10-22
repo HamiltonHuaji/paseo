@@ -109,15 +109,26 @@ function WebHoverCard({
     return focusInside() && document.activeElement?.matches(":focus-visible") === true;
   }, [focusInside]);
 
+  const selectionInside = useCallback(() => {
+    if (!isWeb) return false;
+    const selection = window.getSelection();
+    const content = contentRef.current as unknown as HTMLElement | null;
+    return (
+      !!selection &&
+      !selection.isCollapsed &&
+      !!content &&
+      (content.contains(selection.anchorNode) || content.contains(selection.focusNode))
+    );
+  }, []);
   const scheduleClose = useCallback(() => {
-    if (keyboardFocusInside()) return;
+    if (keyboardFocusInside() || selectionInside()) return;
     if (graceTimerRef.current) return;
     graceTimerRef.current = setTimeout(() => {
       graceTimerRef.current = null;
-      if (keyboardFocusInside()) return;
+      if (keyboardFocusInside() || selectionInside()) return;
       setOpen(false);
     }, CLOSE_GRACE_MS);
-  }, [keyboardFocusInside]);
+  }, [keyboardFocusInside, selectionInside]);
 
   const openNow = useCallback(() => {
     clearGraceTimer();
@@ -262,15 +273,33 @@ function WebHoverCard({
 
 export function HoverCardTrigger({
   children,
+  inline = false,
+  onHoverIn,
   focusable = false,
   accessibilityLabel,
 }: {
   children: ReactNode;
+  inline?: boolean;
+  onHoverIn?: () => void;
   focusable?: boolean;
   accessibilityLabel?: string;
 }): ReactNode {
   const ctx = useContext(HoverCardContext);
+  const inlineRef = useCallback(
+    (node: HTMLSpanElement | null) => ctx?.setTriggerRef(node as unknown as View | null),
+    [ctx],
+  );
+  const inlineEnter = useCallback(() => {
+    onHoverIn?.();
+    ctx?.openNow();
+  }, [ctx, onHoverIn]);
   if (!ctx) return children;
+  if (isWeb && inline)
+    return (
+      <span ref={inlineRef} onMouseEnter={inlineEnter} onMouseLeave={ctx.scheduleClose}>
+        {children}
+      </span>
+    );
   return (
     <View
       ref={ctx.setTriggerRef}

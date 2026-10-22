@@ -1,9 +1,11 @@
 import { sessionCanvas } from "./session-canvas";
+import { heartbeatSettings } from "./heartbeat-settings";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const fr: TranslationResources = {
   sessionCanvas: sessionCanvas["fr"],
+  heartbeats: heartbeatSettings["fr"],
   paneFind: {
     connectionFailure:
       "Impossible de rechercher dans cette conversation. Vérifiez la connexion à l’hôte et réessayez.",
@@ -2296,14 +2298,7 @@ export const fr: TranslationResources = {
       },
       defaultSend: {
         label: "Envoi par défaut",
-        descriptions: {
-          interrupt:
-            "Quand l’agent est en cours d’exécution, Entrée l’interrompt. Cmd/Ctrl+Entrée met en file d’attente.",
-          steer:
-            "Quand l’agent est en cours d’exécution, Entrée réoriente le tour en cours. Cmd/Ctrl+Entrée met en file d’attente.",
-          queue:
-            "Quand l’agent est en cours d’exécution, Entrée met en file d’attente. Cmd/Ctrl+Entrée envoie.",
-        },
+        descriptions: en.settings.general.defaultSend.descriptions,
         options: {
           interrupt: "Interrompre",
           steer: "Réorienter",

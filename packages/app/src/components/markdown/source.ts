@@ -1,5 +1,6 @@
 import { classifyAssistantFileLink } from "@/assistant-file-links";
 import { ASSISTANT_FILE_EXTENSIONS } from "@/assistant-file-links/extensions";
+import { normalizeMarkdownMath } from "./math-source";
 import { normalizeMarkdownHtml } from "./html";
 import { gfmTable } from "micromark-extension-gfm-table";
 import { gfmTableFromMarkdown } from "mdast-util-gfm-table";
@@ -108,7 +109,7 @@ export function prepareMarkdownSource(
   workspaceRoot?: string,
   options: { supportsSvg?: boolean } = {},
 ) {
-  source = normalizeMarkdownHtml(source);
+  source = normalizeMarkdownMath(normalizeMarkdownHtml(source));
   const images: MarkdownImage[] = [];
   let tree: Root | undefined;
   const getTree = () =>

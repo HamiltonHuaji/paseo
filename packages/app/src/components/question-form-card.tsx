@@ -1,3 +1,4 @@
+import { MarkdownRenderer } from "@/components/markdown/renderer";
 import { Alert } from "@/components/ui/alert";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useState, useCallback, useMemo, useRef, type RefObject } from "react";
@@ -86,17 +87,6 @@ function QuestionOptionRow({
     [isSelected, theme.colors.surface2],
   );
 
-  const optionLabelStyle = useMemo(
-    () => [
-      styles.optionLabel,
-      { color: isSelected ? theme.colors.foreground : theme.colors.foregroundMuted },
-    ],
-    [isSelected, theme.colors.foreground, theme.colors.foregroundMuted],
-  );
-  const optionDescriptionStyle = useMemo(
-    () => [styles.optionDescription, { color: theme.colors.foregroundMuted }],
-    [theme.colors.foregroundMuted],
-  );
   const accessibilityState = useMemo(() => ({ checked: isSelected }), [isSelected]);
 
   // Static left-side control: square for multi-select, circle for single-select.
@@ -135,10 +125,8 @@ function QuestionOptionRow({
           {isSelected && !multiSelect ? <View style={radioDotStyle} /> : null}
         </View>
         <View style={styles.optionTextBlock}>
-          <Text style={optionLabelStyle}>{option.label}</Text>
-          {option.description ? (
-            <Text style={optionDescriptionStyle}>{option.description}</Text>
-          ) : null}
+          <MarkdownRenderer text={option.label} compact />
+          {option.description ? <MarkdownRenderer text={option.description} compact /> : null}
           {option.preview ? (
             // Shown for every option at once so they can be compared before picking.
             // Long lines wrap, as in Claude Code, since most previews are prose.
@@ -341,6 +329,10 @@ function QuestionOtherInput({
   );
 }
 
+function questionMarkdown(question: QuestionFormQuestion | undefined) {
+  return question?.question ?? "";
+}
+
 export function QuestionFormCard({
   permission,
   onRespond,
@@ -522,10 +514,6 @@ export function QuestionFormCard({
     ],
     [theme.colors.surface1, theme.colors.border],
   );
-  const questionTextStyle = useMemo(
-    () => [styles.questionText, { color: theme.colors.foreground }],
-    [theme.colors.foreground],
-  );
   // Single-select radios need a group; checkboxes are valid standalone.
   const optionsGroupAccessibility = useMemo(
     () =>
@@ -570,9 +558,9 @@ export function QuestionFormCard({
         onSelect={handleSelectQuestion}
       />
       <View style={styles.questionHeader}>
-        <Text testID="question-form-current-question" style={questionTextStyle}>
-          {activeQuestion?.question}
-        </Text>
+        <View testID="question-form-current-question" style={styles.questionContent}>
+          <MarkdownRenderer text={questionMarkdown(activeQuestion)} compact />
+        </View>
       </View>
 
       {activeQuestion ? (
@@ -673,7 +661,7 @@ const styles = StyleSheet.create((theme) => ({
     paddingBottom: theme.spacing[1],
     flex: 1,
   },
-  questionText: {
+  questionContent: {
     flex: 1,
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
@@ -721,6 +709,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   optionTextBlock: {
     flex: 1,
+    minWidth: 0,
     gap: theme.spacing[1],
   },
   optionLabel: {

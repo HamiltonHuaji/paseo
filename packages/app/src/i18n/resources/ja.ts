@@ -1,9 +1,11 @@
 import { sessionCanvas } from "./session-canvas";
+import { heartbeatSettings } from "./heartbeat-settings";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ja: TranslationResources = {
   sessionCanvas: sessionCanvas["ja"],
+  heartbeats: heartbeatSettings["ja"],
   paneFind: {
     connectionFailure:
       "このチャットを検索できませんでした。ホストへの接続を確認して再試行してください。",
@@ -2268,12 +2270,7 @@ export const ja: TranslationResources = {
       },
       defaultSend: {
         label: "デフォルトの送信",
-        descriptions: {
-          interrupt: "エージェント実行中、Enterで中断します。Command/Ctrl+Enterでキューに追加。",
-          steer:
-            "エージェント実行中、Enterで現在のターンに指示を送ります。Command/Ctrl+Enterでキューに追加。",
-          queue: "エージェント実行中、Enterでキューに追加します。Command/Ctrl+Enterで送信。",
-        },
+        descriptions: en.settings.general.defaultSend.descriptions,
         options: {
           interrupt: "中断",
           steer: "指示",

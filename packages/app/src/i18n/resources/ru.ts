@@ -1,9 +1,11 @@
 import { sessionCanvas } from "./session-canvas";
+import { heartbeatSettings } from "./heartbeat-settings";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
   sessionCanvas: sessionCanvas["ru"],
+  heartbeats: heartbeatSettings["ru"],
   paneFind: {
     connectionFailure:
       "Не удалось выполнить поиск в чате. Проверьте подключение к хосту и повторите попытку.",
@@ -2281,14 +2283,7 @@ export const ru: TranslationResources = {
       },
       defaultSend: {
         label: "Отправка по умолчанию",
-        descriptions: {
-          interrupt:
-            "Когда агент работает, Enter прерывает его работу, а Command/Ctrl+Enter ставит сообщение в очередь.",
-          steer:
-            "Когда агент работает, Enter дополняет текущий ответ новым указанием, а Command/Ctrl+Enter ставит сообщение в очередь.",
-          queue:
-            "Когда агент работает, Enter ставит сообщение в очередь, а Command/Ctrl+Enter отправляет его.",
-        },
+        descriptions: en.settings.general.defaultSend.descriptions,
         options: {
           interrupt: "Прерывать",
           steer: "Направить",

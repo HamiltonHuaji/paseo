@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { deriveWorkspaceTabModel } from "@/screens/workspace/workspace-tab-model";
+import {
+  buildWorkspaceTabTree,
+  projectWorkspaceTabTree,
+  getWorkspaceTabTreeAncestorGroupIds,
+} from "@/screens/workspace/workspace-tab-tree";
 import type { WorkspaceTab } from "@/workspace-tabs/model";
 
 describe("deriveWorkspaceTabModel", () => {
@@ -154,5 +159,49 @@ describe("deriveWorkspaceTabModel", () => {
       kind: "file",
       path: "/repo/worktree/README.md",
     });
+  });
+});
+
+describe("slash tab tree", () => {
+  it("keeps repeated leaf labels distinct through nested grouping and collapsing", () => {
+    const model = buildWorkspaceTabTree([
+      { tabId: "agent-a", label: "research/train/run", pathLabel: "research/train/run" },
+      { tabId: "agent-b", label: "research/train/run", pathLabel: "research/train/run" },
+      { tabId: "agent-c", label: "research/eval/run", pathLabel: "research/eval/run" },
+      { tabId: "file-a", label: "research/train/run" },
+    ]);
+    expect([...model.leavesByTabId.keys()].sort()).toEqual([
+      "agent-a",
+      "agent-b",
+      "agent-c",
+      "file-a",
+    ]);
+    const ancestors = getWorkspaceTabTreeAncestorGroupIds(model, "agent-a");
+    expect(ancestors).toHaveLength(2);
+    const collapsed = projectWorkspaceTabTree(model, new Set([ancestors[1]!]));
+    expect(collapsed.filter((row) => row.kind === "leaf").map((row) => row.leaf.tabId)).toEqual([
+      "agent-c",
+      "file-a",
+    ]);
+    expect(model.groupsById.get(ancestors[1]!)?.descendantTabIds).toEqual(["agent-a", "agent-b"]);
+    expect(
+      projectWorkspaceTabTree(model, new Set())
+        .filter((row) => row.kind === "leaf")
+        .map((row) => row.leaf.tabId),
+    ).toEqual(["agent-a", "agent-b", "agent-c", "file-a"]);
+  });
+
+  it("preserves source order when regrouping reordered tabs", () => {
+    const items = ["b", "a", "c"].map((id) => ({
+      tabId: id,
+      label: `team/${id}`,
+      pathLabel: `team/${id}`,
+    }));
+    const rows = projectWorkspaceTabTree(buildWorkspaceTabTree(items), new Set());
+    expect(rows.filter((row) => row.kind === "leaf").map((row) => row.leaf.tabId)).toEqual([
+      "b",
+      "a",
+      "c",
+    ]);
   });
 });

@@ -1,3 +1,4 @@
+import { openAgentHeartbeats } from "@/schedules/heartbeat-editor";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { i18n } from "@/i18n/i18next";
 import { encodeFilePathForPathSegment, encodeWorkspaceIdForPathSegment } from "@/utils/host-routes";
@@ -68,6 +69,7 @@ export type WorkspaceTabMenuEntry =
     };
 
 interface BuildWorkspaceTabMenuEntriesInput {
+  serverId?: string;
   surface: WorkspaceTabMenuSurface;
   tab: WorkspaceTabDescriptor;
   index: number;
@@ -87,6 +89,7 @@ interface BuildWorkspaceTabMenuEntriesInput {
 }
 
 interface BuildWorkspaceDesktopTabActionsInput {
+  serverId?: string;
   tab: WorkspaceTabDescriptor;
   index: number;
   tabCount: number;
@@ -196,6 +199,15 @@ export function buildWorkspaceTabMenuEntries(
 
   if (tab.target.kind === "agent") {
     const { agentId } = tab.target;
+    const serverId = input.serverId;
+    if (serverId)
+      entries.push({
+        kind: "item",
+        key: "heartbeats",
+        label: i18n.t("heartbeats.title"),
+        testID: `${menuTestIDBase}-heartbeats`,
+        onSelect: () => openAgentHeartbeats(serverId, agentId),
+      });
     entries.push({
       kind: "item",
       key: "copy-resume-command",
@@ -335,6 +347,7 @@ export function buildWorkspaceDesktopTabActions(
     contextMenuTestId,
     menuEntries: buildWorkspaceTabMenuEntries({
       surface: "desktop",
+      serverId: input.serverId,
       tab: input.tab,
       index: input.index,
       tabCount: input.tabCount,

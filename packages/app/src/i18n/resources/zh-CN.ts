@@ -1,9 +1,11 @@
 import { sessionCanvas } from "./session-canvas";
+import { heartbeatSettings } from "./heartbeat-settings";
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
   sessionCanvas: sessionCanvas["zh-CN"],
+  heartbeats: heartbeatSettings["zh-CN"],
   paneFind: {
     connectionFailure: "无法搜索此聊天。请检查主机连接后重试。",
     historyChangedFailure: "搜索期间聊天已更改。请重新搜索。",
@@ -2224,9 +2226,9 @@ export const zhCN: TranslationResources = {
       defaultSend: {
         label: "默认发送",
         descriptions: {
-          interrupt: "Agent 运行时，Enter 会中断。Command/Ctrl+Enter 会排队。",
-          steer: "Agent 运行时，Enter 会引导当前回合。Command/Ctrl+Enter 会排队。",
-          queue: "Agent 运行时，Enter 会排队。Command/Ctrl+Enter 会提交。",
+          interrupt: "Enter 换行，Command/Ctrl+Enter 发送，运行中 Tab 排队。发送按钮中断当前回合。",
+          steer: "Enter 换行，Command/Ctrl+Enter 发送，运行中 Tab 排队。发送按钮引导当前回合。",
+          queue: "Enter 换行，Command/Ctrl+Enter 发送，运行中 Tab 排队。发送按钮在运行中排队。",
         },
         options: {
           interrupt: "中断",

@@ -1,3 +1,6 @@
+import { useTabDisplay } from "@/workspace-tabs/display";
+import type { WorkspaceTabTreeRow } from "./workspace-tab-tree";
+import { WorkspaceTabTreeList } from "./workspace-tab-tree-list";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
   Fragment,
@@ -1057,6 +1060,8 @@ function ResolvedWorkspaceDesktopTabsRow({
   const newTabKeys = useShortcutKeys("workspace-tab-new");
   const [tabsContainerWidth, setTabsContainerWidth] = useState<number>(0);
   const tabsScrollRef = useRef<ScrollView>(null);
+  const verticalTabs = useTabDisplay((state) => state.vertical);
+  const toggleVerticalTabs = useTabDisplay((state) => state.toggle);
   const [exitFocusModeWidth, setExitFocusModeWidth] = useState<number>(0);
   const tabScrollBoundary = useHorizontalScrollBoundary();
   const [labelMeasurements, setLabelMeasurements] = useState(
@@ -1282,10 +1287,12 @@ function ResolvedWorkspaceDesktopTabsRow({
       isActive,
     }: DraggableRenderItemInfo<ResolvedWorkspaceDesktopTabRowItem>) => {
       const shouldShowCloseButton =
-        layout.closeButtonPolicy === "all" && item.presentation.showCloseButton;
+        (verticalTabs || layout.closeButtonPolicy === "all") && item.presentation.showCloseButton;
       const layoutItem = layout.items[index] ?? null;
-      const resolvedTabWidth = layoutItem?.width ?? 150;
-      const showLabel = layoutItem?.showLabel ?? true;
+      const resolvedTabWidth = verticalTabs
+        ? Math.max(120, tabsContainerWidth - 110)
+        : (layoutItem?.width ?? 150);
+      const showLabel = verticalTabs || (layoutItem?.showLabel ?? true);
       const showDropIndicatorBefore = activeDragTabId !== null && tabDropPreviewIndex === index;
       const showDropIndicatorAfter =
         activeDragTabId !== null &&
@@ -1328,6 +1335,8 @@ function ResolvedWorkspaceDesktopTabsRow({
     [
       activeDragTabId,
       isFocused,
+      verticalTabs,
+      tabsContainerWidth,
       layout.closeButtonPolicy,
       layout.items,
       normalizedServerId,
@@ -1363,7 +1372,11 @@ function ResolvedWorkspaceDesktopTabsRow({
 
   const row = (
     <View
-      style={[styles.tabsContainer, onSidebar && styles.tabsContainerSidebar]}
+      style={[
+        styles.tabsContainer,
+        onSidebar && styles.tabsContainerSidebar,
+        verticalContainerStyle(verticalTabs),
+      ]}
       testID="workspace-tabs-row"
       onLayout={handleTabsContainerLayout}
     >
@@ -1387,45 +1400,60 @@ function ResolvedWorkspaceDesktopTabsRow({
         onPress={onExitFocusMode}
         onLayout={handleExitFocusModeLayout}
       />
+      <ToolbarButton
+        label={verticalTabs ? "Horizontal tabs" : "Vertical tabs"}
+        onPress={toggleVerticalTabs}
+        selected={verticalTabs}
+      >
+        <ThemedRows2 size={14} uniProps={extraMutedColorMapping} />
+      </ToolbarButton>
       <View style={styles.tabsScrollContainer}>
-        <Animated.ScrollView
-          ref={tabsScrollRef}
-          horizontal
-          scrollEnabled={layout.requiresHorizontalScrollFallback}
-          testID="workspace-tabs-scroll"
-          style={tabsScrollStyle}
-          contentContainerStyle={styles.tabsContent}
-          showsHorizontalScrollIndicator={false}
-          onLayout={tabScrollBoundary.onLayout}
-          onContentSizeChange={tabScrollBoundary.onContentSizeChange}
-          onScroll={tabScrollBoundary.onScroll}
-          scrollEventThrottle={16}
+        <WorkspaceTabTrack
+          vertical={verticalTabs}
+          displayedTabs={displayedTabs}
+          renderTab={renderTab}
+          onReorderTabs={onReorderTabs}
+          onCloseTab={onCloseTab}
         >
-          <SortableInlineList
-            data={displayedTabs}
-            keyExtractor={tabKeyExtractor}
-            useDragHandle
-            disabled={!externalDndContext && displayedTabs.length < 2}
-            onDragEnd={handleDragEnd}
-            externalDndContext={externalDndContext}
-            activeId={activeDragTabId}
-            getItemData={getTabDragData}
-            renderItem={renderTab}
-          />
-          {!layout.requiresHorizontalScrollFallback ? (
-            <WorkspaceNewTabButton
-              panePanelKinds={panePanelKinds}
-              host={host}
-              launchPurpose={launchPurpose}
-              placement="inline"
-              serverId={normalizedServerId}
-              paneId={paneId}
-              shortcutKeys={newTabKeys}
+          <Animated.ScrollView
+            ref={tabsScrollRef}
+            horizontal
+            scrollEnabled={layout.requiresHorizontalScrollFallback}
+            testID="workspace-tabs-scroll"
+            style={tabsScrollStyle}
+            contentContainerStyle={styles.tabsContent}
+            showsHorizontalScrollIndicator={false}
+            onLayout={tabScrollBoundary.onLayout}
+            onContentSizeChange={tabScrollBoundary.onContentSizeChange}
+            onScroll={tabScrollBoundary.onScroll}
+            scrollEventThrottle={16}
+          >
+            <SortableInlineList
+              data={displayedTabs}
+              keyExtractor={tabKeyExtractor}
+              useDragHandle
+              disabled={!externalDndContext && displayedTabs.length < 2}
+              onDragEnd={handleDragEnd}
+              externalDndContext={externalDndContext}
+              activeId={activeDragTabId}
+              getItemData={getTabDragData}
+              renderItem={renderTab}
             />
-          ) : null}
-        </Animated.ScrollView>
+            {!layout.requiresHorizontalScrollFallback ? (
+              <WorkspaceNewTabButton
+                panePanelKinds={panePanelKinds}
+                host={host}
+                launchPurpose={launchPurpose}
+                placement="inline"
+                serverId={normalizedServerId}
+                paneId={paneId}
+                shortcutKeys={newTabKeys}
+              />
+            ) : null}
+          </Animated.ScrollView>
+        </WorkspaceTabTrack>
         <HorizontalScrollBoundaryShades
-          visible={layout.requiresHorizontalScrollFallback}
+          visible={horizontalOverflow(verticalTabs, layout.requiresHorizontalScrollFallback)}
           backdrop={rail}
           testIDPrefix="workspace-tabs-scroll-shade"
           leftStyle={tabScrollBoundary.leftShadeStyle}
@@ -1436,7 +1464,7 @@ function ResolvedWorkspaceDesktopTabsRow({
         panePanelKinds={panePanelKinds}
         host={host}
         launchPurpose={launchPurpose}
-        showNewTabButton={layout.requiresHorizontalScrollFallback}
+        showNewTabButton={needsNewTabButton(verticalTabs, layout.requiresHorizontalScrollFallback)}
         showSplitActions={showPaneSplitActions}
         showMaximizeAction={showPaneMaximizeAction}
         paneMaximized={paneMaximized}
@@ -1514,6 +1542,7 @@ function ResolvedDesktopTabChip({
   const resolvedTab = useMemo(
     () =>
       buildWorkspaceDesktopTabActions({
+        serverId,
         tab: item.tab,
         index,
         tabCount,
@@ -1530,6 +1559,7 @@ function ResolvedDesktopTabChip({
         labels,
       }),
     [
+      serverId,
       index,
       item.tab,
       onCloseOtherTabs,
@@ -1592,6 +1622,73 @@ function ResolvedDesktopTabChip({
   );
 }
 
+function verticalContainerStyle(vertical: boolean) {
+  return vertical ? styles.verticalContainer : undefined;
+}
+function horizontalOverflow(vertical: boolean, overflow: boolean) {
+  return !vertical && overflow;
+}
+function needsNewTabButton(vertical: boolean, overflow: boolean) {
+  return vertical || overflow;
+}
+function WorkspaceTabTrack({
+  vertical,
+  displayedTabs,
+  renderTab,
+  onReorderTabs,
+  onCloseTab,
+  children,
+}: {
+  vertical: boolean;
+  displayedTabs: ResolvedWorkspaceDesktopTabRowItem[];
+  renderTab: (
+    info: DraggableRenderItemInfo<ResolvedWorkspaceDesktopTabRowItem>,
+  ) => React.ReactElement;
+  onReorderTabs: WorkspaceDesktopTabsRowProps["onReorderTabs"];
+  onCloseTab: WorkspaceDesktopTabsRowProps["onCloseTab"];
+  children: React.ReactNode;
+}) {
+  const items = useMemo(
+    () =>
+      displayedTabs.map((item) => ({
+        tabId: item.tab.tabId,
+        label: item.presentation.label,
+        pathLabel: item.presentation.label,
+      })),
+    [displayedTabs],
+  );
+  const renderLeaf = useCallback(
+    (tabId: string, label: string, info: DraggableRenderItemInfo<WorkspaceTabTreeRow>) => {
+      const index = displayedTabs.findIndex((item) => item.tab.tabId === tabId);
+      const item = displayedTabs[index]!;
+      return renderTab({
+        ...info,
+        index,
+        item: { ...item, presentation: { ...item.presentation, label } },
+      });
+    },
+    [displayedTabs, renderTab],
+  );
+  const reorder = useCallback(
+    (ids: string[]) =>
+      onReorderTabs(
+        ids.flatMap((id) =>
+          displayedTabs.filter((item) => item.tab.tabId === id).map((item) => item.tab),
+        ),
+      ),
+    [displayedTabs, onReorderTabs],
+  );
+  if (!vertical) return children;
+  return (
+    <WorkspaceTabTreeList
+      items={items}
+      selectedTabId={displayedTabs.find((item) => item.isActive)?.tab.tabId}
+      renderTab={renderLeaf}
+      onReorder={reorder}
+      onClose={onCloseTab}
+    />
+  );
+}
 const styles = StyleSheet.create((theme) => ({
   tabsContainer: {
     minWidth: 0,
@@ -1603,6 +1700,7 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     overflow: "visible",
   },
+  verticalContainer: { height: "auto", maxHeight: 320, alignItems: "flex-start" },
   tabsContainerSidebar: {
     backgroundColor: theme.colors.surfaceSidebar,
   },

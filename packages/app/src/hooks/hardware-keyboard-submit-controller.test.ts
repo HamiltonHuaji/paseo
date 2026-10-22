@@ -5,30 +5,39 @@ import {
 } from "./hardware-keyboard-submit-controller";
 
 interface FakeKeyboard extends HardwareKeyboardSubmitListenerPort {
-  emit(): void;
+  emitSubmit(): void;
+  emitQueue(): void;
   readonly isEnabled: boolean;
   readonly listenerCount: number;
 }
 
 function createFakeKeyboard(): FakeKeyboard {
-  const handlers = new Set<() => void>();
+  const submitHandlers = new Set<() => void>();
+  const queueHandlers = new Set<() => void>();
   let enabled = false;
   return {
     addListener(handler) {
-      handlers.add(handler);
-      return { remove: () => handlers.delete(handler) };
+      submitHandlers.add(handler);
+      return { remove: () => submitHandlers.delete(handler) };
+    },
+    addQueueListener(handler) {
+      queueHandlers.add(handler);
+      return { remove: () => queueHandlers.delete(handler) };
     },
     setEnabled(value) {
       enabled = value;
     },
-    emit() {
-      handlers.forEach((handler) => handler());
+    emitSubmit() {
+      submitHandlers.forEach((handler) => handler());
+    },
+    emitQueue() {
+      queueHandlers.forEach((handler) => handler());
     },
     get isEnabled() {
       return enabled;
     },
     get listenerCount() {
-      return handlers.size;
+      return submitHandlers.size + queueHandlers.size;
     },
   };
 }
@@ -41,9 +50,10 @@ describe("hardware-keyboard-submit-controller", () => {
     controller.setOnSubmit(() => {
       calls += 1;
     });
+    controller.setOnQueue(() => {});
 
     controller.enable();
-    keyboard.emit();
+    keyboard.emitSubmit();
 
     expect(calls).toBe(1);
     expect(keyboard.isEnabled).toBe(true);
@@ -57,7 +67,7 @@ describe("hardware-keyboard-submit-controller", () => {
       calls += 1;
     });
 
-    keyboard.emit();
+    keyboard.emitSubmit();
 
     expect(calls).toBe(0);
     expect(keyboard.listenerCount).toBe(0);
@@ -71,7 +81,7 @@ describe("hardware-keyboard-submit-controller", () => {
 
     controller.enable();
     expect(keyboard.isEnabled).toBe(true);
-    expect(keyboard.listenerCount).toBe(1);
+    expect(keyboard.listenerCount).toBe(2);
 
     controller.disable();
     expect(keyboard.isEnabled).toBe(false);
@@ -83,10 +93,11 @@ describe("hardware-keyboard-submit-controller", () => {
     const controller = createHardwareKeyboardSubmitController(keyboard);
     const received: string[] = [];
     controller.setOnSubmit(() => received.push("first"));
+    controller.setOnQueue(() => {});
 
     controller.enable();
     controller.setOnSubmit(() => received.push("second"));
-    keyboard.emit();
+    keyboard.emitSubmit();
 
     expect(received).toEqual(["second"]);
   });
@@ -101,7 +112,7 @@ describe("hardware-keyboard-submit-controller", () => {
 
     controller.enable();
     controller.disable();
-    keyboard.emit();
+    keyboard.emitSubmit();
 
     expect(calls).toBe(0);
   });
@@ -116,10 +127,10 @@ describe("hardware-keyboard-submit-controller", () => {
 
     controller.enable();
     controller.enable();
-    keyboard.emit();
+    keyboard.emitSubmit();
 
     expect(calls).toBe(1);
-    expect(keyboard.listenerCount).toBe(1);
+    expect(keyboard.listenerCount).toBe(2);
   });
 
   it("ignores disable without a prior enable", () => {
@@ -129,5 +140,19 @@ describe("hardware-keyboard-submit-controller", () => {
     controller.disable();
 
     expect(keyboard.isEnabled).toBe(false);
+  });
+
+  it("dispatches queue separately from submit", () => {
+    const keyboard = createFakeKeyboard();
+    const controller = createHardwareKeyboardSubmitController(keyboard);
+    const received: string[] = [];
+    controller.setOnSubmit(() => received.push("submit"));
+    controller.setOnQueue(() => received.push("queue"));
+
+    controller.enable();
+    keyboard.emitQueue();
+    keyboard.emitSubmit();
+
+    expect(received).toEqual(["queue", "submit"]);
   });
 });

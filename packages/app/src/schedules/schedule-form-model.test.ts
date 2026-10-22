@@ -1,3 +1,4 @@
+import { openHeartbeatForm } from "./heartbeat-form-model";
 import type {
   AgentMode,
   AgentModelDefinition,
@@ -758,5 +759,40 @@ describe("schedule form model", () => {
       selectedMode: "load-test",
       isolation: "worktree",
     });
+  });
+});
+
+describe("session heartbeat editor", () => {
+  it("does not submit unchanged schedules and explicitly clears a timezone to UTC", () => {
+    const model = openHeartbeatForm(
+      heartbeatOnHost({ type: "cron", expression: "0 9 * * 1-5", timezone: "Asia/Shanghai" }),
+    );
+    expect(model.getState().dirty).toBe(false);
+    expect(model.getState().canSubmit).toBe(false);
+    model.setTimezone("");
+    expect(model.buildUpdate().cadence).toEqual({
+      type: "cron",
+      expression: "0 9 * * 1-5",
+      timezone: "UTC",
+    });
+  });
+  it("preserves full cron combinations while editing only the prompt", () => {
+    const model = openHeartbeatForm(
+      heartbeatOnHost({ type: "cron", expression: "1,3-9/2 8,14 * 1-6 1-5" }),
+    );
+    model.setPrompt("Updated instructions");
+    expect(model.buildUpdate()).toEqual({ id: "heartbeat-host-a", prompt: "Updated instructions" });
+  });
+  it("retains interval cadence and validates stopping conditions", () => {
+    const model = openHeartbeatForm(heartbeatOnHost({ type: "every", everyMs: 60000 }));
+    model.setMaxRuns("3");
+    model.setExpiresAt("2026-12-31T12:00:00Z");
+    expect(model.buildUpdate()).toEqual({
+      id: "heartbeat-host-a",
+      maxRuns: 3,
+      expiresAt: "2026-12-31T12:00:00.000Z",
+    });
+    model.setMaxRuns("-1");
+    expect(model.getState().canSubmit).toBe(false);
   });
 });

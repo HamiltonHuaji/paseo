@@ -35,7 +35,7 @@ describe.skipIf(isPlatform("win32"))("service POSIX-only", () => {
     }
   });
 
-  it("rejects symlinked files that resolve outside the workspace", async () => {
+  it("reads explicitly linked resources outside the workspace", async () => {
     const root = await createTempDir("paseo-file-explorer-");
     const outsideRoot = await createTempDir("paseo-file-explorer-outside-");
 
@@ -49,14 +49,14 @@ describe.skipIf(isPlatform("win32"))("service POSIX-only", () => {
           root,
           relativePath: "secret-link.txt",
         }),
-      ).rejects.toThrow("Access outside of workspace is not allowed");
+      ).resolves.toMatchObject({ content: "top secret\n" });
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outsideRoot, { recursive: true, force: true });
     }
   });
 
-  it("skips listed symlink entries that resolve outside the workspace", async () => {
+  it("lists explicitly linked resources outside the workspace", async () => {
     const root = await createTempDir("paseo-file-explorer-");
     const outsideRoot = await createTempDir("paseo-file-explorer-outside-");
 
@@ -70,7 +70,7 @@ describe.skipIf(isPlatform("win32"))("service POSIX-only", () => {
 
       const names = result.entries.map((entry) => entry.name);
       expect(names).toContain("visible.txt");
-      expect(names).not.toContain("secret-link.txt");
+      expect(names).toContain("secret-link.txt");
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outsideRoot, { recursive: true, force: true });

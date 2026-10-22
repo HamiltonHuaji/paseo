@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { darkTheme, lightTheme } from "@/styles/theme";
 import { createMarkdownStyles } from "./styles";
 import { prepareMarkdownSource, PENDING_MARKDOWN_IMAGE } from "./source";
+import { normalizeMarkdownMath } from "./math-source";
 import { normalizeMarkdownHtml } from "./html";
 
 describe("shared Markdown source adaptation", () => {
@@ -773,5 +774,29 @@ it("makes the web Markdown container selectable in Safari as well as unprefixed 
   expect(createMarkdownStyles(lightTheme, { blockGap: 12 }).containerStyle).toEqual({
     userSelect: "text",
     WebkitUserSelect: "text",
+  });
+});
+
+describe("math source on the shared engine", () => {
+  it("keeps currency, code and streamed delimiters readable", () => {
+    expect(normalizeMarkdownMath("Costs $5 and $10.")).toBe("Costs \\$5 and \\$10.");
+    expect(normalizeMarkdownMath("`$x$`\n\n```tex\n$$x$$\n```")).toBe(
+      "`$x$`\n\n```tex\n$$x$$\n```",
+    );
+    expect(normalizeMarkdownMath("Before $x+")).toBe("Before \\$x+");
+    expect(normalizeMarkdownMath("Before $x+1$ after")).toBe("Before $x+1$ after");
+    expect(normalizeMarkdownMath(String.raw`\(x^2\)`)).toBe("$x^2$");
+  });
+  it("renders complete inline and multiline formulas through the pinned parser", async () => {
+    const source = prepareMarkdownSource("Inline $x^2$\n\n$$\n\\frac{1}{2}\n$$").render();
+    const tree = await parseMarkdown(source, { latexMath: true });
+    const types: string[] = [];
+    const collect = (node: ASTNode) => {
+      types.push(node.type);
+      node.children?.forEach(collect);
+    };
+    collect(tree);
+    expect(types).toContain("LatexMathInline");
+    expect(types).toContain("LatexMathDisplay");
   });
 });

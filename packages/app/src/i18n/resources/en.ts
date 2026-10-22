@@ -1,6 +1,8 @@
 import { sessionCanvas } from "./session-canvas";
+import { heartbeatSettings } from "./heartbeat-settings";
 export const en = {
   sessionCanvas: sessionCanvas["en"],
+  heartbeats: heartbeatSettings["en"],
   paneFind: {
     connectionFailure: "Could not search this chat. Check the host connection and retry.",
     historyChangedFailure: "The chat changed while searching. Search again.",
@@ -2374,10 +2376,12 @@ export const en = {
       defaultSend: {
         label: "Default send",
         descriptions: {
-          interrupt: "When the agent is running, Enter interrupts. Command/Ctrl+Enter queues.",
+          interrupt:
+            "Enter inserts a newline. Command/Ctrl+Enter sends; Tab queues while running. The send button interrupts an active turn.",
           steer:
-            "When the agent is running, Enter steers the active turn. Command/Ctrl+Enter queues.",
-          queue: "When the agent is running, Enter queues. Command/Ctrl+Enter submits.",
+            "Enter inserts a newline. Command/Ctrl+Enter sends; Tab queues while running. The send button steers the active turn.",
+          queue:
+            "Enter inserts a newline. Command/Ctrl+Enter sends; Tab queues while running. The send button queues during an active turn.",
         },
         options: {
           interrupt: "Interrupt",

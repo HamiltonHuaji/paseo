@@ -125,14 +125,19 @@ export function runDefaultSendAction(ctx: SendActionContext): void {
   ctx.handleSendMessage();
 }
 
-export function runAlternateSendAction(ctx: SendActionContext): void {
-  if (ctx.defaultSendBehavior === "queue") {
-    ctx.handleSendMessage();
-    return;
-  }
-  if (ctx.isAgentRunning && ctx.onQueue) {
-    ctx.handleQueueMessage();
-  }
+export type ComposerHardwareKeyAction = "submit" | "queue";
+
+export function resolveComposerHardwareKeyAction(input: {
+  key: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
+}): ComposerHardwareKeyAction | null {
+  if (input.shiftKey || input.altKey) return null;
+  if (input.key === "Tab" && !input.metaKey && !input.ctrlKey) return "queue";
+  if (input.key === "Enter" && (input.metaKey || input.ctrlKey)) return "submit";
+  return null;
 }
 
 export function runMessageInputKeyboardAction(

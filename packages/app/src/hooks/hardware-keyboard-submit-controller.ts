@@ -1,10 +1,12 @@
 export interface HardwareKeyboardSubmitListenerPort {
   addListener(handler: () => void): { remove: () => void };
+  addQueueListener(handler: () => void): { remove: () => void };
   setEnabled(enabled: boolean): void;
 }
 
 export interface HardwareKeyboardSubmitController {
   setOnSubmit(handler: () => void): void;
+  setOnQueue(handler: () => void): void;
   enable(): void;
   disable(): void;
 }
@@ -12,23 +14,27 @@ export interface HardwareKeyboardSubmitController {
 export function createHardwareKeyboardSubmitController(
   port: HardwareKeyboardSubmitListenerPort,
 ): HardwareKeyboardSubmitController {
-  let subscription: { remove: () => void } | null = null;
+  let subscriptions: Array<{ remove: () => void }> = [];
   let onSubmit: () => void = () => {};
+  let onQueue: () => void = () => {};
 
   return {
     setOnSubmit(handler) {
       onSubmit = handler;
     },
+    setOnQueue(handler) {
+      onQueue = handler;
+    },
     enable() {
-      if (subscription) return;
-      subscription = port.addListener(() => onSubmit());
+      if (subscriptions.length > 0) return;
+      subscriptions = [port.addListener(() => onSubmit()), port.addQueueListener(() => onQueue())];
       port.setEnabled(true);
     },
     disable() {
-      if (!subscription) return;
+      if (subscriptions.length === 0) return;
       port.setEnabled(false);
-      subscription.remove();
-      subscription = null;
+      for (const subscription of subscriptions) subscription.remove();
+      subscriptions = [];
     },
   };
 }

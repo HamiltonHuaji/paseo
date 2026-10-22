@@ -1,3 +1,4 @@
+import type { ScheduleCadence } from "@getpaseo/protocol/schedule/types";
 import {
   HOST_ROUTE_OPCODE,
   encodeHostRouteFrame,
@@ -905,11 +906,7 @@ export interface UpdateScheduleOptions {
   id: string;
   name?: string | null;
   prompt?: string;
-  cadence?: {
-    type: "cron";
-    expression: string;
-    timezone?: string;
-  };
+  cadence?: ScheduleCadence;
   newAgentConfig?: UpdateScheduleNewAgentConfig;
   maxRuns?: number | null;
   expiresAt?: string | null;

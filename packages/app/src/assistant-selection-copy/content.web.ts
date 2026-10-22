@@ -587,7 +587,17 @@ function selectedMessageParts(range: Range): SelectedMessagePart[] | null {
   });
 }
 
+function restoreMathSource(container: HTMLElement): void {
+  for (const formula of container.querySelectorAll('[role="math"][aria-label]')) {
+    const delimiter = formula.querySelector('math[display="block"]') ? "$$" : "$";
+    formula.replaceWith(
+      document.createTextNode(`${delimiter}${formula.getAttribute("aria-label")}${delimiter}`),
+    );
+  }
+}
+
 function restoreMarkdownElements(container: HTMLElement): void {
+  restoreMathSource(container);
   for (const ignored of container.querySelectorAll(`[${MARKDOWN_COPY_IGNORE_ATTRIBUTE}]`)) {
     ignored.remove();
   }

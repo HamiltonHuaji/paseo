@@ -1,5 +1,5 @@
 import { Text } from "react-native";
-import { forwardRef, useCallback, useMemo, useState, type ComponentProps } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type {
   CodeBlockRendererProps,
   LinkRendererProps,
@@ -7,7 +7,7 @@ import type {
 } from "react-native-enriched-markdown";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { useFileLink } from "@/assistant-file-links";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { HighlightedCodeBlock } from "@/components/highlighted-code-block";
 import type { Theme } from "@/styles/theme";
 import { MermaidFence } from "./fence/mermaid";
@@ -31,7 +31,7 @@ function WebCodeBlock({ code, language }: CodeBlockRendererProps) {
 const LINK_HOVER_STYLE = { textDecoration: "underline" } as const;
 
 function WebLink({ link, anchorProps, children }: LinkRendererProps) {
-  const { tooltipPath, onHoverIn } = useFileLink(markdownLinkSource(link.url, link.sourceType));
+  const { onHoverIn } = useFileLink(markdownLinkSource(link.url, link.sourceType));
   const [hovered, setHovered] = useState(false);
   const handleMouseEnter = useCallback(() => setHovered(true), []);
   const handleMouseLeave = useCallback(() => setHovered(false), []);
@@ -54,38 +54,22 @@ function WebLink({ link, anchorProps, children }: LinkRendererProps) {
     </a>
   );
   return (
-    <Tooltip delayDuration={400}>
-      <TooltipTrigger asChild onHoverIn={onHoverIn}>
-        <InlineLinkTrigger>{anchor}</InlineLinkTrigger>
-      </TooltipTrigger>
-      {tooltipPath ? (
-        <TooltipContent side="top" align="start" maxWidth={520}>
-          <Text selectable={false} style={styles.tooltipPath}>
-            {tooltipPath}
+    <HoverCard>
+      <HoverCardTrigger inline onHoverIn={onHoverIn}>
+        {anchor}
+      </HoverCardTrigger>
+      {link.url ? (
+        <HoverCardContent placement="top" alignment="start" style={styles.linkPreview}>
+          <Text selectable style={styles.tooltipPath}>
+            {link.url}
           </Text>
-        </TooltipContent>
+        </HoverCardContent>
       ) : null}
-    </Tooltip>
+    </HoverCard>
   );
 }
-// TooltipTrigger also supplies native Pressable handlers; forward only DOM events.
-// A View renders a div, which is invalid inside the library's prose paragraphs.
-const InlineLinkTrigger = forwardRef<HTMLSpanElement, ComponentProps<"span">>(
-  function InlineLinkTrigger({ children, onMouseEnter, onMouseLeave, onFocus, onBlur }, ref) {
-    return (
-      <span
-        ref={ref}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-        onFocus={onFocus}
-        onBlur={onBlur}
-      >
-        {children}
-      </span>
-    );
-  },
-);
 const styles = StyleSheet.create((theme) => ({
+  linkPreview: { maxWidth: 520, padding: 10 },
   tooltipPath: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.sm,

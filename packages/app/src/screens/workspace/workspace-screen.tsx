@@ -1,6 +1,7 @@
 import type { ComponentProps } from "react";
 import { SessionCanvasScreen } from "@/screens/session-canvas/screen";
 import { WorkspaceSessionCanvasButton } from "./workspace-session-canvas-button";
+import { AgentHeartbeatsHost } from "@/components/schedules/agent-heartbeats-sheet";
 import { useHostFeature } from "@/runtime/host-features";
 import {
   AssistantFileLinkResolverProvider,
@@ -3821,6 +3822,7 @@ function WorkspaceScreenContent({
           </FloatingPanelPortalHostNameProvider>
           <FloatingPanelPortalHost name={workspaceFloatingPanelPortalHostName} />
         </WorkspacePanelSurface>
+        <AgentHeartbeatsHost serverId={normalizedServerId} active={isRouteFocused} />
         <ImportSessionSheet
           visible={isRouteFocused && isImportSheetVisible}
           client={client}

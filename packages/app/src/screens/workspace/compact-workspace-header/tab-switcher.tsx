@@ -204,6 +204,7 @@ function MobileWorkspaceTabOption({
   const menuTestIDBase = `workspace-tab-menu-${tab.tabId}`;
   const menuEntries = buildWorkspaceTabMenuEntries({
     surface: "mobile",
+    serverId: normalizedServerId,
     tab,
     index: tabIndex,
     tabCount,
