@@ -9,6 +9,7 @@ import { Grid2X2, List, RefreshCw, Undo2, GitBranch } from "lucide-react-native"
 import type { WorkCard, WorkPlacement } from "@getpaseo/protocol/work-objects";
 import { useHostFeature } from "@/runtime/host-features";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isNative } from "@/constants/platform";
 import { useFetchQuery } from "@/data/query";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { Button } from "@/components/ui/button";
@@ -186,7 +187,7 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
     void cache.cancelQueries({ queryKey: ["works-progress", serverId, projectId] });
   }, [active, cache, serverId, projectId]);
   useEffect(() => {
-    if (!active || !selected) return;
+    if (!isNative || !active || !selected) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       setSelected(null);
       return true;
