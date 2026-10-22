@@ -3,6 +3,7 @@ import { useHostFeature } from "@/runtime/host-features";
 import { useAppVisible } from "@/hooks/use-app-visible";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { BackHandler, Platform, ScrollView, Text, View, type ViewStyle } from "react-native";
+import { useWorkNavigation } from "@/stores/work-navigation-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useIsFocused } from "@react-navigation/native";
 import { useQueryClient } from "@tanstack/react-query";
@@ -104,7 +105,13 @@ export function ExperimentsScreen(props: ExperimentsScreenProps) {
         <Text>Update this host to use Experiments.</Text>
       </View>
     );
-  return <ExperimentsBoard {...props} active={props.active !== false && visible && focused} />;
+  return (
+    <ExperimentsBoard
+      key={JSON.stringify([props.serverId, props.projectId])}
+      {...props}
+      active={props.active !== false && visible && focused}
+    />
+  );
 }
 
 function ExperimentsBoard({
@@ -130,14 +137,18 @@ function ExperimentsBoard({
     dataShape: "list",
     staleTimeMs: 5_000,
   });
-  const [selectedExperiment, setSelectedExperiment] = useState<string | null>(null);
+  const {
+    selected: selectedExperiment,
+    select: setSelectedExperiment,
+    expanded: attemptExpansionById,
+    expand: setAttemptExpanded,
+  } = useWorkNavigation(serverId, projectId, "experiments");
   const [refreshing, setRefreshing] = useState(false);
   const [arranging, setArranging] = useState(false);
   const [arrangeError, setArrangeError] = useState<string | null>(null);
   const [undoArrangement, setUndoArrangement] = useState<UndoBoardArrangement | null>(null);
   const [canvasLayoutVersion, setCanvasLayoutVersion] = useState(0);
   const [viewMode, setViewMode] = useState<ExperimentViewMode>("list");
-  const [attemptExpansionById, setAttemptExpansionById] = useState<Record<string, boolean>>({});
   const canvasMode = viewMode === "canvas";
   const independentCanvasScroll = canvasMode && !isCompactLayout;
   const experiments = listQuery.data ?? EMPTY_EXPERIMENTS;
@@ -189,10 +200,21 @@ function ExperimentsBoard({
   );
 
   useEffect(() => {
-    if (selectedExperiment && !experiments.some((item) => item.id === selectedExperiment)) {
+    if (
+      listQuery.isSuccess &&
+      !listQuery.isPlaceholderData &&
+      selectedExperiment &&
+      !experiments.some((item) => item.id === selectedExperiment)
+    ) {
       setSelectedExperiment(null);
     }
-  }, [experiments, selectedExperiment]);
+  }, [
+    experiments,
+    listQuery.isSuccess,
+    listQuery.isPlaceholderData,
+    selectedExperiment,
+    setSelectedExperiment,
+  ]);
 
   const groups = useMemo(() => groupExperiments(experiments), [experiments]);
   const boardLayoutQuery = useFetchQuery({
@@ -307,21 +329,16 @@ function ExperimentsBoard({
     }
   }, [projectId, queryClient, refetchList, serverId]);
   const handleRefresh = useCallback(() => void refreshAll(), [refreshAll]);
-  const clearSelection = useCallback(() => setSelectedExperiment(null), []);
+  const clearSelection = useCallback(() => setSelectedExperiment(null), [setSelectedExperiment]);
   useEffect(() => {
     if (Platform.OS !== "android" || !embedded || !active) return;
     const handler = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (selectedExperiment) clearSelection();
+      if (!selectedExperiment) return false;
+      clearSelection();
       return true;
     });
     return () => handler.remove();
   }, [active, clearSelection, embedded, selectedExperiment]);
-  const setAttemptExpanded = useCallback((attemptId: string, expanded: boolean) => {
-    setAttemptExpansionById((current) => {
-      if (current[attemptId] === expanded) return current;
-      return { ...current, [attemptId]: expanded };
-    });
-  }, []);
   const viewOptions = useMemo(
     () => [
       { value: "list" as const, label: "List", icon: List },

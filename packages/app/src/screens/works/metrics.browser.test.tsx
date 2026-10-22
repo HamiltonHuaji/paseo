@@ -3,7 +3,7 @@ import React, {
   createElement,
   useCallback,
   useMemo,
-  useState,
+  useId,
   type ComponentType,
   type ComponentProps,
   type ReactNode,
@@ -21,6 +21,7 @@ import type { WorkDataQueryResult } from "@getpaseo/protocol/work-data";
 import type { WorkCard, WorkView } from "@getpaseo/protocol/work-objects";
 import { WorkCardPreview, cardHeight, useCanvasDisplay } from "./preview";
 import { CardDetailContent } from "./detail";
+import { useWorkNavigation } from "@/stores/work-navigation-store";
 import { cardView } from "./components";
 import type { FloatingSurfaceProps } from "@/components/ui/floating";
 
@@ -441,11 +442,19 @@ const items: WorkView[] = [
 ];
 
 const cards = [card];
-function DetailFixture() {
-  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
-  const onItemExpandedChange = useCallback((id: string, expanded: boolean) => {
-    setExpandedItems((current) => ({ ...current, [id]: expanded }));
-  }, []);
+function DetailFixture({
+  projectId,
+  domain = "works",
+}: {
+  projectId?: string;
+  domain?: "works" | "experiments";
+}) {
+  const instance = useId();
+  const { expanded: expandedItems, expand: onItemExpandedChange } = useWorkNavigation(
+    "navigation-host",
+    projectId ?? instance,
+    domain,
+  );
   const view = useMemo(() => cardView(card), []);
   return (
     <CardDetailContent
@@ -496,4 +505,36 @@ it("shows source failures and keeps hidden panels from reading", async () => {
   const read = vi.fn(async () => data);
   mount(read, false);
   expect(read).not.toHaveBeenCalled();
+});
+
+it("restores item expansion after project screens unmount without sharing v1 navigation", async () => {
+  await page.viewport(750, 900);
+  mount(async () => data, true, <DetailFixture projectId="retained-project" />);
+  await page.getByRole("button", { name: "Expand Baseline run" }).click();
+  await page.getByRole("button", { name: "Collapse Rebalanced mixture" }).click();
+  const leave = () => {
+    const previous = mounted.pop()!;
+    act(() => previous.root.unmount());
+    previous.cache.clear();
+    previous.container.remove();
+  };
+  leave();
+  mount(async () => data, true, <DetailFixture projectId="another-project" />);
+  await expect.element(page.getByRole("button", { name: "Expand Baseline run" })).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Collapse Rebalanced mixture" }))
+    .toBeVisible();
+  leave();
+  mount(
+    async () => data,
+    true,
+    <DetailFixture projectId="retained-project" domain="experiments" />,
+  );
+  await expect.element(page.getByRole("button", { name: "Expand Baseline run" })).toBeVisible();
+  leave();
+  mount(async () => data, true, <DetailFixture projectId="retained-project" />);
+  await expect.element(page.getByRole("button", { name: "Collapse Baseline run" })).toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Expand Rebalanced mixture" }))
+    .toBeVisible();
 });

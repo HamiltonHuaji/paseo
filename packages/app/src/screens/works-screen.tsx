@@ -23,6 +23,7 @@ import {
 import { useWorksConnection } from "./works/connection";
 import { useAppVisible } from "@/hooks/use-app-visible";
 import { WorksContext, WorkActivityContext, useWorks, errorMessage } from "./works/context";
+import { useWorkNavigation } from "@/stores/work-navigation-store";
 import { WorkCardPreview, cardHeight, useCanvasDisplay } from "./works/preview";
 import { CardDetail } from "./works/detail";
 import { workStyles as styles } from "./works/styles";
@@ -73,14 +74,18 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
     return () => clearInterval(timer);
   }, [active]);
   const cache = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
-  const setItemExpanded = useCallback((id: string, expanded: boolean) => {
-    setExpandedItems((current) => ({ ...current, [id]: expanded }));
-  }, []);
+  const {
+    selected,
+    select: setSelected,
+    expanded: expandedItems,
+    expand: setItemExpanded,
+    search,
+    setSearch,
+    includeArchived,
+    setIncludeArchived,
+  } = useWorkNavigation(serverId, projectId, "works");
   const [mode, setMode] = useState<"canvas" | "list">("canvas");
-  const [search, setSearch] = useState("");
-  const [includeArchived, setIncludeArchived] = useState(false);
+  const viewStorageKey = JSON.stringify([VIEW_KEY, serverId, projectId]);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [undo, setUndo] = useState<WorkPlacement[] | null>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -134,19 +139,22 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
     return grouped;
   }, [filtered]);
   useEffect(() => {
-    void AsyncStorage.getItem(VIEW_KEY)
+    void AsyncStorage.getItem(viewStorageKey)
       .then((value) => {
         if (value === "list" || value === "canvas") setMode(value);
         return undefined;
       })
       .catch((error) => setSubscriptionError(errorMessage(error)));
-  }, []);
-  const changeMode = useCallback((value: "canvas" | "list") => {
-    setMode(value);
-    void AsyncStorage.setItem(VIEW_KEY, value).catch((error) =>
-      setSubscriptionError(errorMessage(error)),
-    );
-  }, []);
+  }, [viewStorageKey]);
+  const changeMode = useCallback(
+    (value: "canvas" | "list") => {
+      setMode(value);
+      void AsyncStorage.setItem(viewStorageKey, value).catch((error) =>
+        setSubscriptionError(errorMessage(error)),
+      );
+    },
+    [viewStorageKey],
+  );
   useEffect(() => {
     if (!active || !client || !connected) return;
     let disposed = false;
@@ -178,13 +186,13 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
     void cache.cancelQueries({ queryKey: ["works-progress", serverId, projectId] });
   }, [active, cache, serverId, projectId]);
   useEffect(() => {
-    if (!active) return;
+    if (!active || !selected) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       setSelected(null);
       return true;
     });
     return () => subscription.remove();
-  }, [active]);
+  }, [active, selected, setSelected]);
   const saveLayout = useMutation({
     mutationFn: async (values: WorkPlacement[]) => {
       if (!client || !connected) throw new Error("Host is disconnected");
@@ -213,12 +221,15 @@ function WorksBoard({ embedded }: { embedded: boolean }) {
     void cache.invalidateQueries({ queryKey: ["works-data", serverId, projectId] });
     void cache.invalidateQueries({ queryKey: ["works-progress", serverId, projectId] });
   }, [cache, serverId, projectId]);
-  const closeDetail = useCallback(() => setSelected(null), []);
+  const closeDetail = useCallback(() => setSelected(null), [setSelected]);
   const persistPlacement = useCallback(
     (value: BoardPlacement) => saveLayout.mutate([fromBoard(value)]),
     [saveLayout],
   );
-  const toggleArchived = useCallback(() => setIncludeArchived((value) => !value), []);
+  const toggleArchived = useCallback(
+    () => setIncludeArchived(!includeArchived),
+    [includeArchived, setIncludeArchived],
+  );
   const resetCardSize = useCallback(
     (cardId: string, dimensions: "height" | "both" = "both") => {
       const previous = stored.find((placement) => placement.cardId === cardId);
