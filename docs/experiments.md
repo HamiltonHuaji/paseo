@@ -1,7 +1,8 @@
 # Experiments
 
-Status: initial v1 implementation. Goal catalog management, doctor/repair, and post-turn reporting
-forks remain follow-up work.
+Status: reference for the v1 implementation in the 0.9 fork. The current
+[phased baseline migration](contracts/README.md#当前迁移范围) has not migrated this module.
+Goal catalog management, doctor/repair, and post-turn reporting forks remain follow-up work.
 
 The [Works behavior contracts](contracts/works.md) cover baseline-bump acceptance for Works and
 v1 continuity. This document owns the v1 model; the [v2 module reference](refactors/work-objects-v2.md)

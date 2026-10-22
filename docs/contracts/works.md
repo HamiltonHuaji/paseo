@@ -74,7 +74,7 @@ storage 或用户指定位置并登记；用户入口只列可查看的结果。
 验收：另一 agent 能继续同一问题、找到旧执行和成果；失败与重试不会覆盖旧证据。
 链接会话、touch、记录完成均不自动授权委派或启动操作。工具缺失时明确报告限制，
 不伪造保存成功、不把 v2 调用写进 v1。实际 skill 边界见
-[paseo-works](../../skills/paseo-works/SKILL.zh-CN.md)。
+[paseo-works](https://github.com/HamiltonHuaji/paseo/blob/1bd70fb5056d623e8da784dce82d8ee72fa5f486/skills/paseo-works/SKILL.zh-CN.md)。
 
 ## EXP-01 — v1 数据与入口连续可用
 

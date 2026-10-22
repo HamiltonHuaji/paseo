@@ -1,6 +1,6 @@
 # Paseo Works v2：需求与模块设计
 
-状态：已有 fork 实现和发行记录。长期行为与 baseline bump 验收由
+状态：0.9 fork 已有实现和发行记录；[当前阶段迁移](../contracts/README.md#当前迁移范围)尚未迁入本模块。长期行为与 baseline bump 验收由
 [Paseo Works 契约](../contracts/works.md)维护。本文保留接口、模块与实现参考；
 §10 是验证范围，不是每个版本都已通过的证明。`paseo-works` 是随项目打包的 agent skill，随正式 daemon 更新安装；开发和测试不将其写入用户的全局 skills。客户端功能名为 **Works**（中文“工作”）。
 
@@ -19,7 +19,7 @@
 | 制作分析报告、图表、可交互页面                | Topic 或 Experiment | Item 记录具体制作或分析；一次性交付也可以有稳定归属和入口     |
 | 按条件筛选文献、检查网站并交付问题清单        | Topic               | 交付整理后的材料或检查结果；不要求修改源文件或持续维护        |
 
-不因任务产生了文件、用了工具或耗时较长就强制登记。咨询建议、聊天内创作和常规文件操作的适用边界由 [paseo-works skill](../../skills/paseo-works/SKILL.zh-CN.md)规定。产品提供记录与展示能力，skill 负责让 agent 在适当的时候查找、创建、维护记录并交付入口。
+不因任务产生了文件、用了工具或耗时较长就强制登记。咨询建议、聊天内创作和常规文件操作的适用边界由 [paseo-works skill](https://github.com/HamiltonHuaji/paseo/blob/1bd70fb5056d623e8da784dce82d8ee72fa5f486/skills/paseo-works/SKILL.zh-CN.md)规定。产品提供记录与展示能力，skill 负责让 agent 在适当的时候查找、创建、维护记录并交付入口。
 
 保留 v1 的 Goal 分组、Card 间的 basedOn 来源关系、viewer 配置继承、会话参与记录和 CLI。首版不包含第三层工作对象、评论流、指派人、优先级、排期、通用任务状态机、自动委派、作业调度或 worktree 管理。本地 W&B 来源提供指标和可用的 artifacts；云端指标暂列 TODO，见 §6.5。不在 daemon 运行完整 W&B 前端让客户端代理访问。
 
@@ -650,19 +650,19 @@ Metrics 在客户端绘制曲线或数值，按需要读取历史或 summary；�
 
 模块按下表分工，v1 继续使用独立的业务模型与存储。
 
-| 模块                   | 实现内容                                                                                             | 落点与复用                                                                                                                                   |
-| ---------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 对象契约               | Card／Item、预设、组件配置、投影、错误、分页与 RPC schema；只导出运行时可校验的确定类型              | `packages/protocol/src/work-objects.ts`；不扩展 v1 experiments schema                                                                        |
-| 项目 store 与 service  | 独立 SQLite、Goal／basedOn、对象 touches、活动与起止时间、Result 状态、storage、归档与布局           | `packages/server/src/server/work-objects/`；复用 Project registry 与底层数据库设施                                                           |
-| Agent 及客户端控制适配 | 八个 MCP 工具、项目上下文、筛选与按需返回；work RPC handler；Sessions 与对象 touches 分别查询        | 现有 [agent 工具目录](../../packages/server/src/server/agent/tools/paseo-tools.ts)、session 路由及 `packages/client`；领域逻辑不复制到适配层 |
-| CLI                    | Card／Item 操作、storage、进度刷新、viewer 配置与入口；沿用文本和结构化输出                          | `packages/cli/src/commands/work/`；复用 CLI 输出、host 选择和 daemon client                                                                  |
-| 进度观测               | 日志与命令 reader、viewer-source adapter、并发合并与刷新结果；W&B 来源复用数据查询模块               | `work-objects` 下独立模块；可提取 v1 纯解析逻辑，v1 状态与配置保持独立                                                                       |
-| 共用 viewer host       | 从当前 bootstrap 的 host 装配中分出业务路由注册；接入 v1 resolver 与 v2 resolver，保持同一个监听服务 | [bootstrap.ts](../../packages/server/src/server/bootstrap.ts)、现有静态文件和目录枚举模块；保留原监听配置与服务注册                          |
-| W&B 本地 reader        | 无 Python 的指标与 artifact 读取、run／多文件识别、只读内容解析与共享派生状态                        | server 下独立 viewer-data 模块；不放入 Metrics renderer 或 agent tool handler                                                                |
-| 数据查询服务           | 指标目录、历史／最新标量／摘要、artifact 目录与内容、HTTP 响应；供三类消费者共用                     | 共用 host 的 v2 data 路由；[现有 HTTP controller](../../packages/server/src/server/viewer-http/controller.ts)只继续转发                      |
-| Works surface          | 相邻按钮与传送带烧瓶图标、同级 RetainedPanel、独立 route、完整 board／Item 列表、分组、血缘与归档    | `packages/app/src/screens/works/` 与 workspace screen；参考 [v1 容器](../../packages/app/src/screens/workspace/workspace-screen.tsx)         |
-| 组件展示与数据获取     | kind／label 基础 renderer、Sessions／touches 区分、完成控件、Config 表格、进度单位与指标图表         | Works screen 内消费共享 UI 原语；复用 viewer proxy 和 `fetchViewerHttp`，不复制传输栈                                                        |
-| Skill 与打包           | `paseo-works` 英文入口、中文译文、调用示例、可用性说明、真实工具引用                                 | `skills/paseo-works/`；沿用 server 构建时复制 skills 的现有流程                                                                              |
+| 模块                   | 实现内容                                                                                             | 落点与复用                                                                                                                                                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 对象契约               | Card／Item、预设、组件配置、投影、错误、分页与 RPC schema；只导出运行时可校验的确定类型              | `packages/protocol/src/work-objects.ts`；不扩展 v1 experiments schema                                                                                                                                  |
+| 项目 store 与 service  | 独立 SQLite、Goal／basedOn、对象 touches、活动与起止时间、Result 状态、storage、归档与布局           | `packages/server/src/server/work-objects/`；复用 Project registry 与底层数据库设施                                                                                                                     |
+| Agent 及客户端控制适配 | 八个 MCP 工具、项目上下文、筛选与按需返回；work RPC handler；Sessions 与对象 touches 分别查询        | 现有 [agent 工具目录](../../packages/server/src/server/agent/tools/paseo-tools.ts)、session 路由及 `packages/client`；领域逻辑不复制到适配层                                                           |
+| CLI                    | Card／Item 操作、storage、进度刷新、viewer 配置与入口；沿用文本和结构化输出                          | `packages/cli/src/commands/work/`；复用 CLI 输出、host 选择和 daemon client                                                                                                                            |
+| 进度观测               | 日志与命令 reader、viewer-source adapter、并发合并与刷新结果；W&B 来源复用数据查询模块               | `work-objects` 下独立模块；可提取 v1 纯解析逻辑，v1 状态与配置保持独立                                                                                                                                 |
+| 共用 viewer host       | 从当前 bootstrap 的 host 装配中分出业务路由注册；接入 v1 resolver 与 v2 resolver，保持同一个监听服务 | [bootstrap.ts](../../packages/server/src/server/bootstrap.ts)、现有静态文件和目录枚举模块；保留原监听配置与服务注册                                                                                    |
+| W&B 本地 reader        | 无 Python 的指标与 artifact 读取、run／多文件识别、只读内容解析与共享派生状态                        | server 下独立 viewer-data 模块；不放入 Metrics renderer 或 agent tool handler                                                                                                                          |
+| 数据查询服务           | 指标目录、历史／最新标量／摘要、artifact 目录与内容、HTTP 响应；供三类消费者共用                     | 共用 host 的 v2 data 路由；[现有 HTTP controller](https://github.com/HamiltonHuaji/paseo/blob/1bd70fb5056d623e8da784dce82d8ee72fa5f486/packages/server/src/server/viewer-http/controller.ts)只继续转发 |
+| Works surface          | 相邻按钮与传送带烧瓶图标、同级 RetainedPanel、独立 route、完整 board／Item 列表、分组、血缘与归档    | `packages/app/src/screens/works/` 与 workspace screen；参考 [v1 容器](../../packages/app/src/screens/workspace/workspace-screen.tsx)                                                                   |
+| 组件展示与数据获取     | kind／label 基础 renderer、Sessions／touches 区分、完成控件、Config 表格、进度单位与指标图表         | Works screen 内消费共享 UI 原语；复用 viewer proxy 和 `fetchViewerHttp`，不复制传输栈                                                                                                                  |
+| Skill 与打包           | `paseo-works` 英文入口、中文译文、调用示例、可用性说明、真实工具引用                                 | `skills/paseo-works/`；沿用 server 构建时复制 skills 的现有流程                                                                                                                                        |
 
 客户端和 CLI 通过 `server_info.features.works` 判断 host 是否支持 v2。共用 viewer 服务，无需独立 viewer 服务启动器或 worktree 管理模块。
 

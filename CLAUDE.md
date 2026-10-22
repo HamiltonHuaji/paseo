@@ -36,6 +36,7 @@ The pinned `docs/refactors/experiment-viewer-transport-spec.md` must not be chan
 | [Works contracts](docs/contracts/works.md)                           | Deferred Works and v1 continuity requirements                                                                                  |
 | [Viewer contracts](docs/contracts/viewers.md)                        | Deferred result viewer requirements                                                                                            |
 | [Skill contracts](docs/contracts/skills.md)                          | Deferred skill ownership and repository sync requirements                                                                      |
+| [0.13 preview review](docs/contracts/reviews/0.13.0-beta.1.md)       | Session, client and distribution migration evidence and remaining gaps                                                         |
 | [Baseline review format](docs/contracts/baseline-review.md)          | Per-version evidence and known gaps                                                                                            |
 | [docs/product.md](docs/product.md)                                   | What Paseo is, who it's for, where it's going                                                                                  |
 | [docs/architecture.md](docs/architecture.md)                         | System design, package layering, WebSocket protocol, agent lifecycle, data flow                                                |

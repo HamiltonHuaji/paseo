@@ -1,10 +1,10 @@
 # Skill 仓库同步需求
 
-状态：已有 fork 实现，设置按客户端访问能力与 daemon 订阅分层。
+状态：0.9 fork 已有实现；[当前阶段迁移](contracts/README.md#当前迁移范围)尚未迁入本模块。设置按客户端访问能力与 daemon 订阅分层。
 Baseline bump 的验收入口见 [Skills 契约](contracts/skills.md)。
 本功能扩展其中的 SKILL-01，不改变现有 bundled orchestration skills 的来源和选择机制。
 
-面向 agent 的 [bundled skill](../skills/paseo-skill-repositories/SKILL.md) 与 [工具接口](../skills/paseo-skill-repositories/references/interface.md) 保存在仓库根目录的 `skills/`，沿用现有 bundled skill 发布机制。旧 daemon 未提供工具时，skill 要明确报告不能通过 Paseo 远端取得或发布。
+面向 agent 的 [bundled skill](https://github.com/HamiltonHuaji/paseo/blob/1bd70fb5056d623e8da784dce82d8ee72fa5f486/skills/paseo-skill-repositories/SKILL.md) 与 [工具接口](https://github.com/HamiltonHuaji/paseo/blob/1bd70fb5056d623e8da784dce82d8ee72fa5f486/skills/paseo-skill-repositories/references/interface.md) 保存在仓库根目录的 `skills/`，沿用现有 bundled skill 发布机制。旧 daemon 未提供工具时，skill 要明确报告不能通过 Paseo 远端取得或发布。
 
 ## 目标与边界
 
