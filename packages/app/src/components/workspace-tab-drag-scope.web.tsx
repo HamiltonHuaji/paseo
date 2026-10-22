@@ -1,3 +1,4 @@
+import type { DragOrientation } from "./drag-orientation";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { View, Text } from "react-native";
 import { useTranslation } from "react-i18next";
@@ -37,6 +38,7 @@ import { panelTargetSupportsHost } from "@/plugins/workspace-panels/locations";
 import { acceptsWorkspaceTabDrop } from "./workspace-tab-drag-policy";
 import { WorkspaceTabDragContext } from "./workspace-tab-drag-context";
 interface WorkspaceTabDragData {
+  orientation?: DragOrientation;
   kind: "workspace-tab";
   paneId: string;
   tabId: string;
@@ -102,12 +104,17 @@ function computeTabOverDropPreview(input: {
     overPaneId: overData.paneId,
     overTabId: overData.tabId,
     targetTabs,
+    orientation: overData.orientation,
     activeRect: {
       left: rects.translatedRect.left,
+      top: rects.translatedRect.top,
+      height: rects.translatedRect.height,
       width: rects.translatedRect.width,
     },
     overRect: {
       left: rects.overRect.left,
+      top: rects.overRect.top,
+      height: rects.overRect.height,
       width: rects.overRect.width,
     },
   });

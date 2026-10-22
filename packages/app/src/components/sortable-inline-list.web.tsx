@@ -13,17 +13,27 @@ import {
   sortableKeyboardCoordinates,
   horizontalListSortingStrategy,
   useSortable,
+  verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { DraggableRenderItemInfo } from "./draggable-list.types";
 import { useDragReorderState } from "./drag-reorder";
+import type { DragOrientation } from "./drag-orientation";
 
 const restrictToHorizontalAxis: Modifier = ({ transform }) => ({
   ...transform,
   y: 0,
 });
 
-const DND_MODIFIERS: Modifier[] = [restrictToHorizontalAxis];
+const restrictToVerticalAxis: Modifier = ({ transform }) => ({
+  ...transform,
+  x: 0,
+});
+
+const DND_MODIFIERS: Record<DragOrientation, Modifier[]> = {
+  horizontal: [restrictToHorizontalAxis],
+  vertical: [restrictToVerticalAxis],
+};
 
 function computeDragOpacity(hasExternalContext: boolean, isDragging: boolean): number {
   if (!isDragging) return 1;
@@ -123,6 +133,8 @@ export function SortableInlineList<T>({
   externalDndContext = false,
   activeId: externalActiveId = null,
   getItemData,
+  orientation = "horizontal",
+  isItemDisabled,
 }: {
   data: T[];
   keyExtractor: (item: T, index: number) => string;
@@ -135,6 +147,8 @@ export function SortableInlineList<T>({
   externalDndContext?: boolean;
   activeId?: string | null;
   getItemData?: (item: T, index: number) => Record<string, unknown>;
+  orientation?: DragOrientation;
+  isItemDisabled?: (item: T, index: number) => boolean;
 }): ReactElement {
   const {
     activeId: internalActiveId,
@@ -167,7 +181,12 @@ export function SortableInlineList<T>({
   );
 
   const renderedItems = (
-    <SortableContext items={ids} strategy={horizontalListSortingStrategy}>
+    <SortableContext
+      items={ids}
+      strategy={
+        orientation === "vertical" ? verticalListSortingStrategy : horizontalListSortingStrategy
+      }
+    >
       {items.map((item, index) => {
         const id = keyExtractor(item, index);
         return (
@@ -179,7 +198,7 @@ export function SortableInlineList<T>({
             renderItem={renderItem}
             activeId={activeId}
             useDragHandle={useDragHandle}
-            disabled={disabled}
+            disabled={disabled || Boolean(isItemDisabled?.(item, index))}
             itemData={getItemData?.(item, index)}
             externalDndContext={externalDndContext}
           />
@@ -196,7 +215,7 @@ export function SortableInlineList<T>({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
-      modifiers={DND_MODIFIERS}
+      modifiers={DND_MODIFIERS[orientation]}
       onDragStart={handlers.onDragStart}
       onDragCancel={handlers.onDragCancel}
       onDragEnd={handlers.onDragEnd}

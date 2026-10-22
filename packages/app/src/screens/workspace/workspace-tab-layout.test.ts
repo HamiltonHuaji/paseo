@@ -1,3 +1,5 @@
+import { resolveWorkspaceTabPlacement } from "./workspace-tab-placement";
+import { scrollWorkspaceTabsWithWheel, getWorkspaceTabRevealOffset } from "./workspace-tab-scroll";
 import {
   WorkspaceHeaderExplorerToggle,
   WorkspaceExplorerSidebarToggle,
@@ -254,5 +256,57 @@ describe("resolveWorkspaceTabChipBackdrop", () => {
     expect(
       resolveWorkspaceTabChipBackdrop({ rail: "surface", isActiveFocused: false, isFilled: false }),
     ).toBe("surface0");
+  });
+});
+
+describe("workspace tab placement and scrolling", () => {
+  it.each([
+    { isCompact: false, isWeb: true, paneWidth: 640, preference: "left", expected: "left" },
+    { isCompact: false, isWeb: true, paneWidth: 639, preference: "left", expected: "top" },
+    { isCompact: false, isWeb: true, paneWidth: 1000, preference: "top", expected: "top" },
+    { isCompact: false, isWeb: false, paneWidth: 1000, preference: "left", expected: "top" },
+    { isCompact: true, isWeb: true, paneWidth: 1000, preference: "left", expected: "dropdown" },
+  ] as const)(
+    "resolves the local pane at $paneWidth without changing $preference",
+    ({ expected, ...input }) => {
+      expect(resolveWorkspaceTabPlacement(input)).toBe(expected);
+    },
+  );
+  it("converts normal wheel scrolling and preserves the page at a tab boundary", () => {
+    const target = { clientWidth: 200, scrollWidth: 500, scrollLeft: 0 };
+    let prevented = false;
+    const event = {
+      deltaX: 0,
+      deltaY: 1,
+      deltaMode: 1,
+      ctrlKey: false,
+      defaultPrevented: false,
+      preventDefault: () => {
+        prevented = true;
+      },
+    };
+    expect(scrollWorkspaceTabsWithWheel(target, event)).toBe(true);
+    expect(target.scrollLeft).toBe(16);
+    expect(prevented).toBe(true);
+    target.scrollLeft = 300;
+    expect(scrollWorkspaceTabsWithWheel(target, event)).toBe(false);
+    expect(
+      getWorkspaceTabRevealOffset({
+        currentOffset: 100,
+        viewportWidth: 200,
+        contentWidth: 500,
+        itemStart: 180,
+        itemEnd: 220,
+      }),
+    ).toBe(100);
+    expect(
+      getWorkspaceTabRevealOffset({
+        currentOffset: 100,
+        viewportWidth: 200,
+        contentWidth: 500,
+        itemStart: 310,
+        itemEnd: 340,
+      }),
+    ).toBe(140);
   });
 });

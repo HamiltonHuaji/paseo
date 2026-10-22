@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildWorkspaceDesktopTabActions,
+  moveWorkspaceTabToEdge,
   buildWorkspaceTabMenuEntries,
 } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
@@ -15,6 +16,53 @@ function createAgentTab(): WorkspaceTabDescriptor {
 }
 
 describe("buildWorkspaceTabMenuEntries", () => {
+  it.each(["desktop-rail", "mobile"] as const)(
+    "uses vertical ordering and disables edge actions on %s",
+    (surface) => {
+      const onMoveTabToEnd = vi.fn();
+      const entries = buildWorkspaceTabMenuEntries({
+        surface,
+        tab: createAgentTab(),
+        index: 0,
+        tabCount: 3,
+        menuTestIDBase: "test",
+        onCopyResumeCommand: vi.fn(),
+        onCopyAgentId: vi.fn(),
+        onCopyTerminalId: vi.fn(),
+        onCopyFilePath: vi.fn(),
+        onReloadAgent: vi.fn(),
+        onRenameTab: vi.fn(),
+        onCloseTab: vi.fn(),
+        onMoveTabToStart: vi.fn(),
+        onMoveTabToEnd,
+        onCloseTabsBefore: vi.fn(),
+        onCloseTabsAfter: vi.fn(),
+        onCloseOtherTabs: vi.fn(),
+      }).filter((entry) => entry.kind === "item");
+      expect(entries.find((entry) => entry.key === "move-to-start")?.disabled).toBe(true);
+      const end = entries.find((entry) => entry.key === "move-to-end");
+      expect(end?.disabled).toBe(false);
+      end?.onSelect();
+      expect(onMoveTabToEnd).toHaveBeenCalledWith("agent_123");
+      expect(entries.find((entry) => entry.testID === "test-close-above")?.label).toBe(
+        "Close tabs above",
+      );
+      expect(entries.find((entry) => entry.testID === "test-close-below")?.label).toBe(
+        "Close tabs below",
+      );
+    },
+  );
+
+  it("moves the real tab identity through the complete order", () => {
+    const tabs = ["a", "b", "c"].map((id) =>
+      Object.assign(createAgentTab(), { tabId: id, key: id }),
+    );
+    const moved = moveWorkspaceTabToEdge(tabs, "b", "end");
+    expect(moved.map((tab) => tab.tabId)).toEqual(["a", "c", "b"]);
+    expect(moved[2]).toBe(tabs[1]);
+    expect(moveWorkspaceTabToEdge(tabs, "a", "start")).toBe(tabs);
+  });
+
   it("uses desktop tab ordering labels for desktop menus", () => {
     const onCopyResumeCommand = vi.fn();
     const onCopyAgentId = vi.fn();

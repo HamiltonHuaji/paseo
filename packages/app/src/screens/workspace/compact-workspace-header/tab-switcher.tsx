@@ -15,6 +15,7 @@ import { useFilePanelOpenWithMenu } from "@/file-panels";
 import { MobileTabTrailingAccessory } from "@/screens/workspace/workspace-tab-trailing-accessory";
 import {
   buildWorkspaceTabMenuEntries,
+  moveWorkspaceTabToEdge,
   type WorkspaceTabMenuLabels,
 } from "@/screens/workspace/workspace-tab-menu";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
@@ -125,6 +126,7 @@ function getFallbackTabOptionDescription(
 interface MobileWorkspaceTabSwitcherProps {
   tabs: WorkspaceTabDescriptor[];
   activeTabKey: string;
+  onReorderTabs: (tabs: WorkspaceTabDescriptor[]) => void;
   normalizedServerId: string;
   normalizedWorkspaceId: string;
   onSelectSwitcherTab: (key: string) => void;
@@ -158,6 +160,8 @@ function MobileWorkspaceTabOption({
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
+  onMoveTabToStart,
+  onMoveTabToEnd,
   onCloseTab,
   onCloseTabsAbove,
   onCloseTabsBelow,
@@ -177,6 +181,8 @@ function MobileWorkspaceTabOption({
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onMoveTabToStart?: (tabId: string) => void;
+  onMoveTabToEnd?: (tabId: string) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsAbove: (tabId: string) => Promise<void> | void;
   onCloseTabsBelow: (tabId: string) => Promise<void> | void;
@@ -190,6 +196,8 @@ function MobileWorkspaceTabOption({
       copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
+      moveToStart: t("workspace.tabs.menu.moveToStart"),
+      moveToEnd: t("workspace.tabs.menu.moveToEnd"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
       closeBelow: t("workspace.tabs.menu.closeBelow"),
       closeLeft: t("workspace.tabs.menu.closeLeft"),
@@ -215,6 +223,8 @@ function MobileWorkspaceTabOption({
     onCopyFilePath,
     onReloadAgent,
     onRenameTab,
+    onMoveTabToStart,
+    onMoveTabToEnd,
     onCloseTab,
     onCloseTabsBefore: onCloseTabsAbove,
     onCloseTabsAfter: onCloseTabsBelow,
@@ -280,6 +290,7 @@ function MobileWorkspaceTabOption({
 export const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitcher({
   tabs,
   activeTabKey,
+  onReorderTabs,
   normalizedServerId,
   normalizedWorkspaceId,
   onSelectSwitcherTab,
@@ -298,6 +309,14 @@ export const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitch
   onCloseOtherTabs,
 }: MobileWorkspaceTabSwitcherProps) {
   const { t } = useTranslation();
+  const handleMoveTabToStart = useCallback(
+    (tabId: string) => onReorderTabs(moveWorkspaceTabToEdge(tabs, tabId, "start")),
+    [onReorderTabs, tabs],
+  );
+  const handleMoveTabToEnd = useCallback(
+    (tabId: string) => onReorderTabs(moveWorkspaceTabToEdge(tabs, tabId, "end")),
+    [onReorderTabs, tabs],
+  );
   const tabFallbackLabels = useMemo(
     () => ({
       newTab: t("workspace.tabs.actions.newTab"),
@@ -414,6 +433,8 @@ export const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitch
           onCopyFilePath={onCopyFilePath}
           onReloadAgent={onReloadAgent}
           onRenameTab={onRenameTab}
+          onMoveTabToStart={handleMoveTabToStart}
+          onMoveTabToEnd={handleMoveTabToEnd}
           onCloseTab={onCloseTab}
           onCloseTabsAbove={onCloseTabsAbove}
           onCloseTabsBelow={onCloseTabsBelow}
@@ -433,6 +454,8 @@ export const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitch
       onCopyFilePath,
       onReloadAgent,
       onRenameTab,
+      handleMoveTabToStart,
+      handleMoveTabToEnd,
       onCloseTab,
       onCloseTabsAbove,
       onCloseTabsBelow,

@@ -4,6 +4,8 @@ import { Text } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import {
   ArrowLeftToLine,
+  ArrowUpToLine,
+  ArrowDownToLine,
   ArrowRightToLine,
   Copy,
   CopyX,
@@ -26,6 +28,8 @@ import type { Theme } from "@/styles/theme";
 const ThemedEllipsis = withUnistyles(Ellipsis);
 const ThemedCopy = withUnistyles(Copy);
 const ThemedRotateCw = withUnistyles(RotateCw);
+const ThemedArrowUpToLine = withUnistyles(ArrowUpToLine);
+const ThemedArrowDownToLine = withUnistyles(ArrowDownToLine);
 const ThemedArrowLeftToLine = withUnistyles(ArrowLeftToLine);
 const ThemedArrowRightToLine = withUnistyles(ArrowRightToLine);
 const ThemedCopyX = withUnistyles(CopyX);
@@ -56,6 +60,10 @@ function MobileTabDropdownMenuItem({
         return <ThemedArrowLeftToLine size={16} uniProps={mutedColorMapping} />;
       case "arrow-right-to-line":
         return <ThemedArrowRightToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-up-to-line":
+        return <ThemedArrowUpToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-down-to-line":
+        return <ThemedArrowDownToLine size={16} uniProps={mutedColorMapping} />;
       case "copy-x":
         return <ThemedCopyX size={16} uniProps={mutedColorMapping} />;
       case "pencil":

@@ -1,10 +1,11 @@
+import type { DragOrientation } from "@/components/drag-orientation";
 import { openAgentHeartbeats } from "@/schedules/heartbeat-editor";
 import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import { i18n } from "@/i18n/i18next";
 import { encodeFilePathForPathSegment, encodeWorkspaceIdForPathSegment } from "@/utils/host-routes";
 import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
 
-export type WorkspaceTabMenuSurface = "desktop" | "mobile";
+export type WorkspaceTabMenuSurface = "desktop" | "desktop-rail" | "mobile";
 
 export interface WorkspaceTabMenuLabels {
   copyResumeCommand: string;
@@ -12,6 +13,8 @@ export interface WorkspaceTabMenuLabels {
   copyTerminalId: string;
   copyFilePath: string;
   rename: string;
+  moveToStart: string;
+  moveToEnd: string;
   closeAbove: string;
   closeBelow: string;
   closeLeft: string;
@@ -28,6 +31,8 @@ export const DEFAULT_WORKSPACE_TAB_MENU_LABELS: WorkspaceTabMenuLabels = {
   copyTerminalId: i18n.t("workspace.tabs.menu.copyTerminalId"),
   copyFilePath: i18n.t("workspace.tabs.menu.copyFilePath"),
   rename: i18n.t("workspace.tabs.menu.rename"),
+  moveToStart: i18n.t("workspace.tabs.menu.moveToStart"),
+  moveToEnd: i18n.t("workspace.tabs.menu.moveToEnd"),
   closeAbove: i18n.t("workspace.tabs.menu.closeAbove"),
   closeBelow: i18n.t("workspace.tabs.menu.closeBelow"),
   closeLeft: i18n.t("workspace.tabs.menu.closeLeft"),
@@ -48,6 +53,8 @@ export type WorkspaceTabMenuEntry =
         | "rotate-cw"
         | "arrow-left-to-line"
         | "arrow-right-to-line"
+        | "arrow-up-to-line"
+        | "arrow-down-to-line"
         | "copy-x"
         | "pencil"
         | "x";
@@ -81,6 +88,8 @@ interface BuildWorkspaceTabMenuEntriesInput {
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onMoveTabToStart?: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd?: (tabId: string) => Promise<void> | void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsBefore: (tabId: string) => Promise<void> | void;
   onCloseTabsAfter: (tabId: string) => Promise<void> | void;
@@ -89,6 +98,7 @@ interface BuildWorkspaceTabMenuEntriesInput {
 }
 
 interface BuildWorkspaceDesktopTabActionsInput {
+  orientation?: DragOrientation;
   serverId?: string;
   tab: WorkspaceTabDescriptor;
   index: number;
@@ -99,6 +109,8 @@ interface BuildWorkspaceDesktopTabActionsInput {
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onMoveTabToStart?: (tabId: string) => Promise<void> | void;
+  onMoveTabToEnd?: (tabId: string) => Promise<void> | void;
   onCloseTab: (tabId: string) => Promise<void> | void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
@@ -112,26 +124,50 @@ export interface WorkspaceDesktopTabActions {
   closeButtonTestId: string;
 }
 
+export function moveWorkspaceTabToEdge(
+  tabs: WorkspaceTabDescriptor[],
+  tabId: string,
+  edge: "start" | "end",
+): WorkspaceTabDescriptor[] {
+  const currentIndex = tabs.findIndex((tab) => tab.tabId === tabId);
+  const destinationIndex = edge === "start" ? 0 : tabs.length - 1;
+  if (currentIndex < 0 || currentIndex === destinationIndex) {
+    return tabs;
+  }
+
+  const nextTabs = [...tabs];
+  const [tab] = nextTabs.splice(currentIndex, 1);
+  if (!tab) {
+    return tabs;
+  }
+  if (edge === "start") {
+    nextTabs.unshift(tab);
+  } else {
+    nextTabs.push(tab);
+  }
+  return nextTabs;
+}
+
 function buildCloseBeforeLabel(
   surface: WorkspaceTabMenuSurface,
   labels: WorkspaceTabMenuLabels,
 ): string {
-  return surface === "mobile" ? labels.closeAbove : labels.closeLeft;
+  return surface !== "desktop" ? labels.closeAbove : labels.closeLeft;
 }
 
 function buildCloseAfterLabel(
   surface: WorkspaceTabMenuSurface,
   labels: WorkspaceTabMenuLabels,
 ): string {
-  return surface === "mobile" ? labels.closeBelow : labels.closeRight;
+  return surface !== "desktop" ? labels.closeBelow : labels.closeRight;
 }
 
 function buildCloseBeforeTestIDSuffix(surface: WorkspaceTabMenuSurface): string {
-  return surface === "mobile" ? "close-above" : "close-left";
+  return surface !== "desktop" ? "close-above" : "close-left";
 }
 
 function buildCloseAfterTestIDSuffix(surface: WorkspaceTabMenuSurface): string {
-  return surface === "mobile" ? "close-below" : "close-right";
+  return surface !== "desktop" ? "close-below" : "close-right";
 }
 
 function getCloseButtonTestId(tab: WorkspaceTabDescriptor): string {
@@ -186,6 +222,8 @@ export function buildWorkspaceTabMenuEntries(
     onCopyFilePath,
     onReloadAgent,
     onRenameTab,
+    onMoveTabToStart,
+    onMoveTabToEnd,
     onCloseTab,
     onCloseTabsBefore,
     onCloseTabsAfter,
@@ -278,11 +316,36 @@ export function buildWorkspaceTabMenuEntries(
     });
   }
 
+  if (onMoveTabToStart && onMoveTabToEnd) {
+    entries.push({
+      kind: "item",
+      key: "move-to-start",
+      label: labels.moveToStart,
+      icon: "arrow-up-to-line",
+      disabled: isFirstTab,
+      testID: `${menuTestIDBase}-move-to-start`,
+      onSelect: () => {
+        void onMoveTabToStart(tab.tabId);
+      },
+    });
+    entries.push({
+      kind: "item",
+      key: "move-to-end",
+      label: labels.moveToEnd,
+      icon: "arrow-down-to-line",
+      disabled: isLastTab,
+      testID: `${menuTestIDBase}-move-to-end`,
+      onSelect: () => {
+        void onMoveTabToEnd(tab.tabId);
+      },
+    });
+    entries.push({ kind: "separator", key: "ordering-separator" });
+  }
   entries.push({
     kind: "item",
     key: "close-before",
     label: buildCloseBeforeLabel(surface, labels),
-    icon: "arrow-left-to-line",
+    icon: surface === "desktop-rail" ? "arrow-up-to-line" : "arrow-left-to-line",
     disabled: isFirstTab,
     testID: `${menuTestIDBase}-${buildCloseBeforeTestIDSuffix(surface)}`,
     onSelect: () => {
@@ -293,7 +356,7 @@ export function buildWorkspaceTabMenuEntries(
     kind: "item",
     key: "close-after",
     label: buildCloseAfterLabel(surface, labels),
-    icon: "arrow-right-to-line",
+    icon: surface === "desktop-rail" ? "arrow-down-to-line" : "arrow-right-to-line",
     disabled: isLastTab,
     testID: `${menuTestIDBase}-${buildCloseAfterTestIDSuffix(surface)}`,
     onSelect: () => {
@@ -346,7 +409,7 @@ export function buildWorkspaceDesktopTabActions(
   return {
     contextMenuTestId,
     menuEntries: buildWorkspaceTabMenuEntries({
-      surface: "desktop",
+      surface: input.orientation === "vertical" ? "desktop-rail" : "desktop",
       serverId: input.serverId,
       tab: input.tab,
       index: input.index,
@@ -358,6 +421,8 @@ export function buildWorkspaceDesktopTabActions(
       onCopyFilePath: input.onCopyFilePath,
       onReloadAgent: input.onReloadAgent,
       onRenameTab: input.onRenameTab,
+      onMoveTabToStart: input.onMoveTabToStart,
+      onMoveTabToEnd: input.onMoveTabToEnd,
       onCloseTab: input.onCloseTab,
       onCloseTabsBefore: input.onCloseTabsToLeft,
       onCloseTabsAfter: input.onCloseTabsToRight,

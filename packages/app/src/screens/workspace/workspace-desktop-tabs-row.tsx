@@ -1,6 +1,15 @@
-import { useTabDisplay } from "@/workspace-tabs/display";
-import type { WorkspaceTabTreeRow } from "./workspace-tab-tree";
-import { WorkspaceTabTreeList } from "./workspace-tab-tree-list";
+import type { DragOrientation } from "@/components/drag-orientation";
+import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
+import { TreeChevron, treeRowPaddingLeft } from "@/components/tree-primitives";
+import { WORKSPACE_TAB_RAIL_WIDTH } from "./workspace-tab-placement";
+import { getWorkspaceTabRevealOffset } from "./workspace-tab-scroll";
+import { useWorkspaceTabHorizontalScroll } from "@/hooks/use-workspace-tab-horizontal-scroll";
+import {
+  buildWorkspaceTabTree,
+  projectWorkspaceTabTree,
+  getWorkspaceTabTreeAncestorGroupIds,
+  type WorkspaceTabTreeRow,
+} from "./workspace-tab-tree";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, {
   Fragment,
@@ -13,12 +22,24 @@ import React, {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { Pressable, Text, View, type LayoutChangeEvent, type ScrollView } from "react-native";
+import {
+  Pressable,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  ScrollView,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
+  type PressableStateCallbackType,
+} from "react-native";
 import { useFilePanelOpenWithMenu } from "@/file-panels";
 import {
   CopyX,
   ArrowLeftToLine,
   ArrowRightToLine,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  Folder,
   Copy,
   Pencil,
   RotateCw,
@@ -63,6 +84,7 @@ import {
 import { buildDeterministicWorkspaceTabId } from "@/workspace-tabs/identity";
 import {
   buildWorkspaceDesktopTabActions,
+  moveWorkspaceTabToEdge,
   type WorkspaceDesktopTabActions,
   type WorkspaceTabMenuEntry,
   type WorkspaceTabMenuLabels,
@@ -83,7 +105,10 @@ import { useCompactTimeAgo } from "@/hooks/use-time-ago";
 import { formatCompactTimeAgoAsProse } from "@/utils/time";
 import { buildWorkspaceKeyboardHandlerId } from "@/keyboard/handler-id";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
-import { WorkspaceNewTabMenuContent } from "@/screens/workspace/workspace-new-tab-menu";
+import {
+  WorkspaceNewTabMenuContent,
+  WorkspaceVerticalTabLaunchActions,
+} from "@/screens/workspace/workspace-new-tab-menu";
 import {
   paneContentToolbarTrailingPadding,
   ToolbarButton,
@@ -96,6 +121,9 @@ import {
 } from "@/components/ui/horizontal-scroll-boundary";
 import { useSessionStore } from "@/stores/session-store";
 
+const ThemedFolder = withUnistyles(Folder);
+const ThemedArrowUpToLine = withUnistyles(ArrowUpToLine);
+const ThemedArrowDownToLine = withUnistyles(ArrowDownToLine);
 const DROPDOWN_WIDTH = 220;
 const DEFAULT_INLINE_ADD_BUTTON_RESERVED_WIDTH = 36;
 const PANE_SPLIT_ACTIONS_HORIZONTAL_PADDING = 2;
@@ -267,39 +295,18 @@ function WorkspaceNewTabButton({
   return placement === "inline" ? <View style={styles.inlineAddButton}>{menu}</View> : menu;
 }
 
-function WorkspacePaneToolbarActions({
-  panePanelKinds,
-  host,
-  launchPurpose,
-  showNewTabButton,
-  showSplitActions,
-  showMaximizeAction,
-  paneMaximized,
-  serverId,
-  paneId,
-  newTabShortcutKeys,
+function WorkspaceSplitPaneToolbarActions({
+  expanded,
   onSplitRight,
   onSplitDown,
-  onTogglePaneMaximized,
 }: {
-  panePanelKinds: PanePanelKinds;
-  host: PaneHost;
-  launchPurpose: WorkspaceTabLaunchPurpose;
-  showNewTabButton: boolean;
-  showSplitActions: boolean;
-  showMaximizeAction: boolean;
-  paneMaximized: boolean;
-  serverId: string;
-  paneId?: string;
-  newTabShortcutKeys: ShortcutKey[][] | null;
-  onSplitRight?: () => void;
-  onSplitDown?: () => void;
-  onTogglePaneMaximized?: () => void;
+  expanded: boolean;
+  onSplitRight: () => void;
+  onSplitDown: () => void;
 }) {
   const { t } = useTranslation();
   const splitRightKeys = useShortcutKeys("workspace-pane-split-right");
   const splitDownKeys = useShortcutKeys("workspace-pane-split-down");
-  const splitActionsVisible = showSplitActions && Boolean(onSplitRight && onSplitDown);
   const splitRightLeading = useMemo(
     () => <ThemedColumns2 size={14} uniProps={extraMutedColorMapping} />,
     [],
@@ -316,6 +323,102 @@ function WorkspacePaneToolbarActions({
     () => (splitDownKeys ? <Shortcut chord={splitDownKeys} /> : null),
     [splitDownKeys],
   );
+
+  if (expanded) {
+    return (
+      <>
+        <ToolbarButton
+          label={t("workspace.tabs.actions.splitRight")}
+          shortcut={splitRightKeys}
+          tooltipSide="top"
+          testID="workspace-split-pane-right"
+          onPress={onSplitRight}
+        >
+          {splitRightLeading}
+        </ToolbarButton>
+        <ToolbarButton
+          label={t("workspace.tabs.actions.splitDown")}
+          shortcut={splitDownKeys}
+          tooltipSide="top"
+          testID="workspace-split-pane-down"
+          onPress={onSplitDown}
+        >
+          {splitDownLeading}
+        </ToolbarButton>
+      </>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <ToolbarButton
+        kind="menu"
+        label={t("workspace.git.actions.moreActions")}
+        testID="workspace-split-pane-menu"
+      >
+        <ThemedEllipsis size={14} uniProps={extraMutedColorMapping} />
+      </ToolbarButton>
+      <DropdownMenuContent
+        side="bottom"
+        align="end"
+        offset={4}
+        width={220}
+        testID="workspace-split-pane-menu-content"
+      >
+        <DropdownMenuItem
+          leading={splitRightLeading}
+          trailing={splitRightTrailing}
+          testID="workspace-split-pane-right"
+          onSelect={onSplitRight}
+        >
+          {t("workspace.tabs.actions.splitRight")}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          leading={splitDownLeading}
+          trailing={splitDownTrailing}
+          testID="workspace-split-pane-down"
+          onSelect={onSplitDown}
+        >
+          {t("workspace.tabs.actions.splitDown")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function WorkspacePaneToolbarActions({
+  panePanelKinds,
+  host,
+  launchPurpose,
+  showNewTabButton,
+  showSplitActions,
+  showMaximizeAction,
+  paneMaximized,
+  serverId,
+  paneId,
+  newTabShortcutKeys,
+  onSplitRight,
+  onSplitDown,
+  onTogglePaneMaximized,
+  expandSplitActions = false,
+}: {
+  panePanelKinds: PanePanelKinds;
+  host: PaneHost;
+  launchPurpose: WorkspaceTabLaunchPurpose;
+  showNewTabButton: boolean;
+  showSplitActions: boolean;
+  showMaximizeAction: boolean;
+  paneMaximized: boolean;
+  serverId: string;
+  paneId?: string;
+  newTabShortcutKeys: ShortcutKey[][] | null;
+  onSplitRight?: () => void;
+  onSplitDown?: () => void;
+  onTogglePaneMaximized?: () => void;
+  expandSplitActions?: boolean;
+}) {
+  const { t } = useTranslation();
+  const splitActionsVisible = showSplitActions && Boolean(onSplitRight && onSplitDown);
   const maximizeActionVisible = showMaximizeAction && Boolean(onTogglePaneMaximized);
   if (!showNewTabButton && !splitActionsVisible && !maximizeActionVisible) return null;
 
@@ -351,39 +454,11 @@ function WorkspacePaneToolbarActions({
         </ToolbarButton>
       ) : null}
       {splitActionsVisible && onSplitRight && onSplitDown ? (
-        <DropdownMenu>
-          <ToolbarButton
-            kind="menu"
-            label={t("workspace.git.actions.moreActions")}
-            testID="workspace-split-pane-menu"
-          >
-            <ThemedEllipsis size={14} uniProps={extraMutedColorMapping} />
-          </ToolbarButton>
-          <DropdownMenuContent
-            side="bottom"
-            align="end"
-            offset={4}
-            width={220}
-            testID="workspace-split-pane-menu-content"
-          >
-            <DropdownMenuItem
-              leading={splitRightLeading}
-              trailing={splitRightTrailing}
-              testID="workspace-split-pane-right"
-              onSelect={onSplitRight}
-            >
-              {t("workspace.tabs.actions.splitRight")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              leading={splitDownLeading}
-              trailing={splitDownTrailing}
-              testID="workspace-split-pane-down"
-              onSelect={onSplitDown}
-            >
-              {t("workspace.tabs.actions.splitDown")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <WorkspaceSplitPaneToolbarActions
+          expanded={expandSplitActions}
+          onSplitRight={onSplitRight}
+          onSplitDown={onSplitDown}
+        />
       ) : null}
     </ToolbarControls>
   );
@@ -431,6 +506,10 @@ function TabContextMenuItem({
         return <ThemedRotateCw size={16} uniProps={mutedColorMapping} />;
       case "arrow-left-to-line":
         return <ThemedArrowLeftToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-up-to-line":
+        return <ThemedArrowUpToLine size={16} uniProps={mutedColorMapping} />;
+      case "arrow-down-to-line":
+        return <ThemedArrowDownToLine size={16} uniProps={mutedColorMapping} />;
       case "arrow-right-to-line":
         return <ThemedArrowRightToLine size={16} uniProps={mutedColorMapping} />;
       case "copy-x":
@@ -668,6 +747,7 @@ function useMiddleClickClose(onClose: () => void) {
 
 function TabHandleContent({
   presentation,
+  displayLabel,
   isHighlighted,
   showLabel,
   backdrop,
@@ -676,6 +756,7 @@ function TabHandleContent({
   modifiedTestId,
 }: {
   presentation: WorkspaceTabPresentation;
+  displayLabel?: string;
   isHighlighted: boolean;
   showLabel: boolean;
   backdrop: SurfaceBackdrop;
@@ -699,7 +780,7 @@ function TabHandleContent({
       ) : null}
       {showLabel && presentation.titleState !== "loading" ? (
         <Text style={tabLabelStyle} selectable={false} numberOfLines={1} ellipsizeMode="tail">
-          {presentation.label}
+          {displayLabel ?? presentation.label}
         </Text>
       ) : null}
       {/* The dot is a laid-out sibling of the label, not an overlay, so a truncated label ends
@@ -729,6 +810,9 @@ function TabChip({
   isCloseHovered,
   isClosingTab,
   presentation,
+  displayLabel,
+  treeDepth,
+  orientation,
   tooltipLabel,
   accessibilityLabel,
   resolvedTab,
@@ -751,6 +835,9 @@ function TabChip({
   isCloseHovered: boolean;
   isClosingTab: boolean;
   presentation: WorkspaceTabPresentation;
+  displayLabel?: string;
+  treeDepth: number;
+  orientation: DragOrientation;
   tooltipLabel: string;
   accessibilityLabel: string;
   resolvedTab: WorkspaceDesktopTabActions;
@@ -796,6 +883,9 @@ function TabChip({
   const tabChipStyle = useCallback(
     () => [
       styles.tab,
+      orientation === "vertical" && styles.railTab,
+      orientation === "vertical" &&
+        inlineUnistylesStyle({ paddingLeft: treeRowPaddingLeft(treeDepth) }),
       isFilled && styles.tabFill(chipBackdrop),
       isWeb && isDragging && ({ cursor: "grabbing" } as object),
       {
@@ -804,7 +894,7 @@ function TabChip({
         maxWidth: resolvedTabWidth,
       },
     ],
-    [chipBackdrop, isDragging, isFilled, resolvedTabWidth],
+    [chipBackdrop, isDragging, isFilled, resolvedTabWidth, orientation, treeDepth],
   );
 
   const handleTabPointerEnter = useCallback(() => {
@@ -872,6 +962,7 @@ function TabChip({
             >
               <TabHandleContent
                 presentation={presentation}
+                displayLabel={displayLabel}
                 isHighlighted={isHighlighted}
                 showLabel={showLabel}
                 backdrop={chipBackdrop}
@@ -882,7 +973,7 @@ function TabChip({
             </ContextMenuTrigger>
           </TooltipTrigger>
           <TooltipContent
-            side="bottom"
+            side={orientation === "vertical" ? "right" : "bottom"}
             align="center"
             offset={8}
             maxWidth={720}
@@ -961,7 +1052,10 @@ function TabChip({
   );
 }
 
-export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
+function WorkspaceDesktopTabs({
+  orientation,
+  ...props
+}: WorkspaceDesktopTabsRowProps & { orientation: DragOrientation }) {
   const [presentations, setPresentations] = useState(
     () => new Map<string, WorkspaceTabPresentation>(),
   );
@@ -1006,7 +1100,11 @@ export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
 
   return (
     <>
-      <ResolvedWorkspaceDesktopTabsRow {...props} tabs={resolvedTabs} />
+      {orientation === "vertical" ? (
+        <ResolvedWorkspaceDesktopTabsRail {...props} tabs={resolvedTabs} />
+      ) : (
+        <ResolvedWorkspaceDesktopTabsRow {...props} tabs={resolvedTabs} />
+      )}
       {props.tabs.map(({ tab }) => (
         <WorkspaceDesktopTabPresentationSlot
           key={`${tab.key}:${tab.kind}`}
@@ -1018,6 +1116,14 @@ export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
       ))}
     </>
   );
+}
+
+export function WorkspaceDesktopTabsRow(props: WorkspaceDesktopTabsRowProps) {
+  return <WorkspaceDesktopTabs {...props} orientation="horizontal" />;
+}
+
+export function WorkspaceDesktopTabsRail(props: WorkspaceDesktopTabsRowProps) {
+  return <WorkspaceDesktopTabs {...props} orientation="vertical" />;
 }
 
 function ResolvedWorkspaceDesktopTabsRow({
@@ -1060,8 +1166,6 @@ function ResolvedWorkspaceDesktopTabsRow({
   const newTabKeys = useShortcutKeys("workspace-tab-new");
   const [tabsContainerWidth, setTabsContainerWidth] = useState<number>(0);
   const tabsScrollRef = useRef<ScrollView>(null);
-  const verticalTabs = useTabDisplay((state) => state.vertical);
-  const toggleVerticalTabs = useTabDisplay((state) => state.toggle);
   const [exitFocusModeWidth, setExitFocusModeWidth] = useState<number>(0);
   const tabScrollBoundary = useHorizontalScrollBoundary();
   const [labelMeasurements, setLabelMeasurements] = useState(
@@ -1121,6 +1225,8 @@ function ResolvedWorkspaceDesktopTabsRow({
       copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
       copyFilePath: t("workspace.tabs.menu.copyFilePath"),
       rename: t("workspace.tabs.menu.rename"),
+      moveToStart: t("workspace.tabs.menu.moveToStart"),
+      moveToEnd: t("workspace.tabs.menu.moveToEnd"),
       closeAbove: t("workspace.tabs.menu.closeAbove"),
       closeBelow: t("workspace.tabs.menu.closeBelow"),
       closeLeft: t("workspace.tabs.menu.closeLeft"),
@@ -1233,6 +1339,49 @@ function ResolvedWorkspaceDesktopTabsRow({
     }
   }, [layout.requiresHorizontalScrollFallback]);
 
+  const activeTabRevealTarget = useMemo(() => {
+    const activeIndex = displayedTabs.findIndex((item) => item.isActive);
+    const activeItem = layout.items[activeIndex];
+    const activeTab = displayedTabs[activeIndex];
+    if (activeIndex < 0 || !activeItem || !activeTab) {
+      return null;
+    }
+    let start = TAB_ROW_PADDING_HORIZONTAL;
+    for (let index = 0; index < activeIndex; index += 1) {
+      start += (layout.items[index]?.width ?? 0) + TAB_CHIP_GAP;
+    }
+    return {
+      key: activeTab.tab.tabId,
+      start,
+      end: start + activeItem.width + TAB_CHIP_GAP,
+    };
+  }, [displayedTabs, layout.items]);
+  useWorkspaceTabHorizontalScroll(
+    tabsScrollRef,
+    layout.requiresHorizontalScrollFallback,
+    activeTabRevealTarget,
+  );
+
+  const orderedTabs = useMemo(() => tabs.map((item) => item.tab), [tabs]);
+  const handleMoveTabToStart = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "start");
+      if (nextTabs !== orderedTabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, orderedTabs],
+  );
+  const handleMoveTabToEnd = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "end");
+      if (nextTabs !== orderedTabs) {
+        onReorderTabs(nextTabs);
+      }
+    },
+    [onReorderTabs, orderedTabs],
+  );
+
   const handleDragEnd = useCallback(
     (nextTabs: ResolvedWorkspaceDesktopTabRowItem[]) => {
       onReorderTabs(nextTabs.map((tab) => tab.tab));
@@ -1244,6 +1393,7 @@ function ResolvedWorkspaceDesktopTabsRow({
     if (!paneId) return undefined;
     return (tab: ResolvedWorkspaceDesktopTabRowItem) => ({
       kind: "workspace-tab" as const,
+      orientation: "horizontal" as const,
       paneId,
       tabId: tab.tab.tabId,
     });
@@ -1287,12 +1437,10 @@ function ResolvedWorkspaceDesktopTabsRow({
       isActive,
     }: DraggableRenderItemInfo<ResolvedWorkspaceDesktopTabRowItem>) => {
       const shouldShowCloseButton =
-        (verticalTabs || layout.closeButtonPolicy === "all") && item.presentation.showCloseButton;
+        layout.closeButtonPolicy === "all" && item.presentation.showCloseButton;
       const layoutItem = layout.items[index] ?? null;
-      const resolvedTabWidth = verticalTabs
-        ? Math.max(120, tabsContainerWidth - 110)
-        : (layoutItem?.width ?? 150);
-      const showLabel = verticalTabs || (layoutItem?.showLabel ?? true);
+      const resolvedTabWidth = layoutItem?.width ?? 150;
+      const showLabel = layoutItem?.showLabel ?? true;
       const showDropIndicatorBefore = activeDragTabId !== null && tabDropPreviewIndex === index;
       const showDropIndicatorAfter =
         activeDragTabId !== null &&
@@ -1315,6 +1463,8 @@ function ResolvedWorkspaceDesktopTabsRow({
           onCopyFilePath={onCopyFilePath}
           onReloadAgent={onReloadAgent}
           onRenameTab={onRenameTab}
+          onMoveTabToStart={handleMoveTabToStart}
+          onMoveTabToEnd={handleMoveTabToEnd}
           onCloseTabsToLeft={onCloseTabsToLeft}
           onCloseTabsToRight={onCloseTabsToRight}
           onCloseOtherTabs={onCloseOtherTabs}
@@ -1335,8 +1485,6 @@ function ResolvedWorkspaceDesktopTabsRow({
     [
       activeDragTabId,
       isFocused,
-      verticalTabs,
-      tabsContainerWidth,
       layout.closeButtonPolicy,
       layout.items,
       normalizedServerId,
@@ -1352,6 +1500,8 @@ function ResolvedWorkspaceDesktopTabsRow({
       onNavigateTab,
       onReloadAgent,
       onRenameTab,
+      handleMoveTabToStart,
+      handleMoveTabToEnd,
       rail,
       setHoveredCloseTabKey,
       tabMenuLabels,
@@ -1372,11 +1522,7 @@ function ResolvedWorkspaceDesktopTabsRow({
 
   const row = (
     <View
-      style={[
-        styles.tabsContainer,
-        onSidebar && styles.tabsContainerSidebar,
-        verticalContainerStyle(verticalTabs),
-      ]}
+      style={[styles.tabsContainer, onSidebar && styles.tabsContainerSidebar]}
       testID="workspace-tabs-row"
       onLayout={handleTabsContainerLayout}
     >
@@ -1400,60 +1546,45 @@ function ResolvedWorkspaceDesktopTabsRow({
         onPress={onExitFocusMode}
         onLayout={handleExitFocusModeLayout}
       />
-      <ToolbarButton
-        label={verticalTabs ? "Horizontal tabs" : "Vertical tabs"}
-        onPress={toggleVerticalTabs}
-        selected={verticalTabs}
-      >
-        <ThemedRows2 size={14} uniProps={extraMutedColorMapping} />
-      </ToolbarButton>
       <View style={styles.tabsScrollContainer}>
-        <WorkspaceTabTrack
-          vertical={verticalTabs}
-          displayedTabs={displayedTabs}
-          renderTab={renderTab}
-          onReorderTabs={onReorderTabs}
-          onCloseTab={onCloseTab}
+        <Animated.ScrollView
+          ref={tabsScrollRef}
+          horizontal
+          scrollEnabled={layout.requiresHorizontalScrollFallback}
+          testID="workspace-tabs-scroll"
+          style={tabsScrollStyle}
+          contentContainerStyle={styles.tabsContent}
+          showsHorizontalScrollIndicator={false}
+          onLayout={tabScrollBoundary.onLayout}
+          onContentSizeChange={tabScrollBoundary.onContentSizeChange}
+          onScroll={tabScrollBoundary.onScroll}
+          scrollEventThrottle={16}
         >
-          <Animated.ScrollView
-            ref={tabsScrollRef}
-            horizontal
-            scrollEnabled={layout.requiresHorizontalScrollFallback}
-            testID="workspace-tabs-scroll"
-            style={tabsScrollStyle}
-            contentContainerStyle={styles.tabsContent}
-            showsHorizontalScrollIndicator={false}
-            onLayout={tabScrollBoundary.onLayout}
-            onContentSizeChange={tabScrollBoundary.onContentSizeChange}
-            onScroll={tabScrollBoundary.onScroll}
-            scrollEventThrottle={16}
-          >
-            <SortableInlineList
-              data={displayedTabs}
-              keyExtractor={tabKeyExtractor}
-              useDragHandle
-              disabled={!externalDndContext && displayedTabs.length < 2}
-              onDragEnd={handleDragEnd}
-              externalDndContext={externalDndContext}
-              activeId={activeDragTabId}
-              getItemData={getTabDragData}
-              renderItem={renderTab}
+          <SortableInlineList
+            data={displayedTabs}
+            keyExtractor={tabKeyExtractor}
+            useDragHandle
+            disabled={!externalDndContext && displayedTabs.length < 2}
+            onDragEnd={handleDragEnd}
+            externalDndContext={externalDndContext}
+            activeId={activeDragTabId}
+            getItemData={getTabDragData}
+            renderItem={renderTab}
+          />
+          {!layout.requiresHorizontalScrollFallback ? (
+            <WorkspaceNewTabButton
+              panePanelKinds={panePanelKinds}
+              host={host}
+              launchPurpose={launchPurpose}
+              placement="inline"
+              serverId={normalizedServerId}
+              paneId={paneId}
+              shortcutKeys={newTabKeys}
             />
-            {!layout.requiresHorizontalScrollFallback ? (
-              <WorkspaceNewTabButton
-                panePanelKinds={panePanelKinds}
-                host={host}
-                launchPurpose={launchPurpose}
-                placement="inline"
-                serverId={normalizedServerId}
-                paneId={paneId}
-                shortcutKeys={newTabKeys}
-              />
-            ) : null}
-          </Animated.ScrollView>
-        </WorkspaceTabTrack>
+          ) : null}
+        </Animated.ScrollView>
         <HorizontalScrollBoundaryShades
-          visible={horizontalOverflow(verticalTabs, layout.requiresHorizontalScrollFallback)}
+          visible={layout.requiresHorizontalScrollFallback}
           backdrop={rail}
           testIDPrefix="workspace-tabs-scroll-shade"
           leftStyle={tabScrollBoundary.leftShadeStyle}
@@ -1464,7 +1595,7 @@ function ResolvedWorkspaceDesktopTabsRow({
         panePanelKinds={panePanelKinds}
         host={host}
         launchPurpose={launchPurpose}
-        showNewTabButton={needsNewTabButton(verticalTabs, layout.requiresHorizontalScrollFallback)}
+        showNewTabButton={layout.requiresHorizontalScrollFallback}
         showSplitActions={showPaneSplitActions}
         showMaximizeAction={showPaneMaximizeAction}
         paneMaximized={paneMaximized}
@@ -1480,6 +1611,461 @@ function ResolvedWorkspaceDesktopTabsRow({
 
   return <RenderProfile id="WorkspaceDesktopTabsRow">{row}</RenderProfile>;
 }
+function workspaceTabTreeRowKey(row: WorkspaceTabTreeRow): string {
+  return row.kind === "group" ? `workspace-tab-tree-group:${row.group.id}` : row.leaf.tabId;
+}
+
+function workspaceTabTreeGroupRowStyle({
+  hovered,
+  pressed,
+}: PressableStateCallbackType & { hovered?: boolean }) {
+  return [styles.railTreeGroupRow, (Boolean(hovered) || pressed) && styles.railTreeGroupRowHovered];
+}
+
+function WorkspaceTabTreeGroupRow({
+  row,
+  hasActiveDescendant,
+  onToggle,
+}: {
+  row: Extract<WorkspaceTabTreeRow, { kind: "group" }>;
+  hasActiveDescendant: boolean;
+  onToggle: (groupId: string) => void;
+}) {
+  const handlePress = useCallback(() => onToggle(row.group.id), [onToggle, row.group.id]);
+  const contentStyle = useMemo(
+    () => [
+      styles.railTreeGroupContent,
+      inlineUnistylesStyle({ paddingLeft: treeRowPaddingLeft(row.depth) }),
+    ],
+    [row.depth],
+  );
+  const accessibilityState = useMemo(() => ({ expanded: !row.collapsed }), [row.collapsed]);
+
+  return (
+    <View style={styles.railTreeGroupSlot}>
+      <Pressable
+        testID={`workspace-tab-group-${encodeURIComponent(row.group.path)}`}
+        onPress={handlePress}
+        style={workspaceTabTreeGroupRowStyle}
+        accessibilityRole="button"
+        accessibilityLabel={row.group.path}
+        accessibilityState={accessibilityState}
+      >
+        {row.collapsed && hasActiveDescendant ? (
+          <View style={styles.railTreeGroupActiveBar} />
+        ) : null}
+        <View style={contentStyle}>
+          <TreeChevron expanded={!row.collapsed} />
+          <ThemedFolder size={14} uniProps={mutedColorMapping} />
+          <Text style={styles.railTreeGroupLabel} numberOfLines={1} ellipsizeMode="tail">
+            {row.group.label}
+          </Text>
+          <Text style={styles.railTreeGroupCount}>{row.group.descendantTabIds.length}</Text>
+        </View>
+      </Pressable>
+    </View>
+  );
+}
+
+function ResolvedWorkspaceDesktopTabsRail({
+  paneId,
+  isFocused = false,
+  ownsKeyboardShortcuts = isFocused,
+  tabs,
+  normalizedServerId,
+  normalizedWorkspaceId,
+  setHoveredCloseTabKey,
+  onNavigateTab,
+  onCloseTab,
+  onCopyResumeCommand,
+  onCopyAgentId,
+  onCopyTerminalId,
+  onCopyFilePath,
+  onReloadAgent,
+  onRenameTab,
+  onCloseTabsToLeft,
+  onCloseTabsToRight,
+  onCloseOtherTabs,
+  onCreateNewTab,
+  onReorderTabs,
+  externalDndContext = false,
+  activeDragTabId = null,
+  tabDropPreviewIndex = null,
+  showPaneSplitActions = false,
+  showPaneMaximizeAction = false,
+  paneMaximized = false,
+  onTogglePaneMaximized,
+  onSplitRight,
+  onSplitDown,
+  focusModeEnabled,
+  onExitFocusMode,
+}: ResolvedWorkspaceDesktopTabsRowProps) {
+  const { t } = useTranslation();
+  const newTabKeys = useShortcutKeys("workspace-tab-new");
+  const panePanelKinds = useMemo(() => tabs.map(({ tab }) => tab.target.kind), [tabs]);
+  const railScrollRef = useRef<ScrollView>(null);
+  const railScrollOffsetRef = useRef(0);
+  const [railViewportHeight, setRailViewportHeight] = useState(0);
+  const [railContentHeight, setRailContentHeight] = useState(0);
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<Set<string>>(() => new Set());
+  const tabItemsById = useMemo(() => new Map(tabs.map((item) => [item.tab.tabId, item])), [tabs]);
+  const treeModel = useMemo(
+    () =>
+      buildWorkspaceTabTree(
+        tabs.map((item) => ({
+          tabId: item.tab.tabId,
+          label: item.presentation.label,
+          pathLabel:
+            item.presentation.titleState === "ready" &&
+            (item.presentation.kind === "agent" || item.presentation.kind === "terminal")
+              ? item.presentation.label
+              : null,
+        })),
+      ),
+    [tabs],
+  );
+  const treeRows = useMemo(
+    () => projectWorkspaceTabTree(treeModel, collapsedGroupIds),
+    [collapsedGroupIds, treeModel],
+  );
+  const activeDragSortableId = useMemo(
+    () =>
+      activeDragTabId && treeModel.leavesByTabId.has(activeDragTabId) ? activeDragTabId : null,
+    [activeDragTabId, treeModel.leavesByTabId],
+  );
+  const activeTabId = useMemo(() => tabs.find((item) => item.isActive)?.tab.tabId ?? null, [tabs]);
+  const activeTabIndex = useMemo(() => {
+    if (!activeTabId) return -1;
+    return treeRows.findIndex(
+      (row) =>
+        (row.kind === "leaf" && row.leaf.tabId === activeTabId) ||
+        (row.kind === "group" && row.collapsed && row.group.descendantTabIds.includes(activeTabId)),
+    );
+  }, [activeTabId, treeRows]);
+  const activeTabStart =
+    activeTabIndex < 0 ? null : activeTabIndex * WORKSPACE_SECONDARY_HEADER_HEIGHT;
+  const activeTabEnd =
+    activeTabStart === null ? null : activeTabStart + WORKSPACE_SECONDARY_HEADER_HEIGHT;
+
+  const revealedTabIdRef = useRef<string | null>(null);
+  const handleRailViewportLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    setRailViewportHeight((current) => (current === nextHeight ? current : nextHeight));
+  }, []);
+  const handleRailContentSizeChange = useCallback((_width: number, height: number) => {
+    const nextHeight = Math.round(height);
+    setRailContentHeight((current) => (Math.abs(current - nextHeight) > 1 ? nextHeight : current));
+  }, []);
+  const handleRailScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    railScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+  }, []);
+
+  useEffect(() => {
+    const scrollView = railScrollRef.current;
+    if (
+      !scrollView ||
+      !activeTabId ||
+      revealedTabIdRef.current === activeTabId ||
+      treeRows[activeTabIndex]?.kind !== "leaf" ||
+      activeTabStart === null ||
+      activeTabEnd === null ||
+      railViewportHeight <= 0
+    ) {
+      return;
+    }
+    revealedTabIdRef.current = activeTabId;
+    const nextOffset = getWorkspaceTabRevealOffset({
+      currentOffset: railScrollOffsetRef.current,
+      viewportWidth: railViewportHeight,
+      contentWidth: railContentHeight,
+      itemStart: activeTabStart,
+      itemEnd: activeTabEnd,
+    });
+    if (Math.abs(nextOffset - railScrollOffsetRef.current) <= 1) return;
+    railScrollOffsetRef.current = nextOffset;
+    scrollView.scrollTo({ x: 0, y: nextOffset, animated: false });
+  }, [
+    activeTabEnd,
+    activeTabId,
+    activeTabStart,
+    railContentHeight,
+    railViewportHeight,
+    treeRows,
+    activeTabIndex,
+  ]);
+
+  useEffect(() => {
+    const liveGroupIds = new Set(treeModel.groupIds);
+    setCollapsedGroupIds((current) => {
+      const next = new Set([...current].filter((groupId) => liveGroupIds.has(groupId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [treeModel.groupIds]);
+
+  const previousActiveTabIdRef = useRef(activeTabId);
+  useEffect(() => {
+    const previousActiveTabId = previousActiveTabIdRef.current;
+    previousActiveTabIdRef.current = activeTabId;
+    if (!activeTabId || previousActiveTabId === activeTabId) return;
+    const ancestors = getWorkspaceTabTreeAncestorGroupIds(treeModel, activeTabId);
+    if (ancestors.length === 0) return;
+    setCollapsedGroupIds((current) => {
+      if (!ancestors.some((groupId) => current.has(groupId))) return current;
+      const next = new Set(current);
+      for (const groupId of ancestors) next.delete(groupId);
+      return next;
+    });
+  }, [activeTabId, treeModel]);
+
+  const handleToggleGroup = useCallback((groupId: string) => {
+    setCollapsedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
+
+  const tabMenuLabels = useMemo<WorkspaceTabMenuLabels>(
+    () => ({
+      copyResumeCommand: t("workspace.tabs.menu.copyResumeCommand"),
+      copyAgentId: t("workspace.tabs.menu.copyAgentId"),
+      copyTerminalId: t("workspace.tabs.menu.copyTerminalId"),
+      copyFilePath: t("workspace.tabs.menu.copyFilePath"),
+      rename: t("workspace.tabs.menu.rename"),
+      moveToStart: t("workspace.tabs.menu.moveToStart"),
+      moveToEnd: t("workspace.tabs.menu.moveToEnd"),
+      closeAbove: t("workspace.tabs.menu.closeAbove"),
+      closeBelow: t("workspace.tabs.menu.closeBelow"),
+      closeLeft: t("workspace.tabs.menu.closeLeft"),
+      closeRight: t("workspace.tabs.menu.closeRight"),
+      closeOthers: t("workspace.tabs.menu.closeOthers"),
+      reloadAgent: t("workspace.tabs.menu.reloadAgent"),
+      reloadAgentTooltip: t("workspace.tabs.menu.reloadAgentTooltip"),
+      close: t("workspace.tabs.menu.close"),
+    }),
+    [t],
+  );
+  const orderedTabs = useMemo(() => tabs.map((item) => item.tab), [tabs]);
+  const tabIndexesById = useMemo(
+    () => new Map(tabs.map((item, index) => [item.tab.tabId, index])),
+    [tabs],
+  );
+  const handleMoveTabToStart = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "start");
+      if (nextTabs !== orderedTabs) onReorderTabs(nextTabs);
+    },
+    [onReorderTabs, orderedTabs],
+  );
+  const handleMoveTabToEnd = useCallback(
+    (tabId: string) => {
+      const nextTabs = moveWorkspaceTabToEdge(orderedTabs, tabId, "end");
+      if (nextTabs !== orderedTabs) onReorderTabs(nextTabs);
+    },
+    [onReorderTabs, orderedTabs],
+  );
+  const handleDragEnd = useCallback(
+    (nextRows: WorkspaceTabTreeRow[]) => {
+      if (collapsedGroupIds.size > 0) return;
+      const nextTabs = nextRows.flatMap((row) => {
+        if (row.kind !== "leaf") return [];
+        const item = tabItemsById.get(row.leaf.tabId);
+        return item ? [item.tab] : [];
+      });
+      if (nextTabs.length === tabs.length) onReorderTabs(nextTabs);
+    },
+    [collapsedGroupIds.size, onReorderTabs, tabItemsById, tabs.length],
+  );
+  const getTabDragData = useMemo(() => {
+    if (!paneId) return undefined;
+    return (row: WorkspaceTabTreeRow) =>
+      row.kind === "leaf"
+        ? {
+            kind: "workspace-tab" as const,
+            orientation: "vertical" as const,
+            paneId,
+            tabId: row.leaf.tabId,
+          }
+        : { kind: "workspace-tab-tree-group-static" as const };
+  }, [paneId]);
+  const createNewTab = useCallback(() => onCreateNewTab({ paneId }), [onCreateNewTab, paneId]);
+  const handleNewTabKeyboardAction = useCallback(
+    (action: KeyboardActionDefinition): boolean => {
+      if (!ownsKeyboardShortcuts || action.id !== "workspace.tab.menu.open") return false;
+      createNewTab();
+      return true;
+    },
+    [createNewTab, ownsKeyboardShortcuts],
+  );
+  useKeyboardActionHandler({
+    handlerId: buildWorkspaceKeyboardHandlerId({
+      name: "workspace-new-tab",
+      serverId: normalizedServerId,
+      workspaceId: normalizedWorkspaceId,
+      paneId,
+    }),
+    actions: ["workspace.tab.menu.open"],
+    enabled: ownsKeyboardShortcuts,
+    priority: 200,
+    handle: handleNewTabKeyboardAction,
+  });
+
+  const renderTreeRow = useCallback(
+    ({ item: row, dragHandleProps, isActive }: DraggableRenderItemInfo<WorkspaceTabTreeRow>) => {
+      if (row.kind === "group") {
+        return (
+          <WorkspaceTabTreeGroupRow
+            row={row}
+            hasActiveDescendant={Boolean(
+              activeTabId && row.group.descendantTabIds.includes(activeTabId),
+            )}
+            onToggle={handleToggleGroup}
+          />
+        );
+      }
+
+      const item = tabItemsById.get(row.leaf.tabId);
+      if (!item) return <View />;
+      const index = tabIndexesById.get(row.leaf.tabId) ?? 0;
+      const showDropIndicatorBefore = activeDragTabId !== null && tabDropPreviewIndex === index;
+      const showDropIndicatorAfter =
+        activeDragTabId !== null &&
+        tabDropPreviewIndex === tabs.length &&
+        index === tabs.length - 1;
+      return (
+        <ResolvedDesktopTabChip
+          key={`${item.tab.key}:${item.tab.kind}`}
+          serverId={normalizedServerId}
+          workspaceId={normalizedWorkspaceId}
+          rail="surface"
+          item={item}
+          isFocused={isFocused}
+          isDragging={isActive}
+          index={index}
+          tabCount={tabs.length}
+          onCopyResumeCommand={onCopyResumeCommand}
+          onCopyAgentId={onCopyAgentId}
+          onCopyTerminalId={onCopyTerminalId}
+          onCopyFilePath={onCopyFilePath}
+          onReloadAgent={onReloadAgent}
+          onRenameTab={onRenameTab}
+          onMoveTabToStart={handleMoveTabToStart}
+          onMoveTabToEnd={handleMoveTabToEnd}
+          onCloseTabsToLeft={onCloseTabsToLeft}
+          onCloseTabsToRight={onCloseTabsToRight}
+          onCloseOtherTabs={onCloseOtherTabs}
+          resolvedTabWidth={WORKSPACE_TAB_RAIL_WIDTH - 8}
+          showLabel
+          showCloseButton
+          setHoveredCloseTabKey={setHoveredCloseTabKey}
+          onNavigateTab={onNavigateTab}
+          onCloseTab={onCloseTab}
+          labels={tabMenuLabels}
+          dragHandleProps={dragHandleProps}
+          showDropIndicatorBefore={showDropIndicatorBefore}
+          showDropIndicatorAfter={showDropIndicatorAfter}
+          orientation="vertical"
+          displayLabel={row.leaf.displaySuffix}
+          treeDepth={row.depth}
+        />
+      );
+    },
+    [
+      activeDragTabId,
+      handleMoveTabToEnd,
+      handleMoveTabToStart,
+      handleToggleGroup,
+      activeTabId,
+      isFocused,
+      normalizedServerId,
+      normalizedWorkspaceId,
+      onCloseOtherTabs,
+      onCloseTab,
+      onCloseTabsToLeft,
+      onCloseTabsToRight,
+      onCopyAgentId,
+      onCopyFilePath,
+      onCopyResumeCommand,
+      onCopyTerminalId,
+      onNavigateTab,
+      onReloadAgent,
+      onRenameTab,
+      setHoveredCloseTabKey,
+      tabDropPreviewIndex,
+      tabMenuLabels,
+      tabs.length,
+      tabIndexesById,
+      tabItemsById,
+    ],
+  );
+  const isTreeRowDisabled = useCallback(
+    (row: WorkspaceTabTreeRow) => row.kind === "group" || collapsedGroupIds.size > 0,
+    [collapsedGroupIds.size],
+  );
+  const ignoreLayout = useCallback((_event: LayoutChangeEvent) => {}, []);
+
+  return (
+    <RenderProfile id="WorkspaceDesktopTabsRail">
+      <View style={styles.railContainer} testID="workspace-tabs-rail">
+        <ScrollView
+          ref={railScrollRef}
+          style={styles.railScroll}
+          contentContainerStyle={styles.railTabsContent}
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          testID="workspace-tabs-rail-scroll"
+          onLayout={handleRailViewportLayout}
+          onContentSizeChange={handleRailContentSizeChange}
+          onScroll={handleRailScroll}
+        >
+          <SortableInlineList
+            data={treeRows}
+            keyExtractor={workspaceTabTreeRowKey}
+            useDragHandle
+            disabled={!externalDndContext && treeRows.length < 2}
+            isItemDisabled={isTreeRowDisabled}
+            onDragEnd={handleDragEnd}
+            externalDndContext={externalDndContext}
+            activeId={activeDragSortableId}
+            getItemData={getTabDragData}
+            renderItem={renderTreeRow}
+            orientation="vertical"
+          />
+        </ScrollView>
+        <View style={styles.railActions}>
+          <WorkspaceExitFocusModeButton
+            visible={focusModeEnabled}
+            onPress={onExitFocusMode}
+            onLayout={ignoreLayout}
+          />
+          <WorkspaceVerticalTabLaunchActions
+            serverId={normalizedServerId}
+            paneId={paneId}
+            panePanelKinds={panePanelKinds}
+          />
+          <WorkspacePaneToolbarActions
+            panePanelKinds={panePanelKinds}
+            host="main"
+            launchPurpose="primary"
+            showNewTabButton
+            showSplitActions={showPaneSplitActions}
+            showMaximizeAction={showPaneMaximizeAction}
+            paneMaximized={paneMaximized}
+            serverId={normalizedServerId}
+            paneId={paneId}
+            newTabShortcutKeys={newTabKeys}
+            onSplitRight={onSplitRight}
+            onSplitDown={onSplitDown}
+            onTogglePaneMaximized={onTogglePaneMaximized}
+            expandSplitActions
+          />
+        </View>
+      </View>
+    </RenderProfile>
+  );
+}
+
 function ResolvedDesktopTabChip({
   serverId,
   workspaceId,
@@ -1494,6 +2080,8 @@ function ResolvedDesktopTabChip({
   onCopyFilePath,
   onReloadAgent,
   onRenameTab,
+  onMoveTabToStart,
+  onMoveTabToEnd,
   onCloseTabsToLeft,
   onCloseTabsToRight,
   onCloseOtherTabs,
@@ -1508,6 +2096,9 @@ function ResolvedDesktopTabChip({
   dragHandleProps,
   showDropIndicatorBefore,
   showDropIndicatorAfter,
+  orientation = "horizontal",
+  displayLabel,
+  treeDepth = 0,
 }: {
   serverId: string;
   workspaceId: string;
@@ -1522,6 +2113,8 @@ function ResolvedDesktopTabChip({
   onCopyFilePath: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
+  onMoveTabToStart?: (tabId: string) => void;
+  onMoveTabToEnd?: (tabId: string) => void;
   onCloseTabsToLeft: (tabId: string) => Promise<void> | void;
   onCloseTabsToRight: (tabId: string) => Promise<void> | void;
   onCloseOtherTabs: (tabId: string) => Promise<void> | void;
@@ -1536,6 +2129,9 @@ function ResolvedDesktopTabChip({
   dragHandleProps: DraggableListDragHandleProps | undefined;
   showDropIndicatorBefore: boolean;
   showDropIndicatorAfter: boolean;
+  orientation?: DragOrientation;
+  displayLabel?: string;
+  treeDepth?: number;
 }) {
   const { t } = useTranslation();
   const presentation = item.presentation;
@@ -1543,6 +2139,9 @@ function ResolvedDesktopTabChip({
     () =>
       buildWorkspaceDesktopTabActions({
         serverId,
+        orientation,
+        onMoveTabToStart,
+        onMoveTabToEnd,
         tab: item.tab,
         index,
         tabCount,
@@ -1560,6 +2159,9 @@ function ResolvedDesktopTabChip({
       }),
     [
       serverId,
+      orientation,
+      onMoveTabToStart,
+      onMoveTabToEnd,
       index,
       item.tab,
       onCloseOtherTabs,
@@ -1589,11 +2191,20 @@ function ResolvedDesktopTabChip({
       : rawTooltipLabel;
 
   return (
-    <View style={styles.tabSlot}>
+    <View style={orientation === "vertical" ? styles.railTabSlot : styles.tabSlot}>
       {showDropIndicatorBefore ? (
-        <View style={[styles.tabDropIndicator, styles.tabDropIndicatorBefore]} />
+        <View
+          style={
+            orientation === "vertical"
+              ? [styles.railTabDropIndicator, styles.railTabDropIndicatorBefore]
+              : [styles.tabDropIndicator, styles.tabDropIndicatorBefore]
+          }
+        />
       ) : null}
       <TabChip
+        orientation={orientation}
+        displayLabel={displayLabel}
+        treeDepth={treeDepth}
         serverId={serverId}
         workspaceId={workspaceId}
         tab={item.tab}
@@ -1616,80 +2227,125 @@ function ResolvedDesktopTabChip({
         dragHandleProps={dragHandleProps}
       />
       {showDropIndicatorAfter ? (
-        <View style={[styles.tabDropIndicator, styles.tabDropIndicatorAfter]} />
+        <View
+          style={
+            orientation === "vertical"
+              ? [styles.railTabDropIndicator, styles.railTabDropIndicatorAfter]
+              : [styles.tabDropIndicator, styles.tabDropIndicatorAfter]
+          }
+        />
       ) : null}
     </View>
   );
 }
 
-function verticalContainerStyle(vertical: boolean) {
-  return vertical ? styles.verticalContainer : undefined;
-}
-function horizontalOverflow(vertical: boolean, overflow: boolean) {
-  return !vertical && overflow;
-}
-function needsNewTabButton(vertical: boolean, overflow: boolean) {
-  return vertical || overflow;
-}
-function WorkspaceTabTrack({
-  vertical,
-  displayedTabs,
-  renderTab,
-  onReorderTabs,
-  onCloseTab,
-  children,
-}: {
-  vertical: boolean;
-  displayedTabs: ResolvedWorkspaceDesktopTabRowItem[];
-  renderTab: (
-    info: DraggableRenderItemInfo<ResolvedWorkspaceDesktopTabRowItem>,
-  ) => React.ReactElement;
-  onReorderTabs: WorkspaceDesktopTabsRowProps["onReorderTabs"];
-  onCloseTab: WorkspaceDesktopTabsRowProps["onCloseTab"];
-  children: React.ReactNode;
-}) {
-  const items = useMemo(
-    () =>
-      displayedTabs.map((item) => ({
-        tabId: item.tab.tabId,
-        label: item.presentation.label,
-        pathLabel: item.presentation.label,
-      })),
-    [displayedTabs],
-  );
-  const renderLeaf = useCallback(
-    (tabId: string, label: string, info: DraggableRenderItemInfo<WorkspaceTabTreeRow>) => {
-      const index = displayedTabs.findIndex((item) => item.tab.tabId === tabId);
-      const item = displayedTabs[index]!;
-      return renderTab({
-        ...info,
-        index,
-        item: { ...item, presentation: { ...item.presentation, label } },
-      });
-    },
-    [displayedTabs, renderTab],
-  );
-  const reorder = useCallback(
-    (ids: string[]) =>
-      onReorderTabs(
-        ids.flatMap((id) =>
-          displayedTabs.filter((item) => item.tab.tabId === id).map((item) => item.tab),
-        ),
-      ),
-    [displayedTabs, onReorderTabs],
-  );
-  if (!vertical) return children;
-  return (
-    <WorkspaceTabTreeList
-      items={items}
-      selectedTabId={displayedTabs.find((item) => item.isActive)?.tab.tabId}
-      renderTab={renderLeaf}
-      onReorder={reorder}
-      onClose={onCloseTab}
-    />
-  );
-}
 const styles = StyleSheet.create((theme) => ({
+  railContainer: {
+    width: WORKSPACE_TAB_RAIL_WIDTH,
+    minWidth: WORKSPACE_TAB_RAIL_WIDTH,
+    maxWidth: WORKSPACE_TAB_RAIL_WIDTH,
+    height: "100%",
+    minHeight: 0,
+    flexShrink: 0,
+    borderRightWidth: 1,
+    borderRightColor: theme.colors.border,
+    backgroundColor: theme.colors.surface0,
+  },
+  railScroll: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%",
+  },
+  railTabsContent: {
+    width: "100%",
+  },
+  railActions: {
+    minHeight: WORKSPACE_SECONDARY_HEADER_HEIGHT,
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingLeft: theme.spacing[1],
+    overflow: "visible",
+  },
+  railTabSlot: {
+    position: "relative",
+    width: "100%",
+    height: WORKSPACE_SECONDARY_HEADER_HEIGHT,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "visible",
+  },
+  railTreeGroupSlot: {
+    position: "relative",
+    width: "100%",
+    height: WORKSPACE_SECONDARY_HEADER_HEIGHT,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  railTreeGroupRow: {
+    position: "relative",
+    width: "100%",
+    height: buttonControlHeight.xs,
+    borderRadius: theme.borderRadius.sm,
+    justifyContent: "center",
+    userSelect: "none",
+  },
+  railTreeGroupRowHovered: {
+    backgroundColor: theme.colors.surface1,
+  },
+  railTreeGroupActiveBar: {
+    position: "absolute",
+    left: 0,
+    top: theme.spacing[1],
+    bottom: theme.spacing[1],
+    width: 2,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+  },
+  railTreeGroupContent: {
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingRight: theme.spacing[2],
+    gap: theme.spacing[1],
+  },
+  railTreeGroupLabel: {
+    flex: 1,
+    minWidth: 0,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.medium,
+    userSelect: "none",
+  },
+  railTreeGroupCount: {
+    flexShrink: 0,
+    color: theme.colors.foregroundExtraMuted,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.normal,
+    userSelect: "none",
+  },
+  railTabDropIndicator: {
+    position: "absolute",
+    left: theme.spacing[2],
+    right: theme.spacing[2],
+    height: TAB_DROP_INDICATOR_WIDTH,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.accent,
+    zIndex: 10,
+    pointerEvents: "none",
+  },
+  railTabDropIndicatorBefore: {
+    top: -TAB_DROP_INDICATOR_WIDTH / 2,
+  },
+  railTabDropIndicatorAfter: {
+    bottom: -TAB_DROP_INDICATOR_WIDTH / 2,
+  },
+  railTab: { borderRadius: theme.borderRadius.sm },
   tabsContainer: {
     minWidth: 0,
     height: WORKSPACE_SECONDARY_HEADER_HEIGHT,
@@ -1700,7 +2356,6 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     overflow: "visible",
   },
-  verticalContainer: { height: "auto", maxHeight: 320, alignItems: "flex-start" },
   tabsContainerSidebar: {
     backgroundColor: theme.colors.surfaceSidebar,
   },

@@ -44,6 +44,26 @@ function makeDeps(
 }
 
 describe("loadAppSettingsFromStorage", () => {
+  it.each([APP_SETTINGS_KEY, LEGACY_SETTINGS_KEY])(
+    "retains the old fork left rail preference from %s through unrelated saves",
+    async (key) => {
+      const deps = makeDeps({
+        storage: createInMemoryKeyValueStorage({
+          [key]: JSON.stringify({ workspaceTabPlacement: "left", theme: "dark" }),
+        }),
+      });
+      const loaded = await loadAppSettingsFromStorage(deps);
+      expect(loaded.workspaceTabPlacement).toBe("left");
+      const queryClient = new QueryClient();
+      queryClient.setQueryData(APP_SETTINGS_QUERY_KEY, loaded);
+      await saveAppSettings({ queryClient, deps, updates: { vimKeybindings: true } });
+      expect((await loadAppSettingsFromStorage(deps)).workspaceTabPlacement).toBe("left");
+      expect(
+        JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY) ?? "{}").workspaceTabPlacement,
+      ).toBe("left");
+    },
+  );
+
   it("persists file panel associations, including panels absent from this host", async () => {
     const deps = makeDeps();
     const queryClient = new QueryClient();

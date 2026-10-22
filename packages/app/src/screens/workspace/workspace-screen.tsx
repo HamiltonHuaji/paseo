@@ -3447,6 +3447,7 @@ function WorkspaceScreenContent({
           explorerToggleAccessibilityState={explorerSidebarToggleAccessibilityState}
         >
           <MobileWorkspaceTabSwitcher
+            onReorderTabs={handleReorderTabsInFocusedPane}
             tabs={tabs}
             activeTabKey={activeTabKey}
             normalizedServerId={normalizedServerId}
@@ -3486,6 +3487,7 @@ function WorkspaceScreenContent({
       ) : null,
     [
       activeTabKey,
+      handleReorderTabsInFocusedPane,
       canOpenImportSheet,
       compactHeaderScripts,
       createTerminalDisabled,
