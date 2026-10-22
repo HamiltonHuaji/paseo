@@ -1,0 +1,4 @@
+interface:
+  display_name: "Paseo works"
+  short_description: "Track work and keep results accessible"
+  default_prompt: "Use $paseo-works to find or create the records for this work, track execution, and make its results easy to find from those records."
