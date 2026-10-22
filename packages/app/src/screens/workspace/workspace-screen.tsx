@@ -1,3 +1,7 @@
+import { WorksScreen } from "@/screens/works-screen";
+import { ExperimentsScreen } from "@/screens/experiments-screen";
+import { WorkspaceWorksButton } from "./workspace-works-button";
+import { WorkspaceExperimentsButton } from "./workspace-experiments-button";
 import type { ComponentProps } from "react";
 import { SessionCanvasScreen } from "@/screens/session-canvas/screen";
 import { WorkspaceSessionCanvasButton } from "./workspace-session-canvas-button";
@@ -1079,8 +1083,30 @@ function WorkspaceScreenContent({
   const [isImportSheetVisible, setIsImportSheetVisible] = useState(false);
   const supportsSessionCanvas = useHostFeature(normalizedServerId, "sessionCanvas");
   const [sessionCanvasOpen, setSessionCanvasOpen] = useState(false);
-  const showWorkspace = useCallback(() => setSessionCanvasOpen(false), []);
-  const toggleSessionCanvas = useCallback(() => setSessionCanvasOpen((open) => !open), []);
+  const [workSurface, setWorkSurface] = useState<"works" | "experiments" | null>(null);
+  const [openedWorkSurfaces, setOpenedWorkSurfaces] = useState({
+    works: false,
+    experiments: false,
+  });
+  const supportsWorks = useHostFeature(normalizedServerId, "works");
+  const supportsExperiments = useHostFeature(normalizedServerId, "experiments");
+  const toggleWorkSurface = useCallback((surface: "works" | "experiments") => {
+    setOpenedWorkSurfaces((current) => ({ ...current, [surface]: true }));
+    setWorkSurface((current) => (current === surface ? null : surface));
+  }, []);
+  const toggleWorks = useCallback(() => toggleWorkSurface("works"), [toggleWorkSurface]);
+  const toggleExperiments = useCallback(
+    () => toggleWorkSurface("experiments"),
+    [toggleWorkSurface],
+  );
+  const showWorkspace = useCallback(() => {
+    setSessionCanvasOpen(false);
+    setWorkSurface(null);
+  }, []);
+  const toggleSessionCanvas = useCallback(() => {
+    setWorkSurface(null);
+    setSessionCanvasOpen((open) => !open);
+  }, []);
   useEffect(showWorkspace, [normalizedServerId, normalizedWorkspaceId, showWorkspace]);
   const canOpenImportSheet = [client, isConnected, workspaceDirectory].every(Boolean);
   const openImportSheet = useCallback(() => {
@@ -3254,6 +3280,8 @@ function WorkspaceScreenContent({
     () => (
       <View style={styles.headerRight}>
         <PluginHeaderButtons serverId={normalizedServerId} workspaceId={normalizedWorkspaceId} />
+        <WorkspaceWorksButton visible={supportsWorks} onPress={toggleWorks} />
+        <WorkspaceExperimentsButton visible={supportsExperiments} onPress={toggleExperiments} />
         <WorkspaceSessionCanvasButton
           onPress={toggleSessionCanvas}
           visible={supportsSessionCanvas}
@@ -3309,6 +3337,10 @@ function WorkspaceScreenContent({
       explorerSidebarToggleAccessibilityState,
       explorerToggleOwner,
       toggleSessionCanvas,
+      supportsWorks,
+      supportsExperiments,
+      toggleWorks,
+      toggleExperiments,
       supportsSessionCanvas,
       t,
     ],
@@ -3844,28 +3876,92 @@ function WorkspaceScreenContent({
     </RenderProfile>
   );
 
+  const sessionSurface = (
+    <WorkspaceSessionsSwitcher
+      open={sessionCanvasOpen}
+      renderHeader={renderWorkspaceScreenHeader}
+      serverId={normalizedServerId}
+      workspaceId={normalizedWorkspaceId}
+      active={isRouteFocused}
+      buildConversation={buildCanvasConversation}
+      onRename={renameCanvasSession}
+      onOpen={openCanvasSession}
+      client={client}
+      workspaceRoot={workspaceDirectory ?? undefined}
+      onOpenWorkspaceFile={openMarkdownPath}
+      toast={toast}
+    >
+      {renderedWorkspaceScreen}
+    </WorkspaceSessionsSwitcher>
+  );
+
   if (gatedWorkspaceScreen) {
     return gatedWorkspaceScreen;
   }
+  return renderWorkspaceContentProviders(
+    persistenceKey,
+    <WorkspaceWorkSurfacesSwitcher
+      surface={workSurface}
+      opened={openedWorkSurfaces}
+      serverId={normalizedServerId}
+      projectId={workspaceProjectId(workspaceDescriptor)}
+      active={isRouteFocused}
+      renderHeader={renderWorkspaceScreenHeader}
+    >
+      {sessionSurface}
+    </WorkspaceWorkSurfacesSwitcher>,
+  );
+}
+
+function renderWorkspaceContentProviders(workspaceKey: string | null, children: ReactNode) {
   return (
-    <WorkspaceContentProviders key={persistenceKey} workspaceKey={persistenceKey}>
-      <WorkspaceSessionsSwitcher
-        open={sessionCanvasOpen}
-        renderHeader={renderWorkspaceScreenHeader}
-        serverId={normalizedServerId}
-        workspaceId={normalizedWorkspaceId}
-        active={isRouteFocused}
-        buildConversation={buildCanvasConversation}
-        onRename={renameCanvasSession}
-        onOpen={openCanvasSession}
-        client={client}
-        workspaceRoot={workspaceDirectory ?? undefined}
-        onOpenWorkspaceFile={openMarkdownPath}
-        toast={toast}
-      >
-        {renderedWorkspaceScreen}
-      </WorkspaceSessionsSwitcher>
+    <WorkspaceContentProviders key={workspaceKey} workspaceKey={workspaceKey}>
+      {children}
     </WorkspaceContentProviders>
+  );
+}
+
+function workspaceProjectId(workspace: WorkspaceDescriptor | null | undefined) {
+  return workspace?.projectId;
+}
+
+function WorkspaceWorkSurfacesSwitcher({
+  surface,
+  opened,
+  serverId,
+  projectId,
+  active,
+  renderHeader,
+  children,
+}: {
+  surface: "works" | "experiments" | null;
+  opened: { works: boolean; experiments: boolean };
+  serverId: string;
+  projectId?: string;
+  active: boolean;
+  renderHeader: () => ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <View style={[styles.container, surface !== null && { display: "none" }]}>{children}</View>
+      {projectId &&
+        (["works", "experiments"] as const).map((name) => {
+          if (!opened[name]) return null;
+          const Screen = name === "works" ? WorksScreen : ExperimentsScreen;
+          return (
+            <View key={name} style={[styles.container, surface !== name && { display: "none" }]}>
+              {renderHeader()}
+              <Screen
+                embedded
+                active={active && surface === name}
+                serverId={serverId}
+                projectId={projectId}
+              />
+            </View>
+          );
+        })}
+    </>
   );
 }
 

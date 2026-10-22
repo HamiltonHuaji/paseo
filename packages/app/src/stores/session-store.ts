@@ -1,3 +1,4 @@
+import type { AgentExperimentTouch } from "@getpaseo/protocol/experiments";
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
@@ -103,6 +104,7 @@ export interface Agent {
   parentAgentId: string | null;
   labels: Record<string, string>;
   projectPlacement?: ProjectPlacementPayload | null;
+  experimentTouches?: AgentExperimentTouch[];
 }
 
 export interface WorkspaceDescriptor {

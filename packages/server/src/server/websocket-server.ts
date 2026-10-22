@@ -1,3 +1,5 @@
+import { ExperimentService } from "./experiments/service.js";
+import { WorkService } from "./work-objects/service.js";
 import { currentDaemonDistribution } from "./session/daemon/distribution.js";
 import {
   createAgentMessageDelivery,
@@ -684,6 +686,7 @@ export class VoiceAssistantWebSocketServer {
     pluginRuntime?: SessionOptions["pluginRuntime"],
     orchestrationSkills?: SessionOptions["orchestrationSkills"],
     workspaceLabelService?: WorkspaceLabelService,
+    private readonly workDomain?: { experiments: ExperimentService; works: WorkService },
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.workspaceSetupRuntime = workspaceSetupRuntime;
@@ -1600,6 +1603,9 @@ export class VoiceAssistantWebSocketServer {
       agentMessages: this.agentMessages,
       creationService: this.creationService,
       projectRegistry: this.projectRegistry,
+      experimentService:
+        this.workDomain?.experiments ?? new ExperimentService(this.projectRegistry),
+      workService: this.workDomain?.works,
       workspaceRegistry: this.workspaceRegistry,
       workspaceLabelService: this.workspaceLabelService ?? undefined,
       directorySync: this.directorySync,
@@ -1964,6 +1970,8 @@ export class VoiceAssistantWebSocketServer {
         workspaceSetupRun: true,
         workspaceSetupObservation: true,
         sessionCanvas: true,
+        experiments: true,
+        works: true,
         // COMPAT(providersSnapshot): keep optional until all clients rely on snapshot flow.
         providersSnapshot: true,
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.

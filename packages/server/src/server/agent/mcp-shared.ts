@@ -228,10 +228,12 @@ export async function serializeSnapshotWithMetadata(
   logger: Logger,
 ) {
   const record = await resolveAgentStorageRecord(agentStorage, snapshot.id, logger);
-  return serializeAgentSnapshot(snapshot, {
+  const payload = serializeAgentSnapshot(snapshot, {
     title: record?.title ?? null,
     archivedAt: record?.archivedAt ?? null,
   });
+  payload.experimentTouches = record?.experimentTouches;
+  return payload;
 }
 
 export function parseDurationString(input: string): number {

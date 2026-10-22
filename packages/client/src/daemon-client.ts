@@ -347,6 +347,10 @@ export type ConnectionState =
 
 export type DaemonEvent =
   | {
+      type: "work.project.changed";
+      payload: Extract<SessionOutboundMessage, { type: "work.project.changed" }>["payload"];
+    }
+  | {
       type: "agent_update";
       agentId: string;
       payload: Extract<SessionOutboundMessage, { type: "agent_update" }>["payload"];
@@ -823,6 +827,54 @@ export type FetchWorkspacesOptions = Omit<FetchWorkspacesRequest, "type" | "requ
 };
 export type FetchWorkspacesEntry = FetchWorkspacesPayload["entries"][number];
 export type FetchWorkspacesPageInfo = FetchWorkspacesPayload["pageInfo"];
+export type ExperimentListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.list.response" }
+>["payload"];
+export type ExperimentGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.get.response" }
+>["payload"];
+export type ExperimentCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.create.response" }
+>["payload"];
+export type ExperimentUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.update.response" }
+>["payload"];
+export type ExperimentAttemptCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.attempt.create.response" }
+>["payload"];
+export type ExperimentAttemptUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.attempt.update.response" }
+>["payload"];
+export type ExperimentProgressRefreshPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.attempt.progress.refresh.response" }
+>["payload"];
+export type ExperimentBoardLayoutGetPayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.board.layout.get.response" }
+>["payload"];
+export type ExperimentBoardLayoutUpdatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.board.layout.update.response" }
+>["payload"];
+export type ExperimentStorageResolvePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.storage.resolve.response" }
+>["payload"];
+export type ExperimentViewerConfigurePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.viewer.configure.response" }
+>["payload"];
+export type ExperimentViewerResolvePayload = Extract<
+  SessionOutboundMessage,
+  { type: "experiment.viewer.resolve.response" }
+>["payload"];
 export type WorkspaceLabelListPayload = Extract<
   SessionOutboundMessage,
   { type: "workspace.label.list.response" }
@@ -2917,6 +2969,377 @@ export class DaemonClient {
       requestId,
       message,
       timeout: PROJECT_GITHUB_CLONE_TIMEOUT_MS,
+    });
+  }
+
+  listWorkCards(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.list.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.list.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.list.request", ...input },
+    });
+  }
+
+  getWorkCard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.get.request", ...input },
+    });
+  }
+
+  createWorkCard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.create.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.create.request", ...input },
+    });
+  }
+
+  updateWorkCard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.card.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.card.update.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.card.update.request", ...input },
+    });
+  }
+
+  listWorkItems(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.list.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.list.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.list.request", ...input },
+    });
+  }
+
+  getWorkItem(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.get.request", ...input },
+    });
+  }
+
+  createWorkItem(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.create.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.create.request", ...input },
+    });
+  }
+
+  updateWorkItem(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.item.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.item.update.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.item.update.request", ...input },
+    });
+  }
+
+  getWorkBoard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.board.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.board.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.board.get.request", ...input },
+    });
+  }
+
+  updateWorkBoard(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.board.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.board.update.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.board.update.request", ...input },
+    });
+  }
+
+  getWorkStorage(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.storage.get.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<Extract<SessionOutboundMessage, { type: "work.storage.get.response" }>["payload"]> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.storage.get.request", ...input },
+    });
+  }
+
+  resolveWorkViewers(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.viewers.resolve.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.viewers.resolve.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.viewers.resolve.request", ...input },
+    });
+  }
+
+  refreshWorkProgress(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.progress.refresh.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.progress.refresh.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.progress.refresh.request", ...input },
+    });
+  }
+
+  subscribeWorkProject(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.project.subscribe.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.project.subscribe.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.project.subscribe.request", ...input },
+    });
+  }
+
+  unsubscribeWorkProject(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "work.project.unsubscribe.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<
+    Extract<SessionOutboundMessage, { type: "work.project.unsubscribe.response" }>["payload"]
+  > {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "work.project.unsubscribe.request", ...input },
+    });
+  }
+
+  listExperiments(options: {
+    projectId: string;
+    goal?: string;
+    includeClosed?: boolean;
+    includeArchived?: boolean;
+    requestId?: string;
+  }): Promise<ExperimentListPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.list.request",
+        projectId: options.projectId,
+        ...(options.goal !== undefined ? { goal: options.goal } : {}),
+        ...(options.includeClosed !== undefined ? { includeClosed: options.includeClosed } : {}),
+        ...(options.includeArchived !== undefined
+          ? { includeArchived: options.includeArchived }
+          : {}),
+      },
+    });
+  }
+
+  getExperiment(options: {
+    projectId: string;
+    experiment: string;
+    requestId?: string;
+  }): Promise<ExperimentGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.get.request",
+        projectId: options.projectId,
+        experiment: options.experiment,
+      },
+    });
+  }
+
+  createExperiment(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentCreatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.create.request", ...input },
+    });
+  }
+
+  updateExperiment(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentUpdatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.update.request", ...input },
+    });
+  }
+
+  createExperimentAttempt(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.attempt.create.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentAttemptCreatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.attempt.create.request", ...input },
+    });
+  }
+
+  updateExperimentAttempt(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.attempt.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentAttemptUpdatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.attempt.update.request", ...input },
+    });
+  }
+
+  refreshExperimentProgress(options: {
+    projectId: string;
+    attempt: string;
+    requestId?: string;
+  }): Promise<ExperimentProgressRefreshPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.attempt.progress.refresh.request",
+        projectId: options.projectId,
+        attempt: options.attempt,
+      },
+    });
+  }
+
+  getExperimentBoardLayout(options: {
+    projectId: string;
+    requestId?: string;
+  }): Promise<ExperimentBoardLayoutGetPayload> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "experiment.board.layout.get.request",
+        projectId: options.projectId,
+      },
+    });
+  }
+
+  updateExperimentBoardLayout(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.board.layout.update.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentBoardLayoutUpdatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.board.layout.update.request", ...input },
+    });
+  }
+
+  resolveExperimentStorage(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.storage.resolve.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentStorageResolvePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.storage.resolve.request", ...input },
+    });
+  }
+
+  configureExperimentViewer(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.viewer.configure.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentViewerConfigurePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.viewer.configure.request", ...input },
+    });
+  }
+
+  resolveExperimentViewers(
+    options: Omit<
+      Extract<SessionInboundMessage, { type: "experiment.viewer.resolve.request" }>,
+      "type" | "requestId"
+    > & { requestId?: string },
+  ): Promise<ExperimentViewerResolvePayload> {
+    const { requestId, ...input } = options;
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: { type: "experiment.viewer.resolve.request", ...input },
     });
   }
 
@@ -7202,6 +7625,8 @@ export class DaemonClient {
 
   private toEvent(msg: SessionOutboundMessage): DaemonEvent | null {
     switch (msg.type) {
+      case "work.project.changed":
+        return { type: "work.project.changed", payload: msg.payload };
       case "agent_update":
         return {
           type: "agent_update",

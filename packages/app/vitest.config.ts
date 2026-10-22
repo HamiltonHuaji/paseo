@@ -112,6 +112,8 @@ export default defineConfig({
           "react-native-worklets",
           "react-native-gesture-handler",
           "react-native-keyboard-controller",
+          "react-native-screens",
+          "expo-router",
         ],
       },
     },
@@ -132,6 +134,8 @@ export default defineConfig({
       "react-native-reanimated",
       "react-native-gesture-handler",
       "react-native-keyboard-controller",
+      "react-native-screens",
+      "expo-router",
     ],
   },
   // The globals a React Native bundler defines, which esbuild is no longer there to supply for

@@ -1,3 +1,6 @@
+import type { ExperimentService } from "./experiments/service.js";
+import type { WorkService } from "./work-objects/service.js";
+import { createWorkSession, type WorkSession } from "./work-objects/session.js";
 import type { AgentMessageDelivery } from "./agent/agent-messages/index.js";
 import { AgentDirectory } from "./agent/directory.js";
 import { ConnectedHostSession } from "./connected-hosts/index.js";
@@ -437,6 +440,8 @@ const nodeSessionFileSystem: SessionFileSystem = {
 type AgentMcpTransportFactory = () => Promise<unknown>;
 
 export interface SessionOptions {
+  experimentService: ExperimentService;
+  workService?: WorkService;
   connectedHosts?: ConnectedHosts;
   sourceId?: string;
   routed?: boolean;
@@ -674,6 +679,8 @@ interface ClientActivity {
 }
 
 export class Session {
+  private readonly experimentService: ExperimentService;
+  private readonly workSession: WorkSession | null;
   private readonly connectedHostSession: ConnectedHostSession | null;
   private routed = false;
   isRouted(): boolean {
@@ -923,6 +930,13 @@ export class Session {
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry;
+    const { experimentService } = options;
+    this.experimentService = experimentService;
+    this.workSession = createWorkSession(
+      options.workService,
+      (message) => this.emit(message),
+      this.delivery,
+    );
     this.workspaceRegistry = workspaceRegistry;
     this.directorySync = resolveDirectorySync(directorySync);
     this.workspaceLabelService = resolveWorkspaceLabelService(workspaceLabelService);
@@ -1726,6 +1740,7 @@ export class Session {
     } else {
       this.unsubscribeProjectMutations?.();
       this.unsubscribeProjectMutations = null;
+      this.workSession?.close();
       this.unsubscribeWorkspaceMutations?.();
       this.unsubscribeWorkspaceMutations = null;
       this.unsubscribeTerminalWorkspaceContributionEvents?.();
@@ -2101,6 +2116,7 @@ export class Session {
 
   private async enrichAgentPayload(payload: AgentSnapshotPayload): Promise<AgentSnapshotPayload> {
     const storedRecord = await this.agentStorage.get(payload.id);
+    payload.experimentTouches = storedRecord?.experimentTouches;
     payload.title = storedRecord?.title ?? null;
     payload.archivedAt = storedRecord?.archivedAt ?? null;
     return payload;
@@ -2370,6 +2386,205 @@ export class Session {
     });
   }
 
+  private dispatchWorkDomainMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    return (
+      this.workSession?.dispatch(msg) ??
+      this.dispatchExperimentMessage(msg) ??
+      this.dispatchWorkspaceLifecycleMessage(msg)
+    );
+  }
+
+  private dispatchExperimentMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "experiment.list.request":
+        return this.handleExperimentList(msg);
+      case "experiment.get.request":
+        return this.handleExperimentGet(msg);
+      case "experiment.create.request":
+        return this.handleExperimentCreate(msg);
+      case "experiment.update.request":
+        return this.handleExperimentUpdate(msg);
+      case "experiment.attempt.create.request":
+        return this.handleExperimentAttemptCreate(msg);
+      case "experiment.attempt.update.request":
+        return this.handleExperimentAttemptUpdate(msg);
+      case "experiment.attempt.progress.refresh.request":
+        return this.handleExperimentProgressRefresh(msg);
+      case "experiment.board.layout.get.request":
+        return this.handleExperimentBoardLayoutGet(msg);
+      case "experiment.board.layout.update.request":
+        return this.handleExperimentBoardLayoutUpdate(msg);
+      case "experiment.storage.resolve.request":
+        return this.handleExperimentStorageResolve(msg);
+      case "experiment.viewer.configure.request":
+        return this.handleExperimentViewerConfigure(msg);
+      case "experiment.viewer.resolve.request":
+        return this.handleExperimentViewerResolve(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private async handleExperimentList(
+    msg: Extract<SessionInboundMessage, { type: "experiment.list.request" }>,
+  ): Promise<void> {
+    const experiments = await this.experimentService.list(msg.projectId, {
+      ...(msg.goal !== undefined ? { goal: msg.goal } : {}),
+      includeClosed: msg.includeClosed ?? false,
+      includeArchived: msg.includeArchived ?? false,
+    });
+    this.emit({
+      type: "experiment.list.response",
+      payload: { requestId: msg.requestId, experiments },
+    });
+  }
+
+  private async handleExperimentGet(
+    msg: Extract<SessionInboundMessage, { type: "experiment.get.request" }>,
+  ): Promise<void> {
+    const detail = await this.experimentService.get(msg.projectId, msg.experiment);
+    this.emit({ type: "experiment.get.response", payload: { requestId: msg.requestId, detail } });
+  }
+
+  private async touchExperimentForCaller(
+    callerAgentId: string | undefined,
+    experiment: string,
+    attempt: string | null,
+  ): Promise<void> {
+    if (!callerAgentId) return;
+    try {
+      await this.agentStorage.touchExperiment(callerAgentId, experiment, attempt);
+    } catch (error) {
+      this.sessionLogger.warn(
+        { err: error, callerAgentId, experiment, attempt },
+        "Failed to record Experiment caller engagement",
+      );
+    }
+  }
+
+  private async handleExperimentCreate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.create.request" }>,
+  ): Promise<void> {
+    const experiment = await this.experimentService.createExperiment(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, experiment.id, null);
+    this.emit({
+      type: "experiment.create.response",
+      payload: { requestId: msg.requestId, experiment },
+    });
+  }
+
+  private async handleExperimentUpdate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.update.request" }>,
+  ): Promise<void> {
+    const experiment = await this.experimentService.updateExperiment(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, experiment.id, null);
+    this.emit({
+      type: "experiment.update.response",
+      payload: { requestId: msg.requestId, experiment },
+    });
+  }
+
+  private async handleExperimentAttemptCreate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.attempt.create.request" }>,
+  ): Promise<void> {
+    const attempt = await this.experimentService.createAttempt(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, attempt.experiment, attempt.id);
+    this.emit({
+      type: "experiment.attempt.create.response",
+      payload: { requestId: msg.requestId, attempt },
+    });
+  }
+
+  private async handleExperimentAttemptUpdate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.attempt.update.request" }>,
+  ): Promise<void> {
+    const attempt = await this.experimentService.updateAttempt(msg.projectId, msg);
+    await this.touchExperimentForCaller(msg.callerAgentId, attempt.experiment, attempt.id);
+    this.emit({
+      type: "experiment.attempt.update.response",
+      payload: { requestId: msg.requestId, attempt },
+    });
+  }
+
+  private async handleExperimentProgressRefresh(
+    msg: Extract<SessionInboundMessage, { type: "experiment.attempt.progress.refresh.request" }>,
+  ): Promise<void> {
+    const result = await this.experimentService.refreshProgress(msg.projectId, msg.attempt);
+    this.emit({
+      type: "experiment.attempt.progress.refresh.response",
+      payload: { requestId: msg.requestId, ...result },
+    });
+  }
+
+  private async handleExperimentBoardLayoutGet(
+    msg: Extract<SessionInboundMessage, { type: "experiment.board.layout.get.request" }>,
+  ): Promise<void> {
+    const placements = await this.experimentService.getBoardLayout(msg.projectId);
+    this.emit({
+      type: "experiment.board.layout.get.response",
+      payload: { requestId: msg.requestId, placements },
+    });
+  }
+
+  private async handleExperimentBoardLayoutUpdate(
+    msg: Extract<SessionInboundMessage, { type: "experiment.board.layout.update.request" }>,
+  ): Promise<void> {
+    const placements = await this.experimentService.updateBoardLayout(
+      msg.projectId,
+      msg.placements,
+    );
+    this.emit({
+      type: "experiment.board.layout.update.response",
+      payload: { requestId: msg.requestId, placements },
+    });
+  }
+
+  private async handleExperimentStorageResolve(
+    msg: Extract<SessionInboundMessage, { type: "experiment.storage.resolve.request" }>,
+  ): Promise<void> {
+    let input:
+      | { scope: "shared" }
+      | { scope: "experiment"; experiment: string }
+      | { scope: "attempt"; attempt: string };
+    if (msg.scope === "shared") input = { scope: "shared" };
+    else if (msg.scope === "experiment") {
+      if (!msg.experiment) throw new Error("experiment is required for experiment storage");
+      input = { scope: "experiment", experiment: msg.experiment };
+    } else {
+      if (!msg.attempt) throw new Error("attempt is required for attempt storage");
+      input = { scope: "attempt", attempt: msg.attempt };
+    }
+    const resolvedPath = await this.experimentService.resolveStorage(msg.projectId, input);
+    this.emit({
+      type: "experiment.storage.resolve.response",
+      payload: { requestId: msg.requestId, path: resolvedPath },
+    });
+  }
+
+  private async handleExperimentViewerConfigure(
+    msg: Extract<SessionInboundMessage, { type: "experiment.viewer.configure.request" }>,
+  ): Promise<void> {
+    const viewer = await this.experimentService.configureViewer(
+      msg.projectId,
+      msg.target,
+      msg.viewer,
+    );
+    this.emit({
+      type: "experiment.viewer.configure.response",
+      payload: { requestId: msg.requestId, viewer },
+    });
+  }
+
+  private async handleExperimentViewerResolve(
+    msg: Extract<SessionInboundMessage, { type: "experiment.viewer.resolve.request" }>,
+  ): Promise<void> {
+    const entries = await this.experimentService.resolveViewers(msg.projectId, msg.target);
+    this.emit({
+      type: "experiment.viewer.resolve.response",
+      payload: { requestId: msg.requestId, entries },
+    });
+  }
+
   private dispatchSubscriptionMessage(
     msg: SessionInboundMessage,
     source?: object,
@@ -2407,7 +2622,7 @@ export class Session {
       this.dispatchAgentLifecycleMessage(msg) ??
       this.dispatchAgentConfigMessage(msg) ??
       this.dispatchCheckoutMessage(msg) ??
-      this.dispatchWorkspaceLifecycleMessage(msg) ??
+      this.dispatchWorkDomainMessage(msg) ??
       this.dispatchWorkspaceFileMessage(msg, source) ??
       this.dispatchProviderMessage(msg) ??
       this.dispatchOrchestrationSkillsMessage(msg) ??
@@ -8689,6 +8904,7 @@ export class Session {
     this.unsubscribeProjectMutations = null;
     this.unsubscribePluginChanges?.();
     this.unsubscribePluginChanges = null;
+    this.workSession?.close();
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
     this.agentUpdates.dispose();
