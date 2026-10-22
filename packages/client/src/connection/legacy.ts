@@ -218,11 +218,11 @@ export class LegacySubscriptions {
       for (const interest of this.interests.values()) {
         if (!this.matches(interest, update)) continue;
         // Normalize at the connection edge; all consumers receive the same handle shape.
-        deliver(
-          ("payload" in update
-            ? { ...update, payload: { ...update.payload, subscriptionId: interest.id } }
-            : { ...update, subscriptionId: interest.id }) as SessionOutboundMessage,
-        );
+        const subscription =
+          "payload" in update
+            ? { payload: Object.assign({}, update.payload, { subscriptionId: interest.id }) }
+            : { subscriptionId: interest.id };
+        deliver(Object.assign({}, update, subscription));
       }
   }
 
