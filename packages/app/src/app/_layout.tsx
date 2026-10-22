@@ -1,3 +1,5 @@
+import { useHostRegistryStatus } from "@/runtime/host-runtime";
+import { useHostRuntimeSnapshot } from "@/runtime/host-runtime";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useIsExplorerSidebarOpen } from "@/workspace-tabs/explorer-sidebar";
@@ -10,6 +12,7 @@ import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import { Stack, useNavigationContainerRef, usePathname, useRouter } from "expo-router";
 import {
+  Fragment,
   createContext,
   type ReactNode,
   useCallback,
@@ -85,6 +88,7 @@ import { legacyFavoriteProfileMigration } from "@/agent-profiles/migration";
 import { listenToDesktopEvent } from "@/desktop/electron/events";
 import { updateDesktopWindowChrome } from "@/desktop/electron/window";
 import { getDesktopHost } from "@/desktop/host";
+import { syncViewerProxyHosts, updateViewerProxyRoute } from "@/viewers/proxy";
 import { loadDesktopSettings } from "@/desktop/settings/desktop-settings";
 import { RosettaCalloutSource } from "@/desktop/updates/rosetta-callout-source";
 import { UpdateCalloutSource } from "@/desktop/updates/update-callout-source";
@@ -306,6 +310,14 @@ function LegacyFavoriteProfileMigrationBootstrap({
 
 function HostSessionManager() {
   const hosts = useHosts();
+  const registryStatus = useHostRegistryStatus();
+
+  useEffect(() => {
+    if (registryStatus !== "ready") return;
+    void syncViewerProxyHosts(hosts.map((host) => host.serverId)).catch((error) => {
+      console.warn("[viewer-http] Failed to restore viewer proxies", error);
+    });
+  }, [hosts, registryStatus]);
 
   if (hosts.length === 0) {
     return null;
@@ -314,10 +326,30 @@ function HostSessionManager() {
   return (
     <>
       {hosts.map((daemon) => (
-        <ManagedDaemonSession key={daemon.serverId} daemon={daemon} />
+        <Fragment key={daemon.serverId}>
+          <ManagedDaemonSession daemon={daemon} />
+          <ViewerHttpRouteSync host={daemon} />
+        </Fragment>
       ))}
     </>
   );
+}
+
+function ViewerHttpRouteSync({ host }: { host: HostProfile }) {
+  const snapshot = useHostRuntimeSnapshot(host.serverId);
+  const activeConnection = host.connections.find(
+    (connection) => connection.id === snapshot?.activeConnectionId,
+  );
+
+  useEffect(() => {
+    if (activeConnection?.type !== "relay" && activeConnection?.type !== "directTcp") return;
+    void updateViewerProxyRoute({
+      serverId: host.serverId,
+      connection: activeConnection,
+    }).catch((error) => console.warn("[viewer-http] Failed to update viewer route", error));
+  }, [activeConnection, host.serverId]);
+
+  return null;
 }
 
 export function useEarliestOnlineHostServerId(): string | null {

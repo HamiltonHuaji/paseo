@@ -1,3 +1,5 @@
+import { decodeTunnelStreamFrame, TunnelStreamOpcode, type TunnelStreamFrame } from "./tunnel.js";
+import { decodeViewerHttpFrame, type ViewerHttpFrame } from "./viewer-http.js";
 import { HOST_ROUTE_OPCODE, decodeHostRouteFrame, type HostRouteFrame } from "./host-route.js";
 import {
   decodeFileTransferFrame,
@@ -13,9 +15,13 @@ import {
 export type BinaryFrame =
   | { kind: "host_route"; frame: HostRouteFrame }
   | { kind: "terminal"; frame: TerminalStreamFrame }
-  | { kind: "file_transfer"; frame: FileTransferFrame };
+  | { kind: "file_transfer"; frame: FileTransferFrame }
+  | { kind: "tunnel"; frame: TunnelStreamFrame }
+  | { kind: "viewer_http"; frame: ViewerHttpFrame };
 
 export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
+  const viewerFrame = decodeViewerHttpFrame(bytes);
+  if (viewerFrame) return { kind: "viewer_http", frame: viewerFrame };
   switch (bytes[0]) {
     case HOST_ROUTE_OPCODE: {
       const frame = decodeHostRouteFrame(bytes);
@@ -34,6 +40,14 @@ export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
     case FileTransferOpcode.FileEnd: {
       const frame = decodeFileTransferFrame(bytes);
       return frame ? { kind: "file_transfer", frame } : null;
+    }
+    case TunnelStreamOpcode.Data:
+    case TunnelStreamOpcode.End:
+    case TunnelStreamOpcode.Pause:
+    case TunnelStreamOpcode.Reset:
+    case TunnelStreamOpcode.Resume: {
+      const frame = decodeTunnelStreamFrame(bytes);
+      return frame ? { kind: "tunnel", frame } : null;
     }
     default:
       return null;

@@ -276,6 +276,7 @@ export interface DaemonServerInfo {
   hostname: string | null;
   version: string | null;
   desktopManaged?: boolean;
+  experimentViewer?: ServerInfoStatusPayload["experimentViewer"];
   capabilities?: ServerCapabilities;
   features?: ServerInfoStatusPayload["features"];
 }
@@ -289,6 +290,7 @@ export function toDaemonServerInfo(serverInfo: ServerInfoStatusPayload): DaemonS
     ...(serverInfo.desktopManaged !== undefined
       ? { desktopManaged: serverInfo.desktopManaged }
       : {}),
+    ...(serverInfo.experimentViewer ? { experimentViewer: serverInfo.experimentViewer } : {}),
     ...(serverInfo.capabilities ? { capabilities: serverInfo.capabilities } : {}),
     ...(serverInfo.features ? { features: serverInfo.features } : {}),
   };

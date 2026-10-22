@@ -1,3 +1,4 @@
+import { useOpenViewer } from "@/viewers/use-open-viewer";
 import {
   createContext,
   useCallback,
@@ -9,6 +10,7 @@ import {
 } from "react";
 import React from "react";
 import type { ToastApi } from "@/components/toast-host";
+import type { ViewerDeepLinkTarget } from "@getpaseo/protocol/viewer-deep-link";
 import type { OpenFileDisposition } from "@/workspace/file-open";
 import type { InlinePathTarget } from "./parse";
 import type { AssistantFileLinkContext, GetDirectorySuggestions } from "./resolver";
@@ -24,6 +26,7 @@ export interface AssistantFileLinkResolverConfig {
   workspaceRoot?: string;
   relativePathBase?: string;
   onOpenWorkspaceFile?: (target: InlinePathTarget, disposition: OpenFileDisposition) => void;
+  onOpenViewer?: (target: ViewerDeepLinkTarget) => void;
   toast?: ToastApi | null;
 }
 
@@ -45,15 +48,18 @@ export function AssistantFileLinkResolverProvider({
   workspaceRoot,
   relativePathBase,
   onOpenWorkspaceFile,
+  onOpenViewer,
   toast,
   children,
 }: AssistantFileLinkResolverProviderProps) {
+  const openViewer = useOpenViewer(toast);
   const configRef = useRef<AssistantFileLinkResolverConfig>({
     client,
     serverId,
     workspaceRoot,
     relativePathBase,
     onOpenWorkspaceFile,
+    onOpenViewer: onOpenViewer ?? openViewer,
     toast,
   });
   configRef.current = {
@@ -62,6 +68,7 @@ export function AssistantFileLinkResolverProvider({
     workspaceRoot,
     relativePathBase,
     onOpenWorkspaceFile,
+    onOpenViewer: onOpenViewer ?? openViewer,
     toast,
   };
 

@@ -38,6 +38,7 @@ interface SubscriptionOwner extends RetainedOwner {
 }
 
 export interface OwnedOperation {
+  emitBinary(frame: Uint8Array): Promise<void>;
   readonly source: object;
   readonly signal: AbortSignal;
   emit(message: SessionOutboundMessage): void;
@@ -368,6 +369,11 @@ export class SessionDelivery {
       emit: (message) => {
         if (!owner.active || !source.active || !accepts(message)) return;
         this.sendOwned(owner, message);
+      },
+      emitBinary: async (frame) => {
+        if (!owner.active || !source.active) throw new Error("Operation source is closed");
+        this.proofs.set(frame, owner);
+        await this.sendBinary(source.socket, frame);
       },
       release: () => this.releaseOwner(owner),
     };

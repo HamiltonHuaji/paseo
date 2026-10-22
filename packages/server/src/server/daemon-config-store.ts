@@ -158,7 +158,7 @@ function omitProvidersFromOverrides(
   return Object.keys(nextOverrides).length > 0 ? nextOverrides : undefined;
 }
 
-function getValueAtPath(config: MutableDaemonConfig, path: string): unknown {
+function getValueAtPath(config: unknown, path: string): unknown {
   return path
     .split(".")
     .reduce<unknown>((value, segment) => (isRecord(value) ? value[segment] : undefined), config);
@@ -319,6 +319,7 @@ export class DaemonConfigStore {
   private readonly reloadSource: DaemonConfigReloadSource | undefined;
   private readonly startupPersisted: PersistedConfig;
   private lastKnownPersisted: PersistedConfig;
+  private readonly runtimeAppliedPersistedValues = new Map<string, unknown>();
 
   constructor(
     paseoHome: string,
@@ -353,6 +354,12 @@ export class DaemonConfigStore {
 
   public setAgentSkillSelection(selection: AgentSkillSelection): MutableDaemonConfig {
     return this.applySupportedPatch({ skills: { selection } });
+  }
+
+  public acknowledgePersistedPathApplied(path: string): void {
+    const persisted = loadPersistedConfig(this.paseoHome, this.logger);
+    this.runtimeAppliedPersistedValues.set(path, getValueAtPath(persisted, path));
+    this.lastKnownPersisted = persisted;
   }
 
   private applySupportedPatch(parsedPatch: SupportedMutableConfigPatch): MutableDaemonConfig {
@@ -437,6 +444,15 @@ export class DaemonConfigStore {
     const restartRequiredPaths = compactOwnedPaths(
       diffPaths(this.startupPersisted, persisted).filter((path) => {
         if (path === "$schema" || path === "version") return false;
+        if (
+          this.runtimeAppliedPersistedValues.has(path) &&
+          isEqualValue(
+            getValueAtPath(persisted, path),
+            this.runtimeAppliedPersistedValues.get(path),
+          )
+        ) {
+          return false;
+        }
         if (RELOADABLE_PATHS.some((owner) => pathBelongsTo(path, owner))) return false;
         return !resolved.overrideControlledPaths.some((owner) => pathBelongsTo(path, owner));
       }),

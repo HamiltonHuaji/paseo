@@ -285,6 +285,16 @@ async function dispatchResolvedLink(input: {
   context: AssistantFileLinkResolverContextValue;
 }) {
   const { value } = input.resolution;
+  if (value.kind === "viewer") {
+    const current = input.context.configRef.current;
+    if (
+      current.serverId === input.capturedServerId &&
+      current.workspaceRoot === input.capturedWorkspaceRoot
+    ) {
+      current.onOpenViewer?.(value.target);
+    }
+    return;
+  }
   if (value.kind === "file") {
     await dispatchFileTarget({
       target: value.target,

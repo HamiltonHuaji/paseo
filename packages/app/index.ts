@@ -1,3 +1,4 @@
+import { registerViewerProxyTask } from "./src/viewers/proxy-task";
 // Install runtime polyfills before any other module evaluates. Keep this the first import.
 // oxlint-disable-next-line import/no-unassigned-import -- Polyfills install on import.
 import "./src/polyfills/install-early";
@@ -12,5 +13,6 @@ import { renderRootComponent } from "expo-router/build/renderRootComponent";
 import { startWatchdog } from "./src/watchdog";
 import { RootApp } from "./src/root-app";
 
+registerViewerProxyTask();
 startWatchdog();
 renderRootComponent(RootApp);

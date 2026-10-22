@@ -1298,7 +1298,8 @@ export class VoiceAssistantWebSocketServer {
       this.incrementRuntimeCounter("applicationBinaryRejected");
       if (reportRejection)
         this.logger.warn({ bytes: frame.byteLength }, "ws_application_binary_delivery_denied");
-      return;
+      ws.close(1011, "Binary delivery owner unavailable");
+      throw new Error("Binary delivery owner unavailable");
     }
     this.sendFrameToClient(ws, frame, outboundFrameByteLength(frame), () => {
       this.runtimeMetrics.recordOutboundBinaryFrame(ws.bufferedAmount);
@@ -1952,7 +1953,16 @@ export class VoiceAssistantWebSocketServer {
       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
+      ...(this.daemonRuntimeConfig?.experimentViewer
+        ? { experimentViewer: this.daemonRuntimeConfig.experimentViewer }
+        : {}),
       features: {
+        experimentViewerTransport: true,
+        viewerHttpProxy: session.supports(CLIENT_CAPS.viewerHttpFramingV2),
+        viewerHttpFramingV2: true,
+        viewerHttpFlowControl: true,
+        experimentViewerListenControl:
+          this.daemonRuntimeConfig?.configureExperimentViewerHost !== undefined,
         connectedHosts: true,
         hostMultiplexing: true,
         usageSources: true,
@@ -2143,6 +2153,21 @@ export class VoiceAssistantWebSocketServer {
         config,
       },
     });
+  }
+
+  public broadcastServerInfo(): void {
+    for (const connection of new Set(this.sessions.values())) {
+      if (
+        ![...connection.sockets].some((socket) =>
+          connection.session.wantsSourceEvent(socket, "status.server_info"),
+        )
+      )
+        continue;
+      connection.session.publish({
+        type: "status",
+        payload: this.buildServerInfoStatusPayload(connection.session),
+      });
+    }
   }
 
   private broadcastCapabilitiesUpdate(): void {

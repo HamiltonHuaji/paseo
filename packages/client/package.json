@@ -33,6 +33,22 @@
     "./internal/hosts": {
       "types": "./dist/hosts/index.d.ts",
       "default": "./dist/hosts/index.js"
+    },
+    "./internal/viewer-http-proxy": {
+      "types": "./dist/viewer-http-proxy.d.ts",
+      "default": "./dist/viewer-http-proxy.js"
+    },
+    "./internal/viewer-http-upstream": {
+      "types": "./dist/viewer-http-upstream.d.ts",
+      "default": "./dist/viewer-http-upstream.js"
+    },
+    "./node/local-tunnel-forwarder": {
+      "types": "./dist/node/local-tunnel-forwarder.d.ts",
+      "default": "./dist/node/local-tunnel-forwarder.js"
+    },
+    "./node/local-viewer-http-proxy": {
+      "types": "./dist/node/local-viewer-http-proxy.d.ts",
+      "default": "./dist/node/local-viewer-http-proxy.js"
     }
   },
   "publishConfig": {

@@ -1,3 +1,5 @@
+const INTERNAL_SERVICE_WORKSPACE_ID = "__paseo_daemon_internal__";
+const INTERNAL_SERVICE_PROJECT_SLUG = "paseo";
 import http, { createServer as createHTTPServer } from "node:http";
 import net from "node:net";
 import { connectToLocalService, requestLocalService } from "./local-service-connection.js";
@@ -55,6 +57,14 @@ export interface WorkspaceServiceIdentity {
 }
 
 export interface RegisterWorkspaceServiceInput extends WorkspaceServiceIdentity {
+  port: number;
+  publicBaseUrl?: string | null;
+  healthCheck?: boolean;
+}
+
+export interface RegisterInternalServiceInput {
+  host?: string;
+  serviceName: string;
   port: number;
   publicBaseUrl?: string | null;
 }
@@ -799,6 +809,9 @@ export function createScriptProxyUpgradeHandler({
 
 export interface ServiceProxySubsystem {
   registerWorkspaceService(input: RegisterWorkspaceServiceInput): ServiceProxyRouteEntry;
+  registerInternalService(input: RegisterInternalServiceInput): ServiceProxyRouteEntry;
+  removeInternalService(serviceName: string): void;
+  resolveInternalService(serviceName: string): (ServiceProxyRoute & { host: string }) | null;
   removeWorkspaceService(params: { workspaceId: string; scriptName: string }): void;
   removeServiceRoutesByHostnames(hostnames: string[]): void;
   replaceWorkspaceBranchRoutes(params: { workspaceId: string; newBranch: string | null }): boolean;
@@ -848,6 +861,7 @@ export function createServiceProxySubsystem({
 }
 
 class NodeServiceProxySubsystem implements ServiceProxySubsystem {
+  private readonly internalServiceHosts = new Map<string, string>();
   private readonly routes: ServiceProxyRouteRegistry;
   private standaloneServer: ReturnType<typeof createHTTPServer> | null = null;
   private standaloneListenTarget: ServiceProxyListenTarget | null = null;
@@ -861,6 +875,40 @@ class NodeServiceProxySubsystem implements ServiceProxySubsystem {
 
   registerWorkspaceService(input: RegisterWorkspaceServiceInput): ServiceProxyRouteEntry {
     return this.routes.registerWorkspaceService(input);
+  }
+
+  registerInternalService(input: RegisterInternalServiceInput): ServiceProxyRouteEntry {
+    this.internalServiceHosts.set(input.serviceName, input.host ?? "127.0.0.1");
+    return this.routes.registerWorkspaceService({
+      workspaceId: INTERNAL_SERVICE_WORKSPACE_ID,
+      projectSlug: INTERNAL_SERVICE_PROJECT_SLUG,
+      branchName: null,
+      scriptName: input.serviceName,
+      port: input.port,
+      publicBaseUrl: input.publicBaseUrl,
+      healthCheck: false,
+    });
+  }
+
+  removeInternalService(serviceName: string): void {
+    this.internalServiceHosts.delete(serviceName);
+    this.routes.removeRouteForWorkspaceScript({
+      workspaceId: INTERNAL_SERVICE_WORKSPACE_ID,
+      scriptName: serviceName,
+    });
+  }
+
+  resolveInternalService(serviceName: string): (ServiceProxyRoute & { host: string }) | null {
+    const route = this.routes
+      .listRoutesForWorkspace(INTERNAL_SERVICE_WORKSPACE_ID)
+      .find((entry) => entry.scriptName === serviceName);
+    return route
+      ? {
+          hostname: route.hostname,
+          port: route.port,
+          host: this.internalServiceHosts.get(serviceName) ?? "127.0.0.1",
+        }
+      : null;
   }
 
   removeWorkspaceService(params: { workspaceId: string; scriptName: string }): void {

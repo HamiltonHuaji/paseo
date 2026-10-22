@@ -64,6 +64,45 @@ export interface DesktopOpenerBridge {
   openUrl?: (url: string) => Promise<void>;
 }
 
+export type DesktopTunnelConnection =
+  | {
+      type: "relay";
+      relayEndpoint: string;
+      useTls?: boolean;
+      daemonPublicKeyB64: string;
+    }
+  | {
+      type: "directTcp";
+      endpoint: string;
+      useTls?: boolean;
+      password?: string;
+    };
+
+export interface DesktopTunnelBridge {
+  ensure?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
+    target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
+  }) => Promise<{ origin: string }>;
+  updateRoute?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
+    target: { type: "tcp"; host: string; port: number } | { type: "service"; name: string };
+  }) => Promise<{ updated: boolean }>;
+}
+
+export interface DesktopViewerHttpBridge {
+  syncHosts?: (serverIds: string[]) => Promise<void>;
+  ensure?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
+  }) => Promise<{ origin: string }>;
+  updateRoute?: (input: {
+    serverId: string;
+    connection: DesktopTunnelConnection;
+  }) => Promise<{ updated: boolean }>;
+}
+
 export interface DesktopEditorTargetDescriptor {
   id: string;
   label: string;
@@ -183,6 +222,8 @@ export interface DesktopHostBridge {
   dialog?: DesktopDialogBridge;
   notification?: DesktopNotificationBridge;
   opener?: DesktopOpenerBridge;
+  tunnel?: DesktopTunnelBridge;
+  viewerHttp?: DesktopViewerHttpBridge;
   editor?: DesktopEditorBridge;
   webUtils?: DesktopWebUtilsBridge;
   menu?: DesktopMenuBridge;

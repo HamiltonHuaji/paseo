@@ -1,3 +1,10 @@
+import {
+  decodeTunnelStreamFrame,
+  decodeViewerHttpFrame,
+} from "@getpaseo/protocol/binary-frames/index";
+import type { TunnelTarget } from "@getpaseo/protocol/tunnels";
+import { DaemonTunnel } from "./daemon-tunnel.js";
+import { ViewerHttpStream } from "./viewer-http-stream.js";
 import type { ScheduleCadence } from "@getpaseo/protocol/schedule/types";
 import {
   HOST_ROUTE_OPCODE,
@@ -1290,6 +1297,7 @@ interface PendingSend {
   resolve: () => void;
   reject: (error: Error) => void;
   timeoutHandle: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
 }
 
 interface PingProbe {
@@ -1329,6 +1337,8 @@ function buildFetchAgentsRequest(
 }
 
 export class DaemonClient {
+  private readonly tunnels = new Map<string, DaemonTunnel>();
+  private readonly viewerHttpStreams = new Map<string, ViewerHttpStream>();
   private readonly providerSnapshotUpdates = new ProviderSnapshotUpdates({
     active: (message) => this.owned.owns(message),
     fetch: (cwd) => this.requestProvidersSnapshot({ cwd }),
@@ -1469,6 +1479,90 @@ export class DaemonClient {
     });
 
     return this.connectPromise;
+  }
+
+  /** Resolve a daemon-served HTTP path when this client has a direct connection. */
+  resolveDirectHttpUrl(pathname: string): string | null {
+    if (this.logConnectionPath !== "direct") return null;
+    try {
+      const url = new URL(this.config.url);
+      if (url.protocol !== "ws:" && url.protocol !== "wss:") return null;
+      url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+      url.pathname = pathname.startsWith("/") ? pathname : `/${pathname}`;
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  async openTunnel(target: TunnelTarget): Promise<DaemonTunnel> {
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"tunnel.open.response">({
+      message: { type: "tunnel.open.request", target },
+    });
+    const tunnel = new DaemonTunnel(
+      payload.tunnelId,
+      (frame) => this.sendBinaryFrame(frame),
+      () => this.tunnels.delete(payload.tunnelId),
+    );
+    this.tunnels.set(payload.tunnelId, tunnel);
+    return tunnel;
+  }
+
+  async fetchViewerHttp(input: {
+    method: "GET" | "HEAD";
+    path: string;
+    headers: Record<string, string>;
+    signal?: AbortSignal;
+  }): Promise<{ status: number; headers: Record<string, string>; stream: ViewerHttpStream }> {
+    if (this.getLastServerInfoMessage()?.features?.viewerHttpFramingV2 !== true) {
+      throw new Error("Update the host to use the viewer HTTP proxy");
+    }
+    if (input.signal?.aborted) throw new Error("Viewer request cancelled");
+    const requestId = this.createRequestId();
+    // Install before sending: HEAD/304 can deliver End in the same transport turn as headers.
+    const stream = new ViewerHttpStream(
+      requestId,
+      (frame) => this.sendBinaryFrame(frame),
+      () => this.viewerHttpStreams.delete(requestId),
+      // COMPAT(viewerHttpFlowControl): added after v0.9.5; old daemons use pause/resume.
+      this.getLastServerInfoMessage()?.features?.viewerHttpFlowControl === true,
+    );
+    this.viewerHttpStreams.set(requestId, stream);
+    const onAbort = () => {
+      try {
+        stream.cancel();
+      } catch {
+        // A disconnected transport has already ended the upstream request.
+        stream.abort();
+      }
+    };
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    if (input.signal?.aborted) onAbort();
+    try {
+      const payload =
+        await this.sendNamespacedCorrelatedSessionRequest<"viewer.http.fetch.response">({
+          requestId,
+          // Relay transit does not define a resource deadline. Browser abort or
+          // transport closure cancels the waiter instead.
+          timeout: 0,
+          signal: input.signal,
+          message: {
+            type: "viewer.http.fetch.request",
+            method: input.method,
+            path: input.path,
+            headers: input.headers,
+          },
+        });
+      if (input.signal?.aborted) throw new Error("Viewer request cancelled");
+      return { status: payload.status, headers: payload.headers, stream };
+    } catch (error) {
+      onAbort();
+      throw error;
+    } finally {
+      input.signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   private async attemptConnect(): Promise<void> {
@@ -1689,6 +1783,7 @@ export class DaemonClient {
     this.creations.close();
     this.rejectPendingSendQueue(new Error("Daemon client closed"));
     this.rejectPingProbe(new Error("Daemon client closed"));
+    this.abortTunnels();
     this.terminalStreams.clearSlots();
     this.lastServerInfoMessage = null;
     if (this.runtimeMetricsInterval) {
@@ -2099,11 +2194,14 @@ export class DaemonClient {
    * is queued and will be sent once connected (or rejected after timeout).
    * This prevents waiters from hanging forever when called during connection.
    */
-  private sendSessionMessageOrThrow(message: SessionInboundMessage): Promise<void> {
+  private sendSessionMessageOrThrow(
+    message: SessionInboundMessage,
+    signal?: AbortSignal,
+  ): Promise<void> {
     return this.sendWhenConnected(() => {
       const payload = SessionInboundMessageSchema.parse(message);
       this.sendSessionPayload(payload);
-    });
+    }, signal);
   }
 
   /** Resolves once connected, waiting out a connection that is still being established. */
@@ -2111,7 +2209,8 @@ export class DaemonClient {
     return this.sendWhenConnected(() => undefined);
   }
 
-  private sendWhenConnected(send: () => void): Promise<void> {
+  private sendWhenConnected(send: () => void, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(new Error("Request cancelled"));
     const status = this.connectionState.status;
 
     // If connected, send immediately
@@ -2123,13 +2222,30 @@ export class DaemonClient {
     // If connecting, queue the message to be sent once connected
     if (status === "connecting") {
       return new Promise((resolve, reject) => {
+        let settled = false;
+        let pending: PendingSend;
+        const resolveQueued = () => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+          resolve();
+        };
+        const rejectQueued = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", onAbort);
+          reject(error);
+        };
+        const onAbort = () => {
+          clearTimeout(timeoutHandle);
+          const index = this.pendingSendQueue.indexOf(pending);
+          if (index >= 0) this.pendingSendQueue.splice(index, 1);
+          rejectQueued(new Error("Request cancelled"));
+        };
         const timeoutHandle = setTimeout(() => {
-          // Remove from queue
-          const idx = this.pendingSendQueue.findIndex((p) => p.resolve === resolve);
-          if (idx !== -1) {
-            this.pendingSendQueue.splice(idx, 1);
-          }
-          reject(
+          const index = this.pendingSendQueue.indexOf(pending);
+          if (index >= 0) this.pendingSendQueue.splice(index, 1);
+          rejectQueued(
             new DaemonConnectionError(
               "Timed out waiting for connection to send message",
               "DAEMON_REQUEST_TIMEOUT",
@@ -2137,7 +2253,10 @@ export class DaemonClient {
           );
         }, DEFAULT_SEND_QUEUE_TIMEOUT_MS);
 
-        this.pendingSendQueue.push({ send, resolve, reject, timeoutHandle });
+        pending = { send, resolve: resolveQueued, reject: rejectQueued, timeoutHandle, signal };
+        this.pendingSendQueue.push(pending);
+        signal?.addEventListener("abort", onAbort, { once: true });
+        if (signal?.aborted) onAbort();
       });
     }
 
@@ -2155,6 +2274,10 @@ export class DaemonClient {
     for (const pending of queue) {
       clearTimeout(pending.timeoutHandle);
       try {
+        if (pending.signal?.aborted) {
+          pending.reject(new Error("Request cancelled"));
+          continue;
+        }
         if (this.transport && this.connectionState.status === "connected") {
           pending.send();
           pending.resolve();
@@ -2184,6 +2307,7 @@ export class DaemonClient {
     requestId: string;
     message: SessionInboundMessage;
     timeout?: number;
+    signal?: AbortSignal;
     select: (msg: SessionOutboundMessage) => T | null;
     options?: { skipQueue?: boolean };
   }): Promise<T> {
@@ -2212,13 +2336,17 @@ export class DaemonClient {
       timeout,
       { ...params.options, requestId: params.requestId },
     );
+    const onAbort = () => cancel(new Error("Request cancelled"));
+    params.signal?.addEventListener("abort", onAbort, { once: true });
+    if (params.signal?.aborted) onAbort();
 
     try {
-      await this.sendSessionMessageOrThrow(wire.message);
+      await this.sendSessionMessageOrThrow(wire.message, params.signal);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       cancel(err);
       void promise.catch(() => undefined);
+      params.signal?.removeEventListener("abort", onAbort);
       throw err;
     }
 
@@ -2227,6 +2355,7 @@ export class DaemonClient {
       if (result.kind === "error") throw result.error;
       return result.value;
     } finally {
+      params.signal?.removeEventListener("abort", onAbort);
       await wire.finish();
     }
   }
@@ -2238,6 +2367,7 @@ export class DaemonClient {
     requestId: string;
     message: SessionInboundMessage;
     timeout?: number;
+    signal?: AbortSignal;
     responseType: TResponseType;
     options?: { skipQueue?: boolean };
     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
@@ -2246,6 +2376,7 @@ export class DaemonClient {
       requestId: params.requestId,
       message: params.message,
       timeout: params.timeout,
+      signal: params.signal,
       options: params.options,
       select: (msg) => {
         const correlated = msg as CorrelatedResponseMessage;
@@ -2272,6 +2403,7 @@ export class DaemonClient {
     message: { type: SessionInboundMessage["type"] } & Record<string, unknown>;
     responseType: TResponseType;
     timeout?: number;
+    signal?: AbortSignal;
     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
   }): Promise<TResult> {
     const resolvedRequestId = this.createRequestId(params.requestId);
@@ -2284,6 +2416,7 @@ export class DaemonClient {
       message,
       responseType: params.responseType,
       timeout: params.timeout,
+      signal: params.signal,
       options: { skipQueue: true },
       ...(params.selectPayload ? { selectPayload: params.selectPayload } : {}),
     });
@@ -2299,6 +2432,7 @@ export class DaemonClient {
       unknown
     >;
     timeout?: number;
+    signal?: AbortSignal;
     selectPayload?: (payload: CorrelatedResponsePayload<TResponseType>) => TResult | null;
   }): Promise<TResult> {
     const responseType = params.message.type.replace(/\.request$/, ".response") as TResponseType;
@@ -7156,6 +7290,17 @@ export class DaemonClient {
     }
   }
 
+  async configureExperimentViewerHost(listen: string, requestId?: string) {
+    if (this.lastServerInfoMessage?.features?.experimentViewerListenControl !== true) {
+      throw new Error("Update the host to configure the experiment viewer listener.");
+    }
+    return this.sendNamespacedCorrelatedSessionRequest<"experiment.viewer.host.configure.response">(
+      {
+        requestId,
+        message: { type: "experiment.viewer.host.configure.request", listen },
+      },
+    );
+  }
   private tryHandleBinaryFrame(rawBytes: Uint8Array): boolean {
     const hostFrame = decodeHostRouteFrame(rawBytes);
     if (rawBytes[0] === HOST_ROUTE_OPCODE && !hostFrame) {
@@ -7177,6 +7322,22 @@ export class DaemonClient {
       });
       this.consecutiveLivenessFailures = 0;
       this.handleFileTransferFrame(fileFrame);
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
+
+    const tunnelFrame = decodeTunnelStreamFrame(rawBytes);
+    if (tunnelFrame) {
+      this.consecutiveLivenessFailures = 0;
+      this.tunnels.get(tunnelFrame.tunnelId)?.handleFrame(tunnelFrame);
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
+
+    const viewerFrame = decodeViewerHttpFrame(rawBytes);
+    if (viewerFrame) {
+      this.consecutiveLivenessFailures = 0;
+      this.viewerHttpStreams.get(viewerFrame.requestId)?.handleFrame(viewerFrame);
       this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
       return true;
     }
@@ -7345,6 +7506,14 @@ export class DaemonClient {
     }
   }
 
+  private abortTunnels(): void {
+    const tunnels = [...this.tunnels.values()];
+    this.tunnels.clear();
+    for (const tunnel of tunnels) tunnel.abort();
+    const viewerStreams = [...this.viewerHttpStreams.values()];
+    this.viewerHttpStreams.clear();
+    for (const stream of viewerStreams) stream.abort();
+  }
   private scheduleReconnect(input?: {
     failure?: Error;
     reason?: string;
@@ -7379,6 +7548,7 @@ export class DaemonClient {
     this.clearWaiters(connectionError, true);
     this.rejectPendingSendQueue(connectionError);
     this.rejectPingProbe(connectionError);
+    this.abortTunnels();
     this.terminalStreams.clearSlots();
     this.lastServerInfoMessage = null;
 

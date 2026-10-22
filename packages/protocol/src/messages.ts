@@ -58,6 +58,8 @@ import {
   ExperimentViewerResolveRequestSchema,
   ExperimentViewerResolveResponseSchema,
 } from "./experiments.js";
+import { TunnelOpenRequestSchema, TunnelOpenResponseSchema } from "./tunnels.js";
+import { ViewerHttpFetchRequestSchema, ViewerHttpFetchResponseSchema } from "./viewer-http.js";
 import { AgentMessageSchema } from "./agent-message.js";
 import {
   HostsListRequestSchema,
@@ -1488,6 +1490,12 @@ export const DaemonGetStatusRequestSchema = z.object({
 export const DaemonGetPairingOfferRequestSchema = z.object({
   type: z.literal("daemon.get_pairing_offer.request"),
   requestId: z.string(),
+});
+
+export const ExperimentViewerHostConfigureRequestSchema = z.object({
+  type: z.literal("experiment.viewer.host.configure.request"),
+  requestId: z.string(),
+  listen: z.string().trim().min(1),
 });
 
 export const DaemonConfigReloadRequestSchema = z.object({
@@ -3391,6 +3399,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WaitForFinishRequestSchema,
   DaemonGetStatusRequestSchema,
   DaemonGetPairingOfferRequestSchema,
+  ExperimentViewerHostConfigureRequestSchema,
+  TunnelOpenRequestSchema,
+  ViewerHttpFetchRequestSchema,
   DaemonConfigReloadRequestSchema,
   HubManagementDaemonConnectRequestSchema,
   HubManagementDaemonGetStatusRequestSchema,
@@ -3733,6 +3744,17 @@ export const ServerInfoStatusPayloadSchema = z
     permissions: z.array(DaemonPermissionSchema).optional(),
     // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.
     desktopManaged: z.boolean().optional(),
+    experimentViewer: z
+      .object({
+        host: z.string().min(1),
+        port: z.number().int().min(1).max(65535),
+        scope: z.enum(["loopback", "network"]),
+        preferredListen: z.string().min(1).optional(),
+        configurationSource: z.enum(["persisted", "environment"]).optional(),
+      })
+      .passthrough()
+      .optional(),
+
     capabilities: ServerCapabilitiesFromUnknownSchema.optional(),
     // COMPAT(providersSnapshot): added in v0.1.48, remove gating when all clients use snapshot
     features: z
@@ -3900,6 +3922,11 @@ export const ServerInfoStatusPayloadSchema = z
         selectiveAgentTimeline: z.boolean().optional(),
         explicitEventSubscriptions: z.boolean().optional(),
         ownedSubscriptions: z.boolean().optional(),
+        experimentViewerTransport: z.boolean().optional(),
+        viewerHttpProxy: z.boolean().optional(),
+        viewerHttpFramingV2: z.boolean().optional(),
+        viewerHttpFlowControl: z.boolean().optional(),
+        experimentViewerListenControl: z.boolean().optional(),
         workspaceSetupObservation: z.boolean().optional(),
         // COMPAT(canonicalSubmittedPrompts): added in v0.2.6, remove gate after 2027-01-30.
         canonicalSubmittedPrompts: z.boolean().optional(),
@@ -5260,6 +5287,19 @@ export const DaemonGetPairingOfferResponseSchema = z.object({
       relayEnabled: z.boolean(),
     })
     .passthrough(),
+});
+
+export const ExperimentViewerHostConfigureResponseSchema = z.object({
+  type: z.literal("experiment.viewer.host.configure.response"),
+  payload: z.object({
+    requestId: z.string(),
+    listen: z.string().min(1),
+    viewer: z.object({
+      host: z.string().min(1),
+      port: z.number().int().min(1).max(65535),
+      scope: z.enum(["loopback", "network"]),
+    }),
+  }),
 });
 
 export const DaemonConfigReloadResponseSchema = z.object({
@@ -7185,6 +7225,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SetVoiceModeResponseMessageSchema,
   DaemonGetStatusResponseSchema,
   DaemonGetPairingOfferResponseSchema,
+  ExperimentViewerHostConfigureResponseSchema,
+  TunnelOpenResponseSchema,
+  ViewerHttpFetchResponseSchema,
   DaemonConfigReloadResponseSchema,
   HubManagementDaemonConnectResponseSchema,
   HubManagementDaemonGetStatusResponseSchema,

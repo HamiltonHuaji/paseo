@@ -24,12 +24,15 @@ it("serves Works RPCs, shared metrics/progress, artifact bytes and v1 viewers th
     const installedSkill = path.join(
       path.dirname(daemon.paseoHome),
       "provider-home",
-      ".codex",
+      ".agents",
       "skills",
       "paseo-works",
       "SKILL.md",
     );
     expect((await stat(installedSkill)).isFile()).toBe(true);
+    const installedSkillBody = await readFile(installedSkill, "utf8");
+    expect(installedSkillBody).toContain("name: paseo-works");
+    expect(installedSkillBody).toContain("Find the work before starting");
     const workspace = await client.createWorkspace({ source: { kind: "directory", path: root } });
     const projectId = workspace.workspace!.projectId;
     const fixture = await readFile(
