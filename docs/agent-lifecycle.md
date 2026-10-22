@@ -154,8 +154,9 @@ An empty active list cannot cancel an explicit History selection. Agent-detail l
 not own selection or release the explicit open.
 
 Persisted resume, native restore, and both live and stored-only archive enter the same per-agent
-lifecycle queue. Resume chooses its history or interactive purpose from the durable record after
-entering that queue. Shutdown must finish before the manager releases runtime ownership; a failed
+lifecycle queue. Resume checks the durable archive state after entering that queue; an archived
+record always uses the history purpose. Detail, timeline, and fork-context reads request history
+even for closed, unarchived records. Shutdown must finish before the manager releases runtime ownership; a failed
 close retains the runtime for cleanup and blocks replacement through that close operation.
 
 Authoritative timeline catch-up can use a runtime-only `history` resume purpose. The retained
@@ -163,8 +164,10 @@ history session contains only the read results and must release its provider pro
 finishes. Codex reads the persisted thread and child histories on a temporary app-server and never
 loads, resumes, or unarchives a native thread, including legacy records whose native archive failed.
 ACP providers spawn the CLI, replay the session through `session/load`, and terminate the process
-before returning. Interactive resume remains responsible for repairing a provider session archived
-outside Paseo while its Paseo agent is active.
+before returning. A Codex history session opens an interactive connection when an explicit prompt,
+rewind, compact, or goal operation needs it. Interactive resume remains responsible for repairing
+a provider session archived outside Paseo while its Paseo agent is active. Historical turn events
+alone do not establish whether a separate provider execution is still alive.
 
 Provider session connection owns every process it spawns until the session is registered with
 `AgentManager`. If initialization, persisted-session resume, or initial history hydration fails,

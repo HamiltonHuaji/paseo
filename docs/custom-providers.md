@@ -68,6 +68,7 @@ per-agent examples and provider-specific keys.
 - [Z.AI (Zhipu) coding plan](#zai-zhipu-coding-plan)
 - [Alibaba Cloud (Qwen) coding plan](#alibaba-cloud-qwen-coding-plan)
 - [Codex with a custom OpenAI-compatible endpoint](#codex-with-a-custom-openai-compatible-endpoint)
+- [Codex project storage](#codex-project-storage)
 - [Multiple profiles for the same provider](#multiple-profiles-for-the-same-provider)
 - [Custom binary for a provider](#custom-binary-for-a-provider)
 - [Disabling a provider](#disabling-a-provider)
@@ -227,6 +228,47 @@ For pay-as-you-go, use `ANTHROPIC_API_KEY` with a standard Model Studio key (`sk
 - Official docs: [alibabacloud.com/help/en/model-studio/claude-code-coding-plan](https://www.alibabacloud.com/help/en/model-studio/claude-code-coding-plan)
 
 ---
+
+## Codex project storage
+
+Set `agents.providers.codex.env.PASEO_CODEX_STORAGE` to `"project"` to keep new
+Codex sessions in project-owned storage. The default is `"global"`, which uses
+`CODEX_HOME` or `~/.codex`. Custom Codex provider entries accept the same settings.
+
+```json
+{
+  "agents": {
+    "providers": {
+      "codex": {
+        "env": {
+          "PASEO_CODEX_STORAGE": "project",
+          "PASEO_CODEX_SHARED_RESOURCES": "auth,config,skills,prompts"
+        }
+      }
+    }
+  }
+}
+```
+
+Git checkouts use the common Git directory, so worktrees share storage and removing
+a temporary worktree keeps its sessions. Non-Git directories use
+`.paseo/provider-data/codex` beneath their root. Set `PASEO_CODEX_PROJECT_ROOT` to
+choose a common root for non-Git subdirectories. Each original `CODEX_HOME` gets a
+separate profile directory. Preserve that storage when moving or backing up a
+project; persisted handles retain its absolute path, independently of execution cwd.
+
+`PASEO_CODEX_SHARED_RESOURCES` selects symbolic links to the original user home's
+`auth.json`, `config.toml`, `skills`, and `prompts`. The default is all four; an empty
+string shares none. Removing a selection removes only Paseo's matching link.
+Existing local content remains user-owned. Sharing `config` also shares its defaults;
+use separate original `CODEX_HOME` profiles when those defaults should differ.
+
+Enabling project storage does not migrate or delete global history. Existing
+handles without a recorded storage path continue to use the configured global
+home. Import discovery includes the current project's sessions across worktrees
+and matching global sessions. Ordinary import retains the source storage;
+**Import copy** creates a native branch in the selected destination's storage.
+This does not provide bulk migration or cross-machine credential sharing.
 
 ## Codex with a custom OpenAI-compatible endpoint
 

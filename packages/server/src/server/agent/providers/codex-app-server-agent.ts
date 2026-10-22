@@ -59,6 +59,11 @@ import { renderPromptAttachmentAsText } from "../prompt-attachments.js";
 import { composeSystemPromptParts } from "../system-prompt.js";
 import { curateAgentActivity } from "../activity-curator.js";
 import { readCodexSessionLineage } from "./codex/session-lineage.js";
+import {
+  codexUserHome,
+  findCodexRollout,
+  resolveCodexStorageEnvironment,
+} from "./codex/storage-context.js";
 import { CodexAsyncQuestions, codexAsyncQuestionToTimeline } from "./codex/async-questions.js";
 import {
   mapCodexToolCallEnvelope,
@@ -3650,7 +3655,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     private readonly goalsEnabled: boolean = false,
     private readonly autoReviewEnabled: boolean = false,
     private readonly agentId?: string,
-    private readonly initialResumePurpose: "interactive" | "history" = "interactive",
+    private initialResumePurpose: "interactive" | "history" = "interactive",
   ) {
     this.logger = logger.child({
       module: "agent",
@@ -3743,6 +3748,15 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
     if (this.closed) {
       throw this.createClosedError();
+    }
+  }
+
+  private async connectForExecution(): Promise<void> {
+    await this.connect();
+    if (this.connectionState === "history-ready") {
+      this.initialResumePurpose = "interactive";
+      this.connectionState = "disconnected";
+      await this.connect();
     }
   }
 
@@ -4501,7 +4515,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.dismissPendingPlanApprovals("Dismissed by a new prompt");
 
     try {
-      await this.connect();
+      await this.connectForExecution();
       if (!this.client) {
         throw new Error("Codex client not initialized");
       }
@@ -5059,6 +5073,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       nativeHandle: this.currentThreadId,
       metadata: {
         provider: CODEX_PROVIDER,
+        paseoCodexHome: this.codexHome,
         providerSessionTreeId: this.providerSessionTreeId,
         providerForkedFromId: this.providerForkedFromId,
         branchOperations: this.branchOperations,
@@ -5076,7 +5091,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     };
   }
 
-  async forkNativeSession(threadId: string): Promise<void> {
+  async forkNativeSession(threadId: string, rolloutPath?: string): Promise<void> {
     await this.connect();
     if (!this.client) throw new Error("Codex client is not initialized");
     const config = this.buildCodexInnerConfig();
@@ -5086,6 +5101,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     );
     const forked = await forkCodexThread(this.client, {
       threadId,
+      ...(rolloutPath ? { path: rolloutPath } : {}),
       cwd: this.config.cwd,
       ...(config ? { config } : {}),
       ...(developerInstructions ? { developerInstructions } : {}),
@@ -5162,7 +5178,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   async revertConversation(input: {
     messageId: string;
   }): Promise<{ rollback: () => Promise<void> }> {
-    await this.connect();
+    await this.connectForExecution();
     if (!this.client) {
       throw new Error("Codex client is not initialized");
     }
@@ -5420,7 +5436,7 @@ export class CodexAppServerAgentSession implements AgentSession {
 
   private async executeCompactCommand(): Promise<string | null> {
     try {
-      await this.connect();
+      await this.connectForExecution();
       if (this.currentThreadId) {
         await this.ensureThreadLoaded();
       } else {
@@ -5450,7 +5466,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       return "Usage: /goal <objective>|pause|resume|clear";
     }
     try {
-      await this.connect();
+      await this.connectForExecution();
       if (this.currentThreadId) {
         await this.ensureThreadLoaded();
       } else {
@@ -7464,12 +7480,20 @@ export class CodexAppServerAgentSession implements AgentSession {
 }
 
 export class CodexAppServerAgentClient implements AgentClient {
-  readSessionLineage(activitySessionIds?: readonly string[]) {
-    const env = createProviderEnv({ runtimeSettings: this.runtimeSettings });
-    return readCodexSessionLineage({
-      codexHome: env.CODEX_HOME ?? path.join(env.HOME ?? os.homedir(), ".codex"),
-      activitySessionIds: activitySessionIds,
-    });
+  async readSessionLineage(
+    activitySessionIds?: readonly string[],
+    handles: readonly AgentPersistenceHandle[] = [],
+  ) {
+    const env = buildCodexAppServerEnv(this.runtimeSettings);
+    const homes = new Set([codexUserHome(env)]);
+    for (const handle of handles) {
+      const home = handle.metadata?.paseoCodexHome;
+      if (typeof home === "string") homes.add(home);
+    }
+    const histories = await Promise.all(
+      [...homes].map((codexHome) => readCodexSessionLineage({ codexHome, activitySessionIds })),
+    );
+    return histories.flat();
   }
 
   readonly provider = CODEX_PROVIDER;
@@ -7483,10 +7507,10 @@ export class CodexAppServerAgentClient implements AgentClient {
     private readonly deps: CodexAppServerAgentDeps = {},
   ) {}
 
-  private sessionDeps(launchEnv: Record<string, string> | undefined): CodexAppServerAgentDeps {
+  private sessionDeps(environment: Record<string, string>): CodexAppServerAgentDeps {
     return {
       ...this.deps,
-      codexHome: resolveCodexHomeDir(buildCodexAppServerEnv(this.runtimeSettings, launchEnv)),
+      codexHome: resolveCodexHomeDir(environment),
       customCodexConfig: this.customProviderConfig(),
     };
   }
@@ -7589,7 +7613,10 @@ export class CodexAppServerAgentClient implements AgentClient {
     const sessionConfig: AgentSessionConfig = { ...config, provider: CODEX_PROVIDER };
     const goalsEnabled = await this.resolveGoalsEnabled();
     const autoReviewEnabled = await this.resolveAutoReviewEnabled();
-    const environment = buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env);
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env),
+      config.cwd,
+    );
     const session = new CodexAppServerAgentSession(
       sessionConfig,
       null,
@@ -7600,7 +7627,7 @@ export class CodexAppServerAgentClient implements AgentClient {
           agentId: launchContext?.agentId,
           environment,
         }),
-      { ...this.sessionDeps(launchContext?.env), environment },
+      { ...this.sessionDeps(environment), environment },
       options?.persistSession === false,
       goalsEnabled,
       autoReviewEnabled,
@@ -7626,7 +7653,14 @@ export class CodexAppServerAgentClient implements AgentClient {
     };
     const goalsEnabled = await this.resolveGoalsEnabled();
     const autoReviewEnabled = await this.resolveAutoReviewEnabled();
-    const environment = buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env);
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env),
+      merged.cwd,
+      typeof handle.metadata?.paseoCodexHome === "string"
+        ? handle.metadata.paseoCodexHome
+        : undefined,
+      true,
+    );
     const session = new CodexAppServerAgentSession(
       merged,
       handle,
@@ -7637,7 +7671,7 @@ export class CodexAppServerAgentClient implements AgentClient {
           agentId: launchContext?.agentId,
           environment,
         }),
-      { ...this.sessionDeps(launchContext?.env), environment },
+      { ...this.sessionDeps(environment), environment },
       false,
       goalsEnabled,
       autoReviewEnabled,
@@ -7658,6 +7692,13 @@ export class CodexAppServerAgentClient implements AgentClient {
     }
     const goalsEnabled = await this.resolveGoalsEnabled();
     const autoReviewEnabled = await this.resolveAutoReviewEnabled();
+    const sourceHome = source.describePersistence()?.metadata.paseoCodexHome;
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env),
+      input.targetConfig.cwd,
+      typeof sourceHome === "string" ? sourceHome : undefined,
+      true,
+    );
     const session = new CodexAppServerAgentSession(
       { ...input.targetConfig, provider: CODEX_PROVIDER },
       null,
@@ -7666,8 +7707,9 @@ export class CodexAppServerAgentClient implements AgentClient {
         this.spawnAppServer(launchContext?.env, {
           goalsEnabled,
           agentId: launchContext?.agentId,
+          environment,
         }),
-      this.sessionDeps(launchContext?.env),
+      { ...this.sessionDeps(environment), environment },
       false,
       goalsEnabled,
       autoReviewEnabled,
@@ -7685,7 +7727,34 @@ export class CodexAppServerAgentClient implements AgentClient {
   async listImportableSessions(
     options?: ListImportableSessionsOptions,
   ): Promise<ImportableProviderSession[]> {
-    const child = await this.spawnAppServer();
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings),
+      options?.cwd,
+    );
+    const homes = [
+      ...new Set([
+        environment.CODEX_HOME,
+        codexUserHome(buildCodexAppServerEnv(this.runtimeSettings)),
+      ]),
+    ];
+    const results = await Promise.all(
+      homes.map((home) =>
+        this.listImportableSessionsAtHome(options, { ...environment, CODEX_HOME: home }),
+      ),
+    );
+    return results
+      .flat()
+      .sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime())
+      .slice(0, options?.limit ?? 20);
+  }
+
+  private async listImportableSessionsAtHome(
+    options: ListImportableSessionsOptions | undefined,
+    environment: Record<string, string>,
+  ): Promise<ImportableProviderSession[]> {
+    const projectHome =
+      environment.CODEX_HOME !== codexUserHome(buildCodexAppServerEnv(this.runtimeSettings));
+    const child = await this.spawnAppServer(undefined, { environment });
     const client =
       this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
       new CodexAppServerClient(child, this.logger);
@@ -7706,10 +7775,10 @@ export class CodexAppServerAgentClient implements AgentClient {
       const customProviderConfig = this.customProviderConfig();
       const allThreads = await readCodexThreadWindow(client, this.logger, {
         limit: listLimit,
-        cwd: options?.cwd,
+        cwd: projectHome ? undefined : options?.cwd,
         ...(customProviderConfig ? { modelProviders: [customProviderConfig.model_provider] } : {}),
       });
-      const threads = filterCodexThreadsByCwd(allThreads, options?.cwd);
+      const threads = filterCodexThreadsByCwd(allThreads, projectHome ? undefined : options?.cwd);
       return threads.slice(0, limit).map((thread) => {
         const threadId = typeof thread.id === "string" ? thread.id : "";
         const cwd = typeof thread.cwd === "string" ? thread.cwd : process.cwd();
@@ -7735,11 +7804,27 @@ export class CodexAppServerAgentClient implements AgentClient {
   }
 
   async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings, context.launchContext?.env),
+      input.cwd,
+    );
+    let sourceHome = environment.CODEX_HOME;
+    let rollout = await findCodexRollout(sourceHome, input.providerHandleId);
+    const legacyHome = codexUserHome(
+      buildCodexAppServerEnv(this.runtimeSettings, context.launchContext?.env),
+    );
+    if (!rollout && legacyHome !== sourceHome) {
+      rollout = await findCodexRollout(legacyHome, input.providerHandleId);
+      if (rollout) sourceHome = legacyHome;
+    }
     if (input.fork) {
       const config = { ...context.config, cwd: input.cwd };
       const session = await this.createSession(config, context.launchContext);
       try {
-        await session.forkNativeSession(input.providerHandleId);
+        await session.forkNativeSession(
+          input.providerHandleId,
+          sourceHome !== environment.CODEX_HOME ? rollout : undefined,
+        );
         const persistence = session.describePersistence();
         if (!persistence) throw new Error("Codex did not return a persistence handle for the copy");
         const history = await collectImportedHistory(session.streamHistory());
@@ -7759,11 +7844,32 @@ export class CodexAppServerAgentClient implements AgentClient {
       request: input,
       context,
       resumeSession: this.resumeSession.bind(this),
+      persistence: {
+        provider: CODEX_PROVIDER,
+        sessionId: input.providerHandleId,
+        nativeHandle: input.providerHandleId,
+        metadata: { ...context.storedConfig, cwd: input.cwd, paseoCodexHome: sourceHome },
+      },
     });
   }
 
   async getCatalogCacheKey(options: FetchCatalogOptions): Promise<string> {
-    return options.scope === "workspace" ? options.cwd : "host";
+    const cwd = options.scope === "workspace" ? options.cwd : undefined;
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings),
+      cwd,
+    );
+    const files = [
+      path.join(environment.CODEX_HOME, "config.toml"),
+      ...(cwd ? [path.join(cwd, ".codex", "config.toml")] : []),
+    ];
+    const versions = await Promise.all(
+      files.map(async (file) => {
+        const stat = await fs.stat(file).catch(() => null);
+        return [file, stat?.mtimeMs, stat?.size];
+      }),
+    );
+    return JSON.stringify([cwd ?? "host", versions]);
   }
 
   async fetchCatalog(
@@ -7810,7 +7916,11 @@ export class CodexAppServerAgentClient implements AgentClient {
 
     try {
       await runProviderRefreshActivity(context, "app-server.start", async () => {
-        const child = await this.spawnAppServer();
+        const environment = await resolveCodexStorageEnvironment(
+          buildCodexAppServerEnv(this.runtimeSettings),
+          cwd,
+        );
+        const child = await this.spawnAppServer(undefined, { environment });
         client = new CodexAppServerClient(child, this.logger);
         if (context?.signal.aborted) await dispose();
       });
@@ -7860,7 +7970,15 @@ export class CodexAppServerAgentClient implements AgentClient {
     const threadId = handle.nativeHandle ?? handle.sessionId;
     if (!threadId) return;
 
-    const child = await this.spawnAppServer();
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings),
+      undefined,
+      typeof handle.metadata?.paseoCodexHome === "string"
+        ? handle.metadata.paseoCodexHome
+        : undefined,
+      true,
+    );
+    const child = await this.spawnAppServer(undefined, { environment });
     const client = new CodexAppServerClient(child, this.logger);
 
     try {
@@ -7960,6 +8078,7 @@ function buildCodexModelDefinition(
       model: model.model,
       defaultReasoningEffort: model.defaultReasoningEffort,
       supportedReasoningEfforts: model.supportedReasoningEfforts,
+      serviceTiers: model.serviceTiers ?? [],
     },
   };
 }

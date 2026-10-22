@@ -800,6 +800,7 @@ export interface AgentClient {
   listFeatures?(config: AgentSessionConfig): Promise<AgentFeature[]>;
   readSessionLineage?(
     activitySessionIds?: readonly string[],
+    handles?: readonly AgentPersistenceHandle[],
   ): Promise<import("./session-lineage.js").ProviderSessionLineage[]>;
   listImportableSessions?(
     options?: ListImportableSessionsOptions,

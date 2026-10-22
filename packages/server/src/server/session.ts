@@ -8335,6 +8335,7 @@ export class Session {
       const snapshot = await ensureAgentLoaded(msg.agentId, {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
+        purpose: "history",
         logger: this.sessionLogger,
       });
       const agentPayload = await this.buildAgentPayload(snapshot);
@@ -8465,6 +8466,7 @@ export class Session {
       await ensureAgentLoaded(msg.agentId, {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
+        purpose: "history",
         logger: this.sessionLogger,
       });
       const rows = await this.agentManager.getTimelineRows(msg.agentId);
@@ -8518,6 +8520,7 @@ export class Session {
       await ensureAgentLoaded(msg.agentId, {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
+        purpose: "history",
         logger: this.sessionLogger,
       });
       const rows = await this.agentManager.getTimelineRows(msg.agentId);
@@ -8697,6 +8700,7 @@ export class Session {
       const snapshot = await ensureAgentLoaded(msg.agentId, {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
+        purpose: "history",
         logger: this.sessionLogger,
       });
       const agentPayload = await this.buildAgentPayload(snapshot);

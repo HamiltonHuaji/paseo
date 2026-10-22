@@ -1564,7 +1564,11 @@ export class AgentManager {
     // agent whose working directory may be gone.
     const record = this.registry ? await this.registry.get(resolvedAgentId) : null;
     const currentResumeOptions = record
-      ? { purpose: record.archivedAt ? ("history" as const) : ("interactive" as const) }
+      ? {
+          purpose: record.archivedAt
+            ? ("history" as const)
+            : (resumeOptions?.purpose ?? "interactive"),
+        }
       : resumeOptions;
     const purpose = currentResumeOptions?.purpose ?? "interactive";
 
@@ -2029,6 +2033,7 @@ export class AgentManager {
             matching
               .filter((record) => !record.lastAssistantMessageAt)
               .map((record) => record.persistence!.sessionId),
+            matching.map((record) => record.persistence!),
           ),
           initialIds: initialIds,
         });

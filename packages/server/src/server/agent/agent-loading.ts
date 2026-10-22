@@ -41,6 +41,7 @@ export interface EnsureAgentLoadedDeps {
   agentStorage: AgentStorage;
   validProviders?: Iterable<AgentProvider>;
   broadcastTimeline?: boolean;
+  purpose?: "history" | "interactive";
   logger: Logger;
 }
 
@@ -118,10 +119,12 @@ export async function ensureAgentLoaded(
         buildConfigOverrides(record),
         agentId,
         { ...extractTimestamps(record), attention: extractAttention(record) },
-        record.archivedAt ? { purpose: "history" } : undefined,
+        record.archivedAt ? { purpose: "history" } : { purpose: deps.purpose ?? "interactive" },
       );
       deps.logger.info({ agentId, provider: record.provider }, "Agent resumed from persistence");
     } else {
+      if (deps.purpose === "history")
+        throw new Error("No persisted provider history is available for this agent");
       // No provider handle to resume: this starts the agent's first session rather than
       // bringing one back, so it stamps activity and carries no stored attention. Records
       // without a handle never got far enough to accumulate either.

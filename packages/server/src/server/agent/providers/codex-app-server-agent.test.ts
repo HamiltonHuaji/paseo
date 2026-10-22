@@ -1,5 +1,7 @@
 import { describe, expect, onTestFinished, test, vi } from "vitest";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { resolveCodexStorageEnvironment, findCodexRollout } from "./codex/storage-context.js";
+import { readlink, unlink } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import { type Dirent, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
@@ -1850,6 +1852,78 @@ describe("Codex app-server provider", () => {
     await session.close();
     appServer.assertNoErrors();
   });
+
+  test.each(["rewind", "compact", "goal"] as const)(
+    "promotes a history-only Codex session for explicit %s",
+    async (operation) => {
+      const historyServer = createFakeCodexAppServer();
+      const executionServer = createFakeCodexAppServer({
+        "thread/read": () => ({
+          thread: {
+            id: "saved-thread",
+            historyMode: "legacy",
+            turns: [
+              {
+                id: "saved-turn",
+                items: [
+                  {
+                    type: "userMessage",
+                    id: "saved-message",
+                    content: [{ type: "text", text: "History prompt" }],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        "thread/compact/start": () => ({}),
+        "thread/goal/set": () => ({}),
+      });
+      let spawns = 0;
+      const session = new CodexAppServerAgentSession(
+        createConfig(),
+        { sessionId: "saved-thread" },
+        createTestLogger(),
+        async () => (spawns++ === 0 ? historyServer.child : executionServer.child),
+        {},
+        false,
+        true,
+        false,
+        undefined,
+        "history",
+      );
+      onTestFinished(() => session.close());
+      await session.connect();
+      expect(historyServer.requests().map((request) => request.method)).toEqual([
+        "initialize",
+        "initialized",
+        "thread/read",
+      ]);
+      expect(executionServer.requests()).toEqual([]);
+
+      if (operation === "rewind") {
+        await session.revertConversation({ messageId: "saved-message" });
+        expect(session.describePersistence()?.sessionId).toBe("forked-thread");
+      } else {
+        const command = session.tryHandleOutOfBand(
+          operation === "compact" ? "/compact" : "/goal finish the work",
+        );
+        expect(command).not.toBeNull();
+        await command!.run({ emit: () => {} });
+      }
+      const requests = executionServer.requests().map((request) => request.method);
+      expect(requests).toContain("thread/resume");
+      const operationMethod = {
+        rewind: "thread/fork",
+        compact: "thread/compact/start",
+        goal: "thread/goal/set",
+      };
+      expect(requests).toContain(operationMethod[operation]);
+      expect(spawns).toBe(2);
+      historyServer.assertNoErrors();
+      executionServer.assertNoErrors();
+    },
+  );
 
   test("unarchives Codex when an active Paseo agent resumes an archived thread", async () => {
     const threadRequests: string[] = [];
@@ -7285,6 +7359,87 @@ describe("fork baseline contracts", () => {
           metadata: expect.objectContaining({ completionUnobserved: true }),
         }),
       }),
+    );
+  });
+});
+
+describe("project Codex storage", () => {
+  test("worktrees share durable native storage while separate projects stay isolated", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-codex-storage-"));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const project = path.join(root, "project");
+    const other = path.join(root, "other");
+    const checkout = path.join(root, "checkout");
+    mkdirSync(project);
+    mkdirSync(other);
+    execFileSync("git", ["init", "-q", project]);
+    execFileSync("git", [
+      "-C",
+      project,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "--allow-empty",
+      "-qm",
+      "init",
+    ]);
+    execFileSync("git", ["-C", project, "worktree", "add", "-q", "-b", "other", checkout]);
+    const user = path.join(root, "user");
+    mkdirSync(path.join(user, "skills"), { recursive: true });
+    writeFileSync(path.join(user, "auth.json"), "fixture credential");
+    const env = { CODEX_HOME: user, PASEO_CODEX_STORAGE: "project" };
+    const first = await resolveCodexStorageEnvironment(env, project);
+    const second = await resolveCodexStorageEnvironment(env, checkout);
+    const separate = await resolveCodexStorageEnvironment(env, other);
+    expect(second.CODEX_HOME).toBe(first.CODEX_HOME);
+    expect(separate.CODEX_HOME).not.toBe(first.CODEX_HOME);
+    expect(first.CODEX_HOME).toContain(path.join(project, ".git", "paseo", "codex"));
+    expect(await readlink(path.join(first.CODEX_HOME, "auth.json"))).toBe(
+      path.join(user, "auth.json"),
+    );
+    expect(await readlink(path.join(first.CODEX_HOME, "skills"))).toBe(path.join(user, "skills"));
+    const rolloutDir = path.join(first.CODEX_HOME, "sessions", "2026");
+    mkdirSync(rolloutDir, { recursive: true });
+    const rollout = path.join(rolloutDir, "rollout-native-123.jsonl");
+    writeFileSync(rollout, "fixture history");
+    execFileSync("git", ["-C", project, "worktree", "remove", checkout]);
+    const restored = await resolveCodexStorageEnvironment(env, checkout, first.CODEX_HOME, true);
+    expect(restored.CODEX_HOME).toBe(first.CODEX_HOME);
+    expect(await findCodexRollout(restored.CODEX_HOME, "native-123")).toBe(rollout);
+    expect(readFileSync(path.join(user, "auth.json"), "utf8")).toBe("fixture credential");
+    expect(existsSync(path.join(user, "sessions"))).toBe(false);
+  });
+
+  test("sharing is selectable and user-owned local content survives reconciliation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-codex-sharing-"));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const env = {
+      CODEX_HOME: path.join(root, "user"),
+      PASEO_CODEX_STORAGE: "project",
+      PASEO_CODEX_SHARED_RESOURCES: "skills",
+    };
+    const first = await resolveCodexStorageEnvironment(env, root);
+    expect(existsSync(path.join(first.CODEX_HOME, "auth.json"))).toBe(false);
+    await unlink(path.join(first.CODEX_HOME, "skills"));
+    mkdirSync(path.join(first.CODEX_HOME, "skills"));
+    writeFileSync(path.join(first.CODEX_HOME, "skills", "user-owned"), "keep");
+    await resolveCodexStorageEnvironment({ ...env, PASEO_CODEX_SHARED_RESOURCES: "" }, root);
+    expect(readFileSync(path.join(first.CODEX_HOME, "skills", "user-owned"), "utf8")).toBe("keep");
+  });
+
+  test("enabling project storage leaves legacy handles in the global home", async () => {
+    const env = { CODEX_HOME: "/fixture/old-codex", PASEO_CODEX_STORAGE: "project" };
+    const resolved = await resolveCodexStorageEnvironment(
+      env,
+      "/removed-worktree",
+      undefined,
+      true,
+    );
+    expect(resolved.CODEX_HOME).toBe(env.CODEX_HOME);
+    await expect(findCodexRollout(env.CODEX_HOME, "../escape")).rejects.toThrow(
+      "Invalid Codex session identifier",
     );
   });
 });
