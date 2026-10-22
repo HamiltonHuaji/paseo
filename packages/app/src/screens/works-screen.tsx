@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BackHandler, ScrollView, Text, View } from "react-native";
 import { EditingTextInput } from "@/components/ui/text-input";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Grid2X2, List, RefreshCw, Undo2, GitBranch } from "lucide-react-native";
 import type { WorkCard, WorkPlacement } from "@getpaseo/protocol/work-objects";

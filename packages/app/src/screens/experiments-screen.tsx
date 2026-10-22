@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { BackHandler, Platform, ScrollView, Text, View, type ViewStyle } from "react-native";
 import { useWorkNavigation } from "@/stores/work-navigation-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused } from "expo-router/react-navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import {
