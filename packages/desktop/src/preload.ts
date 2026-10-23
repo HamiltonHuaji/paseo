@@ -131,10 +131,14 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
     }) => ipcRenderer.invoke("paseo:tunnel:updateRoute", input) as Promise<{ updated: boolean }>,
   },
   viewerHttp: {
+    isReachable: (origin: string) =>
+      ipcRenderer.invoke("paseo:viewerHttp:isReachable", origin) as Promise<boolean>,
+    getState: () => ipcRenderer.invoke("paseo:viewerHttp:getState") as Promise<unknown>,
     syncHosts: (serverIds: string[]) =>
       ipcRenderer.invoke("paseo:viewerHttp:syncHosts", serverIds) as Promise<void>,
     ensure: (input: {
       serverId: string;
+      routeGeneration?: number;
       connection:
         | {
             type: "relay";
@@ -151,6 +155,7 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
     }) => ipcRenderer.invoke("paseo:viewerHttp:ensure", input) as Promise<{ origin: string }>,
     updateRoute: (input: {
       serverId: string;
+      routeGeneration?: number;
       connection:
         | {
             type: "relay";

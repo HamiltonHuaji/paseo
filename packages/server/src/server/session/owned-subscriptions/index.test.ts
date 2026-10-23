@@ -206,3 +206,119 @@ test("owned send completion retains source proofs and reports physical failures 
   );
   await delivery.close();
 });
+
+test("retained TCP streams reject foreign sources and settle on detach, revocation and delivery failure", async () => {
+  const { TunnelController } = await import("../../tunnels/controller.js");
+  const { decodeTunnelStreamFrame, TunnelStreamOpcode } =
+    await import("@getpaseo/protocol/binary-frames/index");
+  const net = await import("node:net");
+  const { once } = await import("node:events");
+  const sockets = new Set<import("node:net").Socket>();
+  let received = "";
+  const target = net.createServer({ allowHalfOpen: true }, (socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+    socket.on("error", () => {});
+    socket.on("data", (bytes) => {
+      received += bytes.toString();
+      socket.write(bytes);
+    });
+  });
+  target.listen(0, "127.0.0.1");
+  await once(target, "listening");
+  const address = target.address();
+  if (!address || typeof address === "string") throw new Error("Expected TCP listener");
+  try {
+    for (const failure of ["detach", "revocation", "delivery"] as const) {
+      let permitted = true;
+      let denyDelivery = false;
+      const controller = new TunnelController(null, undefined, () => permitted);
+      const frames: NonNullable<ReturnType<typeof decodeTunnelStreamFrame>>[] = [];
+      const source = {};
+      const delivery = new SessionDelivery(
+        () => {},
+        async (actualSource, bytes) => {
+          expect(actualSource).toBe(source);
+          expect(delivery.permitsBinary(source, bytes)).toBe(true);
+          const frame = decodeTunnelStreamFrame(bytes)!;
+          if (denyDelivery && frame.opcode === TunnelStreamOpcode.Data)
+            throw new Error("Injected delivery denial");
+          frames.push(frame);
+        },
+      );
+      delivery.attach(source, true);
+      let id = "";
+      try {
+        await delivery.request(
+          source,
+          {
+            type: "tunnel.open.request",
+            requestId: failure,
+            target: { type: "tcp", host: "127.0.0.1", port: address.port },
+          },
+          async () => {
+            const owner = delivery.operation(
+              () => false,
+              () => controller.abort(id),
+            );
+            id = await controller.open(
+              { type: "tcp", host: "127.0.0.1", port: address.port },
+              owner,
+            );
+          },
+        );
+        controller.handleFrame(
+          { tunnelId: id, opcode: TunnelStreamOpcode.Resume, payload: new Uint8Array() },
+          source,
+        );
+        controller.handleFrame(
+          {
+            tunnelId: id,
+            opcode: TunnelStreamOpcode.Data,
+            payload: new TextEncoder().encode("foreign"),
+          },
+          {},
+        );
+        controller.handleFrame(
+          {
+            tunnelId: id,
+            opcode: TunnelStreamOpcode.Data,
+            payload: new TextEncoder().encode(failure),
+          },
+          source,
+        );
+        await expect
+          .poll(() => frames.some((frame) => frame.opcode === TunnelStreamOpcode.Data))
+          .toBe(true);
+        expect(received).not.toContain("foreign");
+        expect(delivery.registrationCount).toBe(1);
+        if (failure === "detach") await delivery.detach(source);
+        if (failure === "revocation") {
+          permitted = false;
+          controller.revoke();
+        }
+        if (failure === "delivery") {
+          denyDelivery = true;
+          controller.handleFrame(
+            {
+              tunnelId: id,
+              opcode: TunnelStreamOpcode.Data,
+              payload: new TextEncoder().encode("denied"),
+            },
+            source,
+          );
+        }
+        await expect.poll(() => controller.getState().length).toBe(0);
+        await expect.poll(() => sockets.size).toBe(0);
+        await expect.poll(() => delivery.registrationCount).toBe(0);
+        if (failure === "revocation") expect(frames.at(-1)!.opcode).toBe(TunnelStreamOpcode.Reset);
+      } finally {
+        controller.dispose();
+        await delivery.close();
+      }
+    }
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => target.close(() => resolve()));
+  }
+});

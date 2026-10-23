@@ -26,6 +26,7 @@ export type ViewerProxyState = z.infer<typeof ViewerProxyStateSchema>;
 export interface ViewerProxyInput {
   serverId: string;
   connection: ViewerConnection;
+  routeGeneration?: number;
 }
 
 export interface ViewerHttpRequest {

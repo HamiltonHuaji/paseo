@@ -597,6 +597,12 @@ export interface PaseoDaemon {
   start(): Promise<void>;
   stop(): Promise<void>;
   getExperimentViewerListenTarget(): Extract<ListenTarget, { type: "tcp" }> | null;
+  getExperimentViewerState(): {
+    preferredEndpoint: string;
+    actualEndpoint: string | null;
+    conflictResolved: boolean;
+    activeConnections: number;
+  };
   getListenTarget(): ListenTarget | null;
   getServerId(): string;
 }
@@ -1820,7 +1826,7 @@ export async function createPaseoDaemon(
         res.status(error.code === "cursor_expired" ? 410 : 400).json({ error: error.code });
         return;
       }
-      logger.warn({ err: error, projectId, experiment, viewerPath }, "Viewer request failed");
+      logger.warn({ reason: "resource_unavailable" }, "Viewer request failed");
       res.status(404).end();
     }
   };
@@ -1855,6 +1861,22 @@ export async function createPaseoDaemon(
     (req, res) => void handleExperimentViewer(req, res),
   );
   const experimentViewerHttpServer = createHTTPServer(experimentViewerApp);
+  let viewerActiveConnections = 0;
+  let viewerConflictResolved = false;
+  const getExperimentViewerState = () => ({
+    preferredEndpoint: preferredExperimentViewerListen,
+    actualEndpoint: formatListenTarget(experimentViewerListenTarget),
+    conflictResolved: viewerConflictResolved,
+    activeConnections: viewerActiveConnections,
+  });
+  experimentViewerHttpServer.on("connection", (socket) => {
+    viewerActiveConnections += 1;
+    logger.debug(getExperimentViewerState(), "Viewer HTTP connection accepted");
+    socket.once("close", () => {
+      viewerActiveConnections -= 1;
+      logger.debug(getExperimentViewerState(), "Viewer HTTP connection closed");
+    });
+  });
 
   logger.info({ elapsed: elapsed() }, "Bootstrap complete, ready to start listening");
 
@@ -1872,6 +1894,7 @@ export async function createPaseoDaemon(
   ) => {
     const binding = await listenExperimentViewer(experimentViewerHttpServer, preferred);
     experimentViewerListenTarget = binding.target;
+    viewerConflictResolved = binding.conflictResolved;
     serviceProxy.registerInternalService({
       serviceName: experimentViewerService.scriptName,
       host:
@@ -2266,6 +2289,7 @@ export async function createPaseoDaemon(
     start,
     stop,
     getExperimentViewerListenTarget: () => experimentViewerListenTarget,
+    getExperimentViewerState,
     getListenTarget: () => boundListenTarget,
     getServerId: () => serverId,
   };

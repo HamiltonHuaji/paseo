@@ -524,7 +524,7 @@ Treat symlinks as ordinary filesystem paths. There is no `followSymlinks` option
 or separate allowlist. Viewer configuration is trusted project configuration.
 
 The static handler supports `GET`, `HEAD`, MIME types, directory `index.html`, byte ranges,
-`ETag`, and `Last-Modified`. The daemon hosts one loopback-only viewer HTTP service and registers it
+`ETag`, and `Last-Modified`. The daemon hosts one viewer HTTP service, loopback-only by default, and registers it
 as the internal `viewers` service. All viewers share that internal port and keep their Experiment and
 Attempt path prefixes. Do not start a process or allocate a port per viewer.
 
@@ -537,18 +537,22 @@ five idle minutes; an expired cursor returns HTTP 410 with `{"error":"cursor_exp
 `limit` to request a page size from 1 through 1000; the default is 200. Listings never expose host
 filesystem paths.
 
-A client with a local proxy opens viewers on that proxy, including when it can connect directly.
-Desktop and Android each own one loopback HTTP proxy per Host, backed by dedicated daemon connections
-for viewer traffic. Clients without a proxy can use the reachable daemon viewer HTTP origin.
-Every GET or HEAD resource is an independent logical stream. Reuse a connection
-when its active responses have only a short tail left; otherwise the pool may add another physical
-connection. Select by outstanding work, not elapsed time. Close idle extra connections. Within
-each physical connection, send bounded frames fairly across ready resources, with per-resource
-credit tied to local browser write drain. A video response must not monopolize a relay connection.
-Pool expansion is relay-only and must not create a physical connection for every browser resource.
+Use direct access when the published viewer endpoint has passed a client-side reachability check.
+Only the desktop daemon manager can establish that a daemon's loopback endpoint is local; a remote
+Host's `desktopManaged` flag does not establish that identity. Otherwise desktop and Android use
+one stable TCP listener for `(serverId, service:viewers)`, backed by a dedicated daemon connection.
+Each accepted socket owns one tunnel and one target socket, including all its HTTP keep-alive
+requests. Both directions have bounded credit returned after socket writes, directional FIN,
+and explicit reset. The `tunnelStreamV3` capability requires both peers to implement those semantics.
+The retained HTTP resource API remains available to SDK consumers.
 
-Viewer bytes do not ride on the control connection, and the viewer does not pre-open generic TCP
-tunnels. The system browser uses an ordinary `http://127.0.0.1:<port>/view/...` URL. The loopback
+HostRuntime supplies route generations. New sockets wait for the selected generation; healthy old
+streams drain on their original connection. A disconnect resets that generation's streams while
+preserving the listener. Resolve the named `viewers` service for every new stream so daemon restarts
+and runtime rebinding use the actual endpoint. See the
+[pinned transport requirements](refactors/experiment-viewer-transport-spec.md) for the full contract.
+
+The system browser uses an ordinary `http://127.0.0.1:<port>/view/...` URL. The loopback
 listener and URL survive browser tab closes and route changes. Persist port assignments within each
 client installation. Try the remembered port first, then up to 64 deterministic candidates in
 `20000–29999`, then an OS-assigned port. Resolve address-in-use conflicts without a prompt, remember

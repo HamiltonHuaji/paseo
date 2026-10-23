@@ -18,3 +18,14 @@ export async function updateViewerProxyRoute(input: ViewerProxyInput): Promise<v
 export async function syncViewerProxyHosts(serverIds: string[]): Promise<void> {
   await getDesktopHost()?.viewerHttp?.syncHosts?.(serverIds);
 }
+
+export async function isDirectViewerReachable(origin: string): Promise<boolean> {
+  const probe = getDesktopHost()?.viewerHttp?.isReachable;
+  if (probe) return probe(origin);
+  try {
+    await fetch(origin, { method: "HEAD", mode: "no-cors", signal: AbortSignal.timeout(1500) });
+    return true;
+  } catch {
+    return false;
+  }
+}

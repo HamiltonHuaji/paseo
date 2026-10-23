@@ -1,5 +1,10 @@
 import {
+  decodeTunnelCredit,
+  encodeTunnelCredit,
   encodeTunnelStreamFrame,
+  TUNNEL_DATA_FRAME_BYTES,
+  TUNNEL_PENDING_BYTES,
+  TUNNEL_WINDOW_BYTES,
   TunnelStreamOpcode,
   type TunnelStreamFrame,
 } from "@getpaseo/protocol/binary-frames/index";
@@ -16,8 +21,18 @@ export class DaemonTunnel {
   private handlers: DaemonTunnelHandlers = {};
   private closed = false;
   private localEnded = false;
+  private endSent = false;
   private remoteEnded = false;
   private activated = false;
+  private remotePaused = false;
+  private producerPaused = false;
+  private sendCredit = TUNNEL_WINDOW_BYTES;
+  private receiveCredit = TUNNEL_WINDOW_BYTES;
+  private pending: Uint8Array[] = [];
+  private pendingBytes = 0;
+  private sentBytes = 0;
+  private receivedBytes = 0;
+  private terminationReason: string | null = null;
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
 
@@ -31,12 +46,34 @@ export class DaemonTunnel {
     });
   }
 
+  getState() {
+    return {
+      tunnelId: this.id,
+      state: this.stateName(),
+      sentBytes: this.sentBytes,
+      receivedBytes: this.receivedBytes,
+      queuedBytes: this.pendingBytes,
+      terminationReason: this.terminationReason,
+    };
+  }
+
+  private stateName(): string {
+    if (this.closed) return this.terminationReason === "complete" ? "closed" : "aborted";
+    if (this.localEnded) return "downstream_half_closed";
+    if (this.remoteEnded) return "upstream_half_closed";
+    return "open";
+  }
+
   whenClosed(): Promise<void> {
     return this.closedPromise;
   }
 
   setHandlers(handlers: DaemonTunnelHandlers): void {
     this.handlers = handlers;
+    if (this.closed) {
+      handlers.onReset?.();
+      return;
+    }
     if (!this.activated) {
       this.activated = true;
       this.sendControl(TunnelStreamOpcode.Resume);
@@ -44,86 +81,157 @@ export class DaemonTunnel {
   }
 
   write(data: Uint8Array): void {
-    if (this.closed || this.localEnded) return;
-    this.send(
-      encodeTunnelStreamFrame({
-        opcode: TunnelStreamOpcode.Data,
-        tunnelId: this.id,
-        payload: data,
-      }),
-    );
+    if (this.closed || this.localEnded) throw new Error("Tunnel write after end");
+    if (this.pendingBytes + data.byteLength > TUNNEL_PENDING_BYTES) {
+      this.reset("send_queue_limit");
+      throw new Error("Tunnel send queue limit exceeded");
+    }
+    if (data.byteLength) {
+      this.pending.push(data);
+      this.pendingBytes += data.byteLength;
+    }
+    this.flush();
   }
 
   end(): void {
     if (this.closed || this.localEnded) return;
     this.localEnded = true;
-    this.sendControl(TunnelStreamOpcode.End);
-    this.finishIfClosed();
+    this.flush();
   }
 
-  reset(): void {
+  reset(reason = "local_reset"): void {
     if (this.closed) return;
-    this.sendControl(TunnelStreamOpcode.Reset);
-    this.finish();
+    try {
+      this.sendControl(TunnelStreamOpcode.Reset);
+    } finally {
+      this.finish(reason);
+    }
   }
 
   pauseRemote(): void {
     this.sendControl(TunnelStreamOpcode.Pause);
   }
-
   resumeRemote(): void {
     this.sendControl(TunnelStreamOpcode.Resume);
+  }
+
+  /** Return receive credit only after the downstream socket has accepted these bytes. */
+  consumed(bytes: number): void {
+    if (this.closed) return;
+    if (
+      !Number.isSafeInteger(bytes) ||
+      bytes <= 0 ||
+      this.receiveCredit + bytes > TUNNEL_WINDOW_BYTES
+    ) {
+      this.reset("invalid_credit");
+      throw new Error("Invalid tunnel receive credit");
+    }
+    this.receiveCredit += bytes;
+    this.sendControl(TunnelStreamOpcode.Window, encodeTunnelCredit(bytes));
   }
 
   handleFrame(frame: TunnelStreamFrame): void {
     if (this.closed) return;
     switch (frame.opcode) {
       case TunnelStreamOpcode.Data:
-        if (this.remoteEnded) {
-          this.reset();
+        if (this.remoteEnded || !this.activated || frame.payload.byteLength > this.receiveCredit) {
+          this.reset(this.remoteEnded ? "data_after_end" : "receive_window_exceeded");
           this.handlers.onReset?.();
-          break;
+          return;
         }
+        this.receiveCredit -= frame.payload.byteLength;
+        this.receivedBytes += frame.payload.byteLength;
         this.handlers.onData?.(frame.payload);
         break;
       case TunnelStreamOpcode.End:
-        if (this.remoteEnded) break;
+        if (this.remoteEnded) return;
         this.remoteEnded = true;
         this.handlers.onEnd?.();
         this.finishIfClosed();
         break;
       case TunnelStreamOpcode.Pause:
-        this.handlers.onPause?.();
+        this.remotePaused = true;
+        this.updateProducer();
         break;
       case TunnelStreamOpcode.Resume:
-        this.handlers.onResume?.();
+        this.remotePaused = false;
+        this.flush();
+        if (!this.producerPaused) this.handlers.onResume?.();
+        break;
+      case TunnelStreamOpcode.Window:
+        this.receiveWindow(frame.payload);
         break;
       case TunnelStreamOpcode.Reset:
-        this.finish();
-        this.handlers.onReset?.();
+        this.abort("remote_reset");
         break;
     }
   }
 
-  abort(): void {
+  private receiveWindow(payload: Uint8Array): void {
+    const bytes = decodeTunnelCredit(payload);
+    if (!bytes || this.sendCredit + bytes > TUNNEL_WINDOW_BYTES) {
+      this.reset("invalid_credit");
+      this.handlers.onReset?.();
+      return;
+    }
+    this.sendCredit += bytes;
+    this.flush();
+  }
+
+  abort(reason = "source_detached"): void {
     if (this.closed) return;
-    this.finish();
+    this.finish(reason);
     this.handlers.onReset?.();
   }
 
-  private sendControl(opcode: TunnelStreamOpcode): void {
-    if (this.closed) return;
-    this.send(encodeTunnelStreamFrame({ opcode, tunnelId: this.id }));
+  private flush(): void {
+    while (!this.closed && !this.remotePaused && this.sendCredit > 0 && this.pending.length) {
+      const chunk = this.pending[0]!;
+      const size = Math.min(chunk.byteLength, this.sendCredit, TUNNEL_DATA_FRAME_BYTES);
+      this.sendCredit -= size;
+      this.pendingBytes -= size;
+      if (size === chunk.byteLength) this.pending.shift();
+      else this.pending[0] = chunk.subarray(size);
+      this.sendControl(TunnelStreamOpcode.Data, chunk.subarray(0, size));
+      this.sentBytes += size;
+    }
+    if (this.localEnded && !this.pendingBytes && !this.endSent && !this.closed) {
+      this.endSent = true;
+      this.sendControl(TunnelStreamOpcode.End);
+      this.finishIfClosed();
+    }
+    this.updateProducer();
   }
 
-  private finish(): void {
+  private updateProducer(): void {
+    const paused = this.remotePaused || this.sendCredit === 0 || this.pendingBytes > 0;
+    if (this.closed || paused === this.producerPaused) return;
+    this.producerPaused = paused;
+    if (paused) this.handlers.onPause?.();
+    else this.handlers.onResume?.();
+  }
+
+  private sendControl(opcode: TunnelStreamOpcode, payload?: Uint8Array): void {
+    if (this.closed) return;
+    try {
+      this.send(encodeTunnelStreamFrame({ opcode, tunnelId: this.id, payload }));
+    } catch (error) {
+      this.abort("send_failed");
+      throw error;
+    }
+  }
+
+  private finish(reason: string): void {
     if (this.closed) return;
     this.closed = true;
+    this.terminationReason = reason;
+    this.pending = [];
+    this.pendingBytes = 0;
     this.onClosed();
     this.resolveClosed();
   }
 
   private finishIfClosed(): void {
-    if (this.localEnded && this.remoteEnded) this.finish();
+    if (this.endSent && this.remoteEnded) this.finish("complete");
   }
 }

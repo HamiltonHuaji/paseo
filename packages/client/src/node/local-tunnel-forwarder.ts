@@ -7,6 +7,7 @@ export interface LocalTunnelForwarder {
   readonly host: string;
   readonly port: number;
   readonly origin: string;
+  getState(): { activeConnections: number; idleStreams: number };
   resetIdleTunnels(): void;
   close(): Promise<void>;
 }
@@ -19,6 +20,7 @@ export async function createLocalTunnelForwarder(input: {
   target: TunnelTarget;
   host?: string;
   port?: number;
+  ports?: number[];
   idleTunnelPoolSize?: number;
   onConnectionError?: (error: unknown) => void;
 }): Promise<LocalTunnelForwarder> {
@@ -135,7 +137,17 @@ export async function createLocalTunnelForwarder(input: {
         openedTunnel.setHandlers({
           onData: (data) => {
             if (socket.destroyed) return;
-            socket.write(data);
+            socket.write(data, (error) => {
+              if (error) {
+                failConnection(error);
+                return;
+              }
+              try {
+                openedTunnel.consumed(data.byteLength);
+              } catch (failure) {
+                failConnection(failure);
+              }
+            });
             if (!remotePaused && socket.writableLength >= LOCAL_SOCKET_HIGH_WATER_BYTES) {
               remotePaused = true;
               sendToTunnel("pause");
@@ -147,7 +159,9 @@ export async function createLocalTunnelForwarder(input: {
             }
           },
           onEnd: () => socket.end(),
-          onReset: () => socket.destroy(),
+          onReset: () => {
+            if (!socket.destroyed) socket.resetAndDestroy();
+          },
           onPause: () => socket.pause(),
           onResume: () => socket.resume(),
         });
@@ -168,13 +182,20 @@ export async function createLocalTunnelForwarder(input: {
       });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(input.port ?? 0, host, () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
+  for (const port of input.ports ?? [input.port ?? 0]) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, host, () => {
+          server.off("error", reject);
+          resolve();
+        });
+      });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+    }
+  }
   const address = server.address();
   if (!address || typeof address === "string") {
     server.close();
@@ -187,6 +208,7 @@ export async function createLocalTunnelForwarder(input: {
     host,
     port: address.port,
     origin: `http://${host}:${address.port}`,
+    getState: () => ({ activeConnections: sockets.size, idleStreams: idleTunnels.length }),
     resetIdleTunnels: () => {
       poolEpoch += 1;
       for (const tunnel of idleTunnels.splice(0)) tunnel.reset();

@@ -3988,6 +3988,7 @@ export const ServerInfoStatusPayloadSchema = z
         explicitEventSubscriptions: z.boolean().optional(),
         ownedSubscriptions: z.boolean().optional(),
         experimentViewerTransport: z.boolean().optional(),
+        tunnelStreamV3: z.boolean().optional(),
         viewerHttpProxy: z.boolean().optional(),
         viewerHttpFramingV2: z.boolean().optional(),
         viewerHttpFlowControl: z.boolean().optional(),

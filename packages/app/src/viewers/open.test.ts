@@ -23,7 +23,7 @@ function target(connection: ViewerConnection | null): ViewerOpenTarget {
     connection,
     serverInfo: {
       experimentViewer: { host: "127.0.0.1", port: 19001, scope: "loopback" },
-      features: { viewerHttpProxy: true },
+      features: { tunnelStreamV3: true },
     },
     directHttpUrl: "https://remote.example:6767/",
   };
@@ -33,6 +33,7 @@ function createPorts() {
   const requested: ViewerProxyInput[] = [];
   const opened: string[] = [];
   const ports: ViewerOpenPorts = {
+    isDirectReachable: async () => false,
     ensureProxy: async (input) => {
       requested.push(input);
       return { origin: "http://127.0.0.1:23456" };
@@ -67,6 +68,7 @@ describe("opening a viewer", () => {
   it("preserves query and fragment when a browser-only client opens a reachable viewer directly", async () => {
     const { ports, opened } = createPorts();
     ports.ensureProxy = null;
+    ports.isDirectReachable = async () => true;
     const remote = target(direct);
     remote.serverInfo!.experimentViewer = { host: "0.0.0.0", port: 19001, scope: "network" };
     await openViewer(remote, path, ports);
@@ -84,6 +86,26 @@ describe("opening a viewer", () => {
       expect(opened).toEqual([]);
     },
   );
+
+  it("prefers a verified built-in daemon endpoint without allocating a listener", async () => {
+    const { ports, requested, opened } = createPorts();
+    const local = target(relay);
+    local.localDaemon = true;
+    ports.isDirectReachable = async (origin) => origin === "http://127.0.0.1:19001";
+    await openViewer(local, path, ports);
+    expect(requested).toEqual([]);
+    expect(opened).toEqual([`http://127.0.0.1:19001${path}`]);
+  });
+
+  it("prefers a verified remote network endpoint", async () => {
+    const { ports, requested, opened } = createPorts();
+    const remote = target(direct);
+    remote.serverInfo!.experimentViewer = { host: "0.0.0.0", port: 19001, scope: "network" };
+    ports.isDirectReachable = async () => true;
+    await openViewer(remote, path, ports);
+    expect(requested).toEqual([]);
+    expect(opened).toEqual([`http://remote.example:19001${path}`]);
+  });
 
   it("reports proxy failure without falling back to the daemon address", async () => {
     const { ports, opened } = createPorts();

@@ -1199,7 +1199,9 @@ export class Session {
     });
     this.providerSnapshotManager = providerSnapshotManager;
     this.serviceProxy = serviceProxy ?? null;
-    this.tunnelController = new TunnelController(this.serviceProxy);
+    this.tunnelController = new TunnelController(this.serviceProxy, this.sessionLogger, () =>
+      this.authorization.allowsPermission("tunnel.manage"),
+    );
     this.viewerHttpController = new ViewerHttpController(this.serviceProxy);
     this.scriptRuntimeStore = scriptRuntimeStore ?? null;
     this.workspaceSetupObservation = workspaceSetupObservation ?? new WorkspaceSetupObservation();
@@ -2272,6 +2274,7 @@ export class Session {
   public setPermissions(permissions: readonly DaemonPermission[]): void {
     this.authorization.replacePermissions(permissions);
     this.connectedHostSession?.revoke();
+    if (!this.authorization.allowsPermission("tunnel.manage")) this.tunnelController.revoke();
     if (!this.authorization.allowsPermission("workspace.write")) {
       void this.delivery
         .releaseFamily("browser-host")
@@ -2611,7 +2614,7 @@ export class Session {
     source?: object,
   ): Promise<void> {
     if (!source) throw new Error("Tunnel requests require a physical client connection");
-    if (!this.supportsForSource(CLIENT_CAPS.tunnelStreamV2, source)) {
+    if (!this.supportsForSource(CLIENT_CAPS.tunnelStreamV3, source)) {
       throw new Error("Tunnel streaming requires a newer Paseo client");
     }
     let tunnelId: string | null = null;
@@ -3739,6 +3742,7 @@ export class Session {
     if (binaryFrame.kind === "tunnel") {
       if (this.authorization.allowsPermission("tunnel.manage"))
         this.tunnelController.handleFrame(binaryFrame.frame, source);
+      else this.tunnelController.revoke(source);
       return;
     }
     if (binaryFrame.kind === "host_route") {

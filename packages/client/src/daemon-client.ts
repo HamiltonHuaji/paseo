@@ -1498,12 +1498,24 @@ export class DaemonClient {
   }
 
   async openTunnel(target: TunnelTarget): Promise<DaemonTunnel> {
+    if (this.getLastServerInfoMessage()?.features?.tunnelStreamV3 !== true) {
+      throw new Error("Update the host to use TCP viewer forwarding");
+    }
+    const source = this.transport;
+    if (!source || this.connectionState.status !== "connected")
+      throw new Error("Tunnel source disconnected");
     const payload = await this.sendNamespacedCorrelatedSessionRequest<"tunnel.open.response">({
       message: { type: "tunnel.open.request", target },
     });
+    if (this.transport !== source || this.connectionState.status !== "connected")
+      throw new Error("Tunnel source changed while opening");
     const tunnel = new DaemonTunnel(
       payload.tunnelId,
-      (frame) => this.sendBinaryFrame(frame),
+      (frame) => {
+        if (this.transport !== source || this.connectionState.status !== "connected")
+          throw new Error("Tunnel source disconnected");
+        this.sendTransportFrame(frame);
+      },
       () => this.tunnels.delete(payload.tunnelId),
     );
     this.tunnels.set(payload.tunnelId, tunnel);

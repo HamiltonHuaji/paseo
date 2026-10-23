@@ -7902,3 +7902,106 @@ test("initial acquisition preserves structured transport failures and ordinary o
     cause: failure,
   });
 });
+
+test("TCP tunnels retain queued bytes before FIN and enforce receive credit", async () => {
+  const { DaemonTunnel } = await import("./daemon-tunnel.js");
+  const { decodeTunnelStreamFrame, encodeTunnelCredit, TUNNEL_WINDOW_BYTES, TunnelStreamOpcode } =
+    await import("@getpaseo/protocol/binary-frames/index");
+  const frames: NonNullable<ReturnType<typeof decodeTunnelStreamFrame>>[] = [];
+  const tunnel = new DaemonTunnel(
+    "queue",
+    (bytes) => frames.push(decodeTunnelStreamFrame(bytes)!),
+    () => {},
+  );
+  tunnel.setHandlers({});
+  const bytes = new Uint8Array(TUNNEL_WINDOW_BYTES * 3).fill(42);
+  tunnel.write(bytes);
+  tunnel.end();
+  expect(frames.some((frame) => frame.opcode === TunnelStreamOpcode.End)).toBe(false);
+  expect(tunnel.getState().queuedBytes).toBe(TUNNEL_WINDOW_BYTES * 2);
+  for (let window = 0; window < 2; window++) {
+    tunnel.handleFrame({
+      opcode: TunnelStreamOpcode.Window,
+      tunnelId: tunnel.id,
+      payload: encodeTunnelCredit(TUNNEL_WINDOW_BYTES),
+    });
+  }
+  expect(frames.at(-1)!.opcode).toBe(TunnelStreamOpcode.End);
+  expect(
+    frames
+      .filter((frame) => frame.opcode === TunnelStreamOpcode.Data)
+      .reduce((total, frame) => total + frame.payload.length, 0),
+  ).toBe(bytes.length);
+  expect(() => tunnel.write(new Uint8Array([1]))).toThrow("write after end");
+  tunnel.handleFrame({
+    opcode: TunnelStreamOpcode.End,
+    tunnelId: tunnel.id,
+    payload: new Uint8Array(),
+  });
+  await tunnel.whenClosed();
+  expect(tunnel.getState().terminationReason).toBe("complete");
+
+  let reset = false;
+  const consumer = new DaemonTunnel(
+    "consumer",
+    () => {},
+    () => {},
+  );
+  consumer.setHandlers({
+    onReset: () => {
+      reset = true;
+    },
+  });
+  consumer.handleFrame({
+    opcode: TunnelStreamOpcode.Data,
+    tunnelId: consumer.id,
+    payload: new Uint8Array(TUNNEL_WINDOW_BYTES),
+  });
+  consumer.handleFrame({
+    opcode: TunnelStreamOpcode.Data,
+    tunnelId: consumer.id,
+    payload: new Uint8Array([1]),
+  });
+  expect(reset).toBe(true);
+  expect(consumer.getState().terminationReason).toBe("receive_window_exceeded");
+});
+
+test("TCP tunnel resets on data after FIN and surfaces failed sends", async () => {
+  const { DaemonTunnel } = await import("./daemon-tunnel.js");
+  const { TunnelStreamOpcode } = await import("@getpaseo/protocol/binary-frames/index");
+  let reset = 0;
+  const tunnel = new DaemonTunnel(
+    "fin",
+    () => {},
+    () => {},
+  );
+  tunnel.setHandlers({
+    onReset: () => {
+      reset += 1;
+    },
+  });
+  tunnel.handleFrame({
+    opcode: TunnelStreamOpcode.End,
+    tunnelId: tunnel.id,
+    payload: new Uint8Array(),
+  });
+  expect(tunnel.getState().state).toBe("upstream_half_closed");
+  tunnel.write(new Uint8Array([7]));
+  tunnel.handleFrame({
+    opcode: TunnelStreamOpcode.Data,
+    tunnelId: tunnel.id,
+    payload: new Uint8Array([1]),
+  });
+  expect(reset).toBe(1);
+  expect(tunnel.getState().terminationReason).toBe("data_after_end");
+  const denied = new DaemonTunnel(
+    "denied",
+    () => {
+      throw new Error("delivery denied");
+    },
+    () => {},
+  );
+  expect(() => denied.setHandlers({})).toThrow("delivery denied");
+  await denied.whenClosed();
+  expect(denied.getState().terminationReason).toBe("send_failed");
+});

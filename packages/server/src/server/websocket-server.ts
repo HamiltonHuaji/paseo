@@ -1,3 +1,4 @@
+import { decodeTunnelStreamFrame } from "@getpaseo/protocol/binary-frames/index";
 import { ExperimentService } from "./experiments/service.js";
 import { WorkService } from "./work-objects/service.js";
 import type { SkillRepositoryService } from "./skill-repositories/service.js";
@@ -1297,11 +1298,23 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
+  private binaryDeliveryIdentity(ws: WebSocketLike, frame: Uint8Array): Record<string, unknown> {
+    const identity = this.socketIdentities.get(ws);
+    const tunnel = decodeTunnelStreamFrame(frame);
+    return {
+      ...(identity ? toConnectionLogFields(identity) : {}),
+      ...(tunnel ? { tunnelId: tunnel.tunnelId } : {}),
+    };
+  }
+
   private sendBinaryToClient(ws: WebSocketLike, frame: Uint8Array, reportRejection = true): void {
     if (!this.sessions.get(ws)?.session.delivery.permitsBinary(ws, frame)) {
       this.incrementRuntimeCounter("applicationBinaryRejected");
       if (reportRejection)
-        this.logger.warn({ bytes: frame.byteLength }, "ws_application_binary_delivery_denied");
+        this.logger.warn(
+          { bytes: frame.byteLength, ...this.binaryDeliveryIdentity(ws, frame) },
+          "ws_application_binary_delivery_denied",
+        );
       ws.close(1011, "Binary delivery owner unavailable");
       throw new Error("Binary delivery owner unavailable");
     }
@@ -1313,8 +1326,12 @@ export class VoiceAssistantWebSocketServer {
   private async sendBinaryToClientAndWait(ws: WebSocketLike, frame: Uint8Array): Promise<void> {
     if (!this.sessions.get(ws)?.session.delivery.permitsBinary(ws, frame)) {
       this.incrementRuntimeCounter("applicationBinaryRejected");
-      this.logger.warn({ bytes: frame.byteLength }, "ws_application_binary_delivery_denied");
-      return;
+      this.logger.warn(
+        { bytes: frame.byteLength, ...this.binaryDeliveryIdentity(ws, frame) },
+        "ws_application_binary_delivery_denied",
+      );
+      ws.close(1011, "Binary delivery owner unavailable");
+      throw new Error("Binary delivery owner unavailable");
     }
     try {
       const sent = await sendBoundedPhysicalFrameAndWait({
@@ -1327,7 +1344,8 @@ export class VoiceAssistantWebSocketServer {
       }
       this.runtimeMetrics.recordOutboundBinaryFrame(ws.bufferedAmount);
     } catch (err) {
-      this.logger.warn({ err }, "ws_send_failed");
+      this.logger.warn(this.binaryDeliveryIdentity(ws, frame), "ws_binary_send_failed");
+      ws.close(1011, "Binary delivery failed");
       throw err;
     }
   }
@@ -1963,6 +1981,7 @@ export class VoiceAssistantWebSocketServer {
         : {}),
       features: {
         experimentViewerTransport: true,
+        tunnelStreamV3: true,
         viewerHttpProxy: session.supports(CLIENT_CAPS.viewerHttpFramingV2),
         viewerHttpFramingV2: true,
         viewerHttpFlowControl: true,

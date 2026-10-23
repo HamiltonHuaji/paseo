@@ -145,6 +145,7 @@ export const DEFAULT_CLIENT_CAPABILITIES = {
   [CLIENT_CAPS.explicitEventSubscriptions]: true,
   [CLIENT_CAPS.agentConversationFork]: true,
   [CLIENT_CAPS.tunnelStreamV2]: true,
+  [CLIENT_CAPS.tunnelStreamV3]: true,
   [CLIENT_CAPS.viewerHttpFramingV2]: true,
   [CLIENT_CAPS.viewerHttpProxy]: true,
   [CLIENT_CAPS.viewerHttpFlowControl]: true,

@@ -346,8 +346,9 @@ function ViewerHttpRouteSync({ host }: { host: HostProfile }) {
     void updateViewerProxyRoute({
       serverId: host.serverId,
       connection: activeConnection,
+      routeGeneration: snapshot?.clientGeneration,
     }).catch((error) => console.warn("[viewer-http] Failed to update viewer route", error));
-  }, [activeConnection, host.serverId]);
+  }, [activeConnection, host.serverId, snapshot?.clientGeneration, snapshot?.connectionStatus]);
 
   return null;
 }

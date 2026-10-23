@@ -6,6 +6,7 @@ export const TunnelStreamOpcode = {
   Pause: 0x22,
   Resume: 0x23,
   Reset: 0x24,
+  Window: 0x25,
 } as const;
 
 export type TunnelStreamOpcode = (typeof TunnelStreamOpcode)[keyof typeof TunnelStreamOpcode];
@@ -39,7 +40,9 @@ export function decodeTunnelStreamFrame(bytes: Uint8Array): TunnelStreamFrame | 
   const tunnelIdLength = bytes[1];
   if (tunnelIdLength === 0 || tunnelIdLength > bytes.byteLength - 2) return null;
   const payload = bytes.subarray(2 + tunnelIdLength);
-  if (bytes[0] !== TunnelStreamOpcode.Data && payload.byteLength !== 0) return null;
+  if (bytes[0] === TunnelStreamOpcode.Window) {
+    if (payload.byteLength !== 4) return null;
+  } else if (bytes[0] !== TunnelStreamOpcode.Data && payload.byteLength !== 0) return null;
   return {
     opcode: bytes[0],
     tunnelId: new TextDecoder().decode(bytes.subarray(2, 2 + tunnelIdLength)),
@@ -53,6 +56,24 @@ function isTunnelStreamOpcode(value: number): value is TunnelStreamOpcode {
     value === TunnelStreamOpcode.End ||
     value === TunnelStreamOpcode.Pause ||
     value === TunnelStreamOpcode.Resume ||
-    value === TunnelStreamOpcode.Reset
+    value === TunnelStreamOpcode.Reset ||
+    value === TunnelStreamOpcode.Window
   );
+}
+
+// Both directions begin with this credit. Credit returns only after the receiving socket drains.
+export const TUNNEL_WINDOW_BYTES = 256 * 1024;
+export const TUNNEL_DATA_FRAME_BYTES = 64 * 1024;
+export const TUNNEL_PENDING_BYTES = 1024 * 1024;
+
+export function encodeTunnelCredit(bytes: number): Uint8Array {
+  const payload = new Uint8Array(4);
+  new DataView(payload.buffer).setUint32(0, bytes);
+  return payload;
+}
+
+export function decodeTunnelCredit(payload: Uint8Array): number {
+  return payload.byteLength === 4
+    ? new DataView(payload.buffer, payload.byteOffset, 4).getUint32(0)
+    : 0;
 }

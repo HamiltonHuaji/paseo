@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
 class PaseoViewerProxyModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PaseoViewerProxy")
-    Events("onRequest", "onCancel", "onStopped")
+    Events("onOpen", "onData", "onEnd", "onReset", "onStopped")
 
     OnCreate {
       ViewerProxyService.eventSink = { name, payload -> sendEvent(name, payload) }
@@ -37,17 +37,20 @@ class PaseoViewerProxyModule : Module() {
     AsyncFunction("removeListener") Coroutine { serverId: String ->
       withContext(Dispatchers.IO) { ViewerProxyService.instance?.removeListener(serverId) }
     }
-    AsyncFunction("headers") Coroutine { id: String, status: Int, headers: Map<String, String> ->
-      withContext(Dispatchers.IO) { requireNotNull(ViewerProxyService.instance).proxy.headers(id, status, headers) }
+    AsyncFunction("resume") Coroutine { id: String ->
+      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.resume(id) }
+    }
+    AsyncFunction("getState") Coroutine { ->
+      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.state() ?: emptyList() }
     }
     AsyncFunction("write") Coroutine { id: String, base64: String ->
       withContext(Dispatchers.IO) { requireNotNull(ViewerProxyService.instance).proxy.write(id, base64) }
     }
-    AsyncFunction("finish") Coroutine { id: String ->
-      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.finish(id) }
+    AsyncFunction("end") Coroutine { id: String ->
+      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.end(id) }
     }
-    AsyncFunction("fail") Coroutine { id: String ->
-      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.fail(id) }
+    AsyncFunction("reset") Coroutine { id: String ->
+      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.reset(id) }
     }
   }
 }

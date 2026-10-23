@@ -8,14 +8,11 @@ import {
   type LocalTunnelForwarder,
 } from "@getpaseo/client/node/local-tunnel-forwarder";
 import {
-  createLocalViewerHttpProxy,
-  type LocalViewerHttpProxy,
-} from "@getpaseo/client/node/local-viewer-http-proxy";
-import {
   ViewerConnectionSchema,
   viewerPortCandidates,
 } from "@getpaseo/client/internal/viewer-http-proxy";
-import { createViewerHttpUpstream } from "@getpaseo/client/internal/viewer-http-upstream";
+import { createTunnelUpstream } from "@getpaseo/client/internal/tunnel-upstream";
+import net from "node:net";
 import { loadViewerPorts, saveViewerPorts } from "./viewer-ports.js";
 import {
   buildDaemonWebSocketUrl,
@@ -32,32 +29,19 @@ const EnsureTunnelInputSchema = z.object({
   serverId: z.string().min(1),
   connection: ConnectionSchema,
   target: TunnelTargetSchema,
+  routeGeneration: z.number().int().nonnegative().optional(),
 });
 
 type TunnelConnection = z.infer<typeof ConnectionSchema>;
-type ManagedDaemonTunnel = Awaited<ReturnType<DaemonClient["openTunnel"]>>;
-
-interface UpstreamGeneration {
-  client: DaemonClient;
-  routeKey: string;
-  activeStreams: number;
-  retiring: boolean;
-}
-
 interface ManagedTunnel {
   forwarder: LocalTunnelForwarder;
-  updateRoute(connection: TunnelConnection): Promise<void>;
-  close(): Promise<void>;
-}
-
-interface ManagedViewerProxy {
-  proxy: LocalViewerHttpProxy;
-  updateRoute(connection: TunnelConnection): void;
+  updateRoute(connection: TunnelConnection, generation?: number): Promise<void>;
+  getState(): unknown;
   close(): Promise<void>;
 }
 
 const tunnels = new Map<string, Promise<ManagedTunnel>>();
-const viewerProxies = new Map<string, ManagedViewerProxy>();
+const viewerProxies = new Map<string, ManagedTunnel>();
 let viewerMutation = Promise.resolve();
 
 function mutateViewers<Result>(operation: () => Promise<Result>): Promise<Result> {
@@ -69,46 +53,66 @@ function mutateViewers<Result>(operation: () => Promise<Result>): Promise<Result
   return pending;
 }
 
-async function ensureViewerProxy(serverId: string): Promise<ManagedViewerProxy> {
+async function ensureViewerProxy(serverId: string): Promise<ManagedTunnel> {
   const existing = viewerProxies.get(serverId);
   if (existing) return existing;
   const state = await loadViewerPorts();
-  const upstream = createViewerHttpUpstream({
-    createClient: (connection) => createTunnelClient(serverId, connection),
-    onError: (error) => log.warn("[viewer-http] Upstream failed", { serverId, error }),
-  });
-  const proxy = await createLocalViewerHttpProxy({
-    fetch: upstream.fetch,
+  const managed = await createManagedTunnel({
+    serverId,
+    target: { type: "service", name: "viewers" },
     ports: viewerPortCandidates({ serverId, state }),
-    onRequestError: (error) => log.debug("[viewer-http] Resource failed", { serverId, error }),
   });
   const previous = state[serverId];
-  state[serverId] = { port: Number(new URL(proxy.origin).port), enabled: true };
+  state[serverId] = { port: managed.forwarder.port, enabled: true };
   try {
     await saveViewerPorts(state);
   } catch (error) {
     if (previous) state[serverId] = previous;
     else delete state[serverId];
-    await proxy.close();
-    await upstream.close();
+    await managed.close();
     throw error;
   }
-  const managed: ManagedViewerProxy = {
-    proxy,
-    updateRoute: upstream.updateRoute,
-    close: async () => {
-      await proxy.close();
-      await upstream.close();
-    },
-  };
   viewerProxies.set(serverId, managed);
-  log.info("[viewer-http] Listening", { serverId, origin: proxy.origin });
+  log.info("[viewer-tunnel] Listening", managed.getState());
   return managed;
 }
 
 export function registerTunnelHandlers(): void {
+  ipcMain.handle("paseo:viewerHttp:getState", () =>
+    [...viewerProxies.values()].map((managed) => managed.getState()),
+  );
+  ipcMain.handle("paseo:viewerHttp:isReachable", async (_event, raw: unknown) => {
+    const origin = new URL(z.string().url().parse(raw));
+    if (
+      origin.protocol !== "http:" ||
+      origin.pathname !== "/" ||
+      origin.username ||
+      origin.password
+    )
+      return false;
+    return new Promise<boolean>((resolve) => {
+      const socket = net.createConnection({
+        host: origin.hostname.replace(/^\[|\]$/g, ""),
+        port: Number(origin.port || 80),
+      });
+      const finish = (reachable: boolean) => {
+        socket.destroy();
+        resolve(reachable);
+      };
+      socket.setTimeout(1500, () => finish(false));
+      socket.once("connect", () => finish(true));
+      socket.once("error", () => finish(false));
+    });
+  });
   ipcMain.handle("paseo:tunnel:ensure", async (_event, rawInput: unknown) => {
     const input = EnsureTunnelInputSchema.parse(rawInput);
+    if (input.target.type === "service" && input.target.name === "viewers") {
+      return mutateViewers(async () => {
+        const managed = await ensureViewerProxy(input.serverId);
+        await managed.updateRoute(input.connection, input.routeGeneration);
+        return { origin: managed.forwarder.origin };
+      });
+    }
     const key = JSON.stringify({ serverId: input.serverId, target: input.target });
     let pending = tunnels.get(key);
     if (!pending) {
@@ -119,23 +123,31 @@ export function registerTunnelHandlers(): void {
       tunnels.set(key, pending);
     }
     const managed = await pending;
-    await managed.updateRoute(input.connection);
+    await managed.updateRoute(input.connection, input.routeGeneration);
     return { origin: managed.forwarder.origin };
   });
   ipcMain.handle("paseo:tunnel:updateRoute", async (_event, rawInput: unknown) => {
     const input = EnsureTunnelInputSchema.parse(rawInput);
+    if (input.target.type === "service" && input.target.name === "viewers") {
+      return mutateViewers(async () => {
+        const managed = viewerProxies.get(input.serverId);
+        if (!managed) return { updated: false };
+        await managed.updateRoute(input.connection, input.routeGeneration);
+        return { updated: true };
+      });
+    }
     const key = JSON.stringify({ serverId: input.serverId, target: input.target });
     const pending = tunnels.get(key);
     if (!pending) return { updated: false };
-    await (await pending).updateRoute(input.connection);
+    await (await pending).updateRoute(input.connection, input.routeGeneration);
     return { updated: true };
   });
   ipcMain.handle("paseo:viewerHttp:ensure", async (_event, rawInput: unknown) => {
     const input = EnsureTunnelInputSchema.omit({ target: true }).parse(rawInput);
     return mutateViewers(async () => {
       const managed = await ensureViewerProxy(input.serverId);
-      managed.updateRoute(input.connection);
-      return { origin: managed.proxy.origin };
+      await managed.updateRoute(input.connection, input.routeGeneration);
+      return { origin: managed.forwarder.origin };
     });
   });
   ipcMain.handle("paseo:viewerHttp:updateRoute", async (_event, rawInput: unknown) => {
@@ -144,7 +156,7 @@ export function registerTunnelHandlers(): void {
       const state = await loadViewerPorts();
       if (!state[input.serverId]?.enabled) return { updated: false };
       const managed = await ensureViewerProxy(input.serverId);
-      managed.updateRoute(input.connection);
+      await managed.updateRoute(input.connection, input.routeGeneration);
       return { updated: true };
     });
   });
@@ -177,68 +189,43 @@ export async function closeAllTunnelForwarders(): Promise<void> {
   await Promise.allSettled(viewers.map((managed) => managed.close()));
 }
 
-async function createManagedTunnel(
-  input: z.infer<typeof EnsureTunnelInputSchema>,
-): Promise<ManagedTunnel> {
-  let current = await createUpstream(input.serverId, input.connection);
-  const generations = new Set<UpstreamGeneration>([current]);
-  let routeUpdate = Promise.resolve();
-
-  const retireIfDrained = async (generation: UpstreamGeneration): Promise<void> => {
-    if (!generation.retiring || generation.activeStreams > 0) return;
-    generations.delete(generation);
-    await generation.client.close();
-  };
-
-  const openTunnel = async (target: TunnelTarget): Promise<ManagedDaemonTunnel> => {
-    const generation = current;
-    generation.activeStreams += 1;
-    try {
-      const tunnel = await generation.client.openTunnel(target);
-      void tunnel.whenClosed().finally(() => {
-        generation.activeStreams -= 1;
-        void retireIfDrained(generation);
-      });
-      return tunnel;
-    } catch (error) {
-      generation.activeStreams -= 1;
-      void retireIfDrained(generation);
-      throw error;
-    }
-  };
-
-  const forwarder = await createLocalTunnelForwarder({
-    openTunnel,
-    target: input.target,
-    onConnectionError: (error) => {
-      log.warn("[tunnel-forwarder] Browser connection failed", error);
-    },
+async function createManagedTunnel(input: {
+  serverId: string;
+  target: TunnelTarget;
+  connection?: TunnelConnection;
+  routeGeneration?: number;
+  ports?: number[];
+}): Promise<ManagedTunnel> {
+  const upstream = createTunnelUpstream({
+    createClient: (connection) => createTunnelClient(input.serverId, connection),
+    onError: () => log.warn("[viewer-tunnel] Upstream unavailable", { serverId: input.serverId }),
   });
-  const updateRoute = (connection: TunnelConnection): Promise<void> => {
-    routeUpdate = routeUpdate
-      .catch(() => undefined)
-      .then(async () => {
-        const nextRouteKey = JSON.stringify(connection);
-        if (current.routeKey === nextRouteKey) return undefined;
-        const replacement = await createUpstream(input.serverId, connection);
-        generations.add(replacement);
-        const previous = current;
-        current = replacement;
-        forwarder.resetIdleTunnels();
-        previous.retiring = true;
-        await retireIfDrained(previous);
-        return undefined;
-      });
-    return routeUpdate;
+  const forwarder = await createLocalTunnelForwarder({
+    openTunnel: upstream.openTunnel,
+    target: input.target,
+    ports: input.ports,
+    onConnectionError: () =>
+      log.warn("[viewer-tunnel] Connection failed", { serverId: input.serverId }),
+  });
+  const getState = () => ({
+    serverId: input.serverId,
+    target: input.target.type === "service" ? `service:${input.target.name}` : "tcp",
+    origin: forwarder.origin,
+    ...forwarder.getState(),
+    ...upstream.getState(),
+  });
+  const updateRoute = async (connection: TunnelConnection, generation = 0) => {
+    await upstream.updateRoute(connection, generation);
+    forwarder.resetIdleTunnels();
+    log.debug("[viewer-tunnel] Route ready", getState());
   };
   return {
     forwarder,
     updateRoute,
+    getState,
     close: async () => {
-      await routeUpdate.catch(() => undefined);
       await forwarder.close();
-      await Promise.allSettled([...generations].map((generation) => generation.client.close()));
-      generations.clear();
+      await upstream.close();
     },
   };
 }
@@ -273,23 +260,4 @@ function createTunnelClient(serverId: string, connection: TunnelConnection): Dae
     reconnect: { enabled: true },
   });
   return client;
-}
-
-async function createUpstream(
-  serverId: string,
-  connection: TunnelConnection,
-): Promise<UpstreamGeneration> {
-  const client = createTunnelClient(serverId, connection);
-  try {
-    await client.connect();
-    return {
-      client,
-      routeKey: JSON.stringify(connection),
-      activeStreams: 0,
-      retiring: false,
-    };
-  } catch (error) {
-    await client.close();
-    throw error;
-  }
 }

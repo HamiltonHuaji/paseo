@@ -97,14 +97,18 @@ export interface DesktopTunnelBridge {
 }
 
 export interface DesktopViewerHttpBridge {
+  isReachable?: (origin: string) => Promise<boolean>;
+  getState?: () => Promise<unknown>;
   syncHosts?: (serverIds: string[]) => Promise<void>;
   ensure?: (input: {
     serverId: string;
     connection: DesktopTunnelConnection;
+    routeGeneration?: number;
   }) => Promise<{ origin: string }>;
   updateRoute?: (input: {
     serverId: string;
     connection: DesktopTunnelConnection;
+    routeGeneration?: number;
   }) => Promise<{ updated: boolean }>;
 }
 

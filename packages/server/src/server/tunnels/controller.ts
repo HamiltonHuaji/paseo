@@ -1,5 +1,7 @@
 import net from "node:net";
 import { randomUUID } from "node:crypto";
+import type { Logger } from "pino";
+import { DaemonTunnel } from "@getpaseo/client/internal/daemon-tunnel";
 import {
   encodeTunnelStreamFrame,
   TunnelStreamOpcode,
@@ -12,97 +14,177 @@ import type { ServiceProxySubsystem } from "../service-proxy.js";
 interface TunnelEntry {
   socket: net.Socket;
   owner: OwnedOperation;
+  stream: DaemonTunnel;
   sendChain: Promise<void>;
-  activated: boolean;
-  downstreamPaused: boolean;
-  outboundQueuedBytes: number;
-  outboundQueuePaused: boolean;
-  downstreamEnded: boolean;
-  upstreamEnded: boolean;
+  sourceId: string;
+  deliveryFailed: boolean;
 }
-
-// Keep enough encrypted WebSocket writes in flight to fill a high-latency relay path without
-// letting one browser connection buffer an unbounded viewer response in the daemon.
-const OUTBOUND_QUEUE_HIGH_WATER_BYTES = 1024 * 1024;
-const OUTBOUND_QUEUE_LOW_WATER_BYTES = 512 * 1024;
 
 export class TunnelController {
   private readonly tunnels = new Map<string, TunnelEntry>();
+  private readonly sources = new WeakMap<object, string>();
 
-  constructor(private readonly serviceProxy: ServiceProxySubsystem | null) {}
+  constructor(
+    private readonly serviceProxy: ServiceProxySubsystem | null,
+    private readonly logger?: Pick<Logger, "debug" | "warn">,
+    private readonly permitted: () => boolean = () => true,
+  ) {}
+
+  getState() {
+    return [...this.tunnels.values()].map((entry) => this.describe(entry));
+  }
+
+  private describe(entry: TunnelEntry) {
+    const state = Object.assign(entry.stream.getState(), { source: entry.sourceId });
+    if (entry.deliveryFailed) {
+      state.state = "aborted";
+      state.terminationReason = "delivery_failed";
+    }
+    return state;
+  }
 
   async open(target: TunnelTarget, owner: OwnedOperation): Promise<string> {
+    if (owner.signal.aborted) throw new Error("Tunnel source detached");
     const endpoint = this.resolveTarget(target);
     const tunnelId = randomUUID();
     const socket = net.createConnection({ ...endpoint, allowHalfOpen: true });
     socket.setNoDelay(true);
     socket.pause();
+    let sourceId = this.sources.get(owner.source);
+    if (!sourceId) {
+      sourceId = randomUUID();
+      this.sources.set(owner.source, sourceId);
+    }
+    const stream = new DaemonTunnel(
+      tunnelId,
+      (frame) => {
+        if (owner.signal.aborted) throw new Error("Tunnel source detached");
+        entry.sendChain = entry.sendChain
+          .then(async () => {
+            if (!this.permitted()) {
+              await owner.emitBinary(
+                encodeTunnelStreamFrame({ opcode: TunnelStreamOpcode.Reset, tunnelId }),
+              );
+              stream.abort("permission_revoked");
+              return undefined;
+            }
+            await owner.emitBinary(frame);
+            return undefined;
+          })
+          .catch(() => {
+            entry.deliveryFailed = true;
+            this.logger?.warn({ tunnelId, source: entry.sourceId }, "Tunnel delivery failed");
+            stream.abort("delivery_failed");
+          });
+      },
+      () => {
+        const state = stream.getState();
+        // A FIN is directional. Finish the target's queued writes before releasing its socket.
+        const drained =
+          state.terminationReason === "complete" && !socket.writableFinished
+            ? new Promise<void>((resolve) => {
+                socket.once("finish", resolve);
+                socket.once("close", resolve);
+              })
+            : Promise.resolve();
+        if (state.terminationReason !== "complete") {
+          if (!socket.destroyed && !socket.pending) socket.resetAndDestroy();
+          else socket.destroy();
+        }
+        void Promise.all([entry.sendChain, drained]).finally(() => {
+          this.logger?.debug(this.describe(entry), "Tunnel terminated");
+          this.tunnels.delete(tunnelId);
+          socket.destroy();
+          owner.signal.removeEventListener("abort", detached);
+          void owner.release();
+        });
+      },
+    );
     const entry: TunnelEntry = {
       socket,
       owner,
+      stream,
       sendChain: Promise.resolve(),
-      activated: false,
-      downstreamPaused: false,
-      outboundQueuedBytes: 0,
-      outboundQueuePaused: false,
-      downstreamEnded: false,
-      upstreamEnded: false,
+      sourceId,
+      deliveryFailed: false,
     };
+    const detached = () => stream.abort("source_detached");
+    owner.signal.addEventListener("abort", detached, { once: true });
     this.tunnels.set(tunnelId, entry);
-
-    socket.on("data", (chunk: Buffer) => {
-      entry.outboundQueuedBytes += chunk.byteLength;
-      if (entry.outboundQueuedBytes >= OUTBOUND_QUEUE_HIGH_WATER_BYTES) {
-        entry.outboundQueuePaused = true;
-        socket.pause();
+    socket.on("error", () => {
+      try {
+        stream.reset("target_error");
+      } catch {
+        stream.abort();
       }
-      this.enqueueSend(tunnelId, entry, TunnelStreamOpcode.Data, chunk, () => {
-        entry.outboundQueuedBytes = Math.max(0, entry.outboundQueuedBytes - chunk.byteLength);
-        if (
-          entry.outboundQueuePaused &&
-          entry.outboundQueuedBytes <= OUTBOUND_QUEUE_LOW_WATER_BYTES
-        ) {
-          entry.outboundQueuePaused = false;
-          this.resumeUpstreamIfReady(entry);
-        }
-      });
+    });
+    socket.on("close", () => {
+      if (stream.getState().terminationReason) return;
+      try {
+        stream.reset("target_closed");
+      } catch {
+        stream.abort();
+      }
+    });
+    socket.on("data", (chunk: Buffer) => {
+      try {
+        stream.write(chunk);
+      } catch {
+        socket.destroy();
+      }
     });
     socket.on("end", () => {
-      if (entry.upstreamEnded) return;
-      entry.upstreamEnded = true;
-      this.enqueueSend(tunnelId, entry, TunnelStreamOpcode.End, undefined, () =>
-        this.finishIfClosed(tunnelId, entry),
-      );
-    });
-    socket.on("error", () => {
-      void this.reset(tunnelId, entry, true);
-    });
-    socket.on("close", (hadError) => {
-      if (this.tunnels.get(tunnelId) !== entry) return;
-      if (hadError || !entry.upstreamEnded || !entry.downstreamEnded) {
-        void this.reset(tunnelId, entry, true);
-      } else {
-        this.finish(tunnelId, entry);
+      try {
+        stream.end();
+      } catch {
+        socket.destroy();
       }
     });
-
     try {
       await new Promise<void>((resolve, reject) => {
-        const onConnect = () => {
-          socket.off("error", onError);
+        const cleanup = () => {
+          socket.off("error", failed);
+          socket.off("close", closed);
+        };
+        const failed = () => {
+          cleanup();
+          reject(new Error("Tunnel target unavailable"));
+        };
+        const closed = () => {
+          cleanup();
+          reject(new Error("Tunnel source detached"));
+        };
+        socket.once("connect", () => {
+          cleanup();
           resolve();
-        };
-        const onError = (error: Error) => {
-          socket.off("connect", onConnect);
-          reject(error);
-        };
-        socket.once("connect", onConnect);
-        socket.once("error", onError);
+        });
+        socket.once("error", failed);
+        socket.once("close", closed);
       });
+      if (owner.signal.aborted) throw new Error("Tunnel source detached");
+      stream.setHandlers({
+        onData: (bytes) => {
+          socket.write(bytes, (error) => {
+            if (error) {
+              stream.abort("target_write_failed");
+              return;
+            }
+            try {
+              if (bytes.byteLength) stream.consumed(bytes.byteLength);
+            } catch {
+              socket.destroy();
+            }
+          });
+        },
+        onEnd: () => socket.end(),
+        onReset: () => socket.destroy(),
+        onPause: () => socket.pause(),
+        onResume: () => socket.resume(),
+      });
+      this.logger?.debug({ tunnelId, source: sourceId, state: "open" }, "Tunnel opened");
       return tunnelId;
     } catch (error) {
-      this.tunnels.delete(tunnelId);
-      socket.destroy();
+      stream.abort("open_failed");
       throw error;
     }
   }
@@ -110,109 +192,43 @@ export class TunnelController {
   handleFrame(frame: TunnelStreamFrame, source: object): void {
     const entry = this.tunnels.get(frame.tunnelId);
     if (!entry || entry.owner.source !== source) return;
-    if (frame.opcode === TunnelStreamOpcode.Data) {
-      if (entry.downstreamEnded) {
-        void this.reset(frame.tunnelId, entry, true);
-        return;
-      }
-      if (!entry.socket.write(frame.payload)) {
-        this.enqueueSend(frame.tunnelId, entry, TunnelStreamOpcode.Pause);
-        entry.socket.once("drain", () => {
-          this.enqueueSend(frame.tunnelId, entry, TunnelStreamOpcode.Resume);
-        });
-      }
+    if (!this.permitted()) {
+      this.revoke(source);
       return;
     }
-    if (frame.opcode === TunnelStreamOpcode.Pause) {
-      entry.downstreamPaused = true;
-      entry.socket.pause();
-      return;
+    try {
+      entry.stream.handleFrame(frame);
+    } catch {
+      entry.stream.abort("send_failed");
     }
-    if (frame.opcode === TunnelStreamOpcode.Resume) {
-      entry.activated = true;
-      entry.downstreamPaused = false;
-      this.resumeUpstreamIfReady(entry);
-      return;
+  }
+
+  revoke(source?: object): void {
+    for (const entry of this.tunnels.values()) {
+      if (source && entry.owner.source !== source) continue;
+      // Reset must still be delivered after permission removal so the browser can settle.
+      const frame = encodeTunnelStreamFrame({
+        opcode: TunnelStreamOpcode.Reset,
+        tunnelId: entry.stream.id,
+      });
+      entry.sendChain = entry.sendChain
+        .then(() => entry.owner.emitBinary(frame))
+        .catch(() => undefined);
+      entry.stream.abort("permission_revoked");
     }
-    if (frame.opcode === TunnelStreamOpcode.Reset) {
-      void this.reset(frame.tunnelId, entry, false);
-      return;
-    }
-    if (entry.downstreamEnded) return;
-    entry.downstreamEnded = true;
-    entry.socket.end();
-    this.finishIfClosed(frame.tunnelId, entry);
   }
 
   abort(tunnelId: string): void {
-    const entry = this.tunnels.get(tunnelId);
-    if (!entry) return;
-    this.tunnels.delete(tunnelId);
-    entry.socket.destroy();
+    this.tunnels.get(tunnelId)?.stream.abort("source_detached");
   }
-
   dispose(): void {
-    for (const [tunnelId] of this.tunnels) this.abort(tunnelId);
+    for (const entry of this.tunnels.values()) entry.stream.abort("daemon_shutdown");
   }
 
   private resolveTarget(target: TunnelTarget): { host: string; port: number } {
     if (target.type === "tcp") return { host: target.host, port: target.port };
     const route = this.serviceProxy?.resolveInternalService(target.name);
-    if (!route) throw new Error(`Tunnel service is unavailable: ${target.name}`);
+    if (!route) throw new Error("Tunnel service is unavailable");
     return { host: route.host, port: route.port };
-  }
-
-  private enqueueSend(
-    tunnelId: string,
-    entry: TunnelEntry,
-    opcode: TunnelStreamOpcode,
-    payload?: Uint8Array,
-    after?: () => void,
-  ): void {
-    const sending = entry.owner
-      .emitBinary(encodeTunnelStreamFrame({ opcode, tunnelId, payload }))
-      .then(
-        () => after?.(),
-        () => {
-          void this.reset(tunnelId, entry, false);
-        },
-      );
-    entry.sendChain = Promise.all([entry.sendChain, sending]).then(() => undefined);
-  }
-
-  private finishIfClosed(tunnelId: string, entry: TunnelEntry): void {
-    if (!entry.downstreamEnded || !entry.upstreamEnded) return;
-    void entry.sendChain.finally(() => this.finish(tunnelId, entry));
-  }
-
-  private resumeUpstreamIfReady(entry: TunnelEntry): void {
-    if (
-      entry.activated &&
-      !entry.downstreamPaused &&
-      !entry.outboundQueuePaused &&
-      !entry.upstreamEnded
-    ) {
-      entry.socket.resume();
-    }
-  }
-
-  private finish(tunnelId: string, entry: TunnelEntry): void {
-    if (this.tunnels.get(tunnelId) !== entry) return;
-    this.tunnels.delete(tunnelId);
-    entry.socket.destroy();
-    void entry.owner.release();
-  }
-
-  private async reset(tunnelId: string, entry: TunnelEntry, notifyPeer: boolean): Promise<void> {
-    if (this.tunnels.get(tunnelId) !== entry) return;
-    this.tunnels.delete(tunnelId);
-    entry.socket.destroy();
-    if (notifyPeer) {
-      await entry.sendChain.catch(() => undefined);
-      await entry.owner
-        .emitBinary(encodeTunnelStreamFrame({ opcode: TunnelStreamOpcode.Reset, tunnelId }))
-        .catch(() => undefined);
-    }
-    await entry.owner.release().catch(() => undefined);
   }
 }

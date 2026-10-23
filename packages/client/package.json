@@ -49,6 +49,14 @@
     "./node/local-viewer-http-proxy": {
       "types": "./dist/node/local-viewer-http-proxy.d.ts",
       "default": "./dist/node/local-viewer-http-proxy.js"
+    },
+    "./internal/tunnel-upstream": {
+      "types": "./dist/tunnel-upstream.d.ts",
+      "default": "./dist/tunnel-upstream.js"
+    },
+    "./internal/daemon-tunnel": {
+      "types": "./dist/daemon-tunnel.d.ts",
+      "default": "./dist/daemon-tunnel.js"
     }
   },
   "publishConfig": {
