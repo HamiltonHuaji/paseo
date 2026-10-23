@@ -216,6 +216,16 @@ jobs:
         name: Build server dependencies
         run: npm run build:server-deps
 
+      - name: Install Codex for local MCP continuity regression
+        if: ${{ needs.changes.outputs.full != 'false' || needs.changes.outputs.server != 'false' }}
+        run: node scripts/npm-retry.mjs install -g @openai/codex@0.162.1
+
+      - name: Run native MCP continuity regression
+        if: ${{ needs.changes.outputs.full != 'false' || needs.changes.outputs.server != 'false' }}
+        run: |
+          codex --version
+          npm run test:integration:local --workspace=@getpaseo/server -- --testNamePattern="keeps runtime MCP tools callable after interruption, rewind and resume" --bail=1
+
       - name: Run server tests
         if: ${{ needs.changes.outputs.full != 'false' || needs.changes.outputs.server != 'false' }}
         run: npm run test --workspace=@getpaseo/server
