@@ -7650,3 +7650,28 @@ describe("project Codex storage", () => {
     );
   });
 });
+
+test("model catalog does not add configured reasoning levels to unsupported models", async () => {
+  const appServer = createFakeCodexAppServer({
+    "model/list": () => ({
+      data: [
+        {
+          id: "limited",
+          isDefault: true,
+          defaultReasoningEffort: "low",
+          supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low reasoning" }],
+        },
+      ],
+    }),
+    "config/read": () => ({ config: { model: "limited", model_reasoning_effort: "xhigh" } }),
+  });
+  const catalog = await createProviderWithFakeAppServer(appServer).fetchCatalog({
+    scope: "global",
+    force: true,
+  });
+  expect(catalog.models[0]?.thinkingOptions).toEqual([
+    { id: "low", label: "low", description: "Low reasoning", isDefault: true },
+  ]);
+  expect(catalog.models[0]?.defaultThinkingOptionId).toBe("low");
+  appServer.assertNoErrors();
+});

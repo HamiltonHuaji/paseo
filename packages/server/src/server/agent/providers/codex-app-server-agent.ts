@@ -4046,7 +4046,8 @@ export class CodexAppServerAgentSession implements AgentSession {
     const tiers = this.currentServiceTiers();
     // COMPAT(codexFastPreference): added in v0.10.0, remove after 2027-03-29 once saved Fast preferences have migrated.
     if (this.serviceTier === "fast" && !tiers.some((tier) => tier.id === "fast")) {
-      this.serviceTier = tiers.find((tier) => tier.name.toLowerCase() === "fast")?.id ?? null;
+      this.serviceTier =
+        tiers.find((tier) => tier.name.toLowerCase() === "fast")?.id ?? this.serviceTier;
     }
     if (
       this.serviceTier !== null &&
@@ -4843,7 +4844,9 @@ export class CodexAppServerAgentSession implements AgentSession {
   }
 
   async setThinkingOption(thinkingOptionId: string | null): Promise<void | AgentProviderNotice> {
-    this.thinkingSelection = normalizeCodexThinkingOptionId(thinkingOptionId);
+    const selection = normalizeCodexThinkingOptionId(thinkingOptionId);
+    this.assertThinkingOptionSupported(this.config.model, selection);
+    this.thinkingSelection = selection;
     this.config.thinkingOptionId = this.thinkingSelection;
     this.refreshResolvedCollaborationMode();
     this.cachedRuntimeInfo = null;
@@ -5592,6 +5595,20 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
   }
 
+  private assertThinkingOptionSupported(
+    model: string | undefined,
+    effort: string | undefined,
+  ): void {
+    const supported = this.speedModels.find(
+      (entry) => entry.id === model,
+    )?.supportedReasoningEfforts;
+    if (effort && supported && !supported.some((entry) => entry.reasoningEffort === effort)) {
+      throw new Error(
+        `Codex reasoning effort '${effort}' is not available for model '${model}'. Select a supported reasoning level or update the provider configuration.`,
+      );
+    }
+  }
+
   private async refreshExecutionModelSettings(): Promise<void> {
     if (!this.client) throw new Error("Codex client is not initialized");
     this.speedModels = await readCodexModels(this.client);
@@ -5657,6 +5674,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (!model) {
       throw new Error("Unable to resolve Codex model");
     }
+    this.assertThinkingOptionSupported(model, thinkingOptionId);
     return {
       model,
       thinkingOptionId,
@@ -8076,6 +8094,17 @@ export class CodexAppServerAgentClient implements AgentClient {
         };
       } catch (error) {
         await session.close().catch(() => undefined);
+        if (
+          sourceHome !== environment.CODEX_HOME &&
+          rollout &&
+          error instanceof Error &&
+          error.message.includes(`no rollout found for thread id ${input.providerHandleId}`)
+        ) {
+          throw new Error(
+            "This Codex version cannot copy this session between Codex storage homes. Import the original session instead; its source remains in the original home.",
+            { cause: error },
+          );
+        }
         throw error;
       }
     }
@@ -8291,14 +8320,18 @@ function buildCodexModelDefinition(
   const defaultReasoningEffort = normalizeCodexThinkingOptionId(
     typeof model.defaultReasoningEffort === "string" ? model.defaultReasoningEffort : null,
   );
-  const resolvedDefaultReasoningEffort =
-    ctx.configuredDefaultThinkingOptionId ?? defaultReasoningEffort;
-
   const thinkingById = buildCodexThinkingOptionMap(
     model.supportedReasoningEfforts,
-    resolvedDefaultReasoningEffort,
-    ctx.configuredDefaultThinkingOptionId,
+    defaultReasoningEffort,
   );
+  const configuredEffort = ctx.configuredDefaultThinkingOptionId;
+  let resolvedDefaultReasoningEffort = thinkingById.keys().next().value;
+  if (defaultReasoningEffort && thinkingById.has(defaultReasoningEffort)) {
+    resolvedDefaultReasoningEffort = defaultReasoningEffort;
+  }
+  if (configuredEffort && thinkingById.has(configuredEffort)) {
+    resolvedDefaultReasoningEffort = configuredEffort;
+  }
 
   const thinkingOptions = Array.from(thinkingById.values()).map((option) =>
     Object.assign({}, option, {
@@ -8333,7 +8366,6 @@ function buildCodexModelDefinition(
 function buildCodexThinkingOptionMap(
   supportedReasoningEfforts: CodexReasoningEffortEntry[] | undefined,
   resolvedDefaultReasoningEffort: string | undefined,
-  configuredDefaultThinkingOptionId: string | undefined,
 ): Map<string, { id: string; label: string; description?: string }> {
   const thinkingById = new Map<string, { id: string; label: string; description?: string }>();
   if (Array.isArray(supportedReasoningEfforts)) {
@@ -8350,14 +8382,11 @@ function buildCodexThinkingOptionMap(
     }
   }
 
-  if (resolvedDefaultReasoningEffort && !thinkingById.has(resolvedDefaultReasoningEffort)) {
+  if (!supportedReasoningEfforts && resolvedDefaultReasoningEffort) {
     thinkingById.set(resolvedDefaultReasoningEffort, {
       id: resolvedDefaultReasoningEffort,
       label: resolvedDefaultReasoningEffort,
-      description:
-        configuredDefaultThinkingOptionId === resolvedDefaultReasoningEffort
-          ? "Configured default reasoning effort"
-          : "Model default reasoning effort",
+      description: "Model default reasoning effort",
     });
   }
   return thinkingById;

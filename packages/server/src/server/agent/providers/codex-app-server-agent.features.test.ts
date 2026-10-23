@@ -339,6 +339,49 @@ describe("Codex app-server provider features", () => {
     }
   });
 
+  test.each([{ service_tier: "fast" }, { fast_mode: true }])(
+    "rejects saved Fast intent when the model no longer declares it: %j",
+    async (featureValues) => {
+      const { session, appServer } = createSessionHarness({ model: "gpt-5.4-mini", featureValues });
+      try {
+        await expect(session.connect()).rejects.toThrow("Codex speed 'fast' is not available");
+        expect(appServer.requests().some(({ method }) => method === "thread/start")).toBe(false);
+      } finally {
+        await session.close();
+      }
+    },
+  );
+
+  test("rejects reasoning choices outside the selected model's declared capabilities", async () => {
+    const models = [
+      {
+        id: "gpt-5.4",
+        isDefault: true,
+        defaultReasoningEffort: "low",
+        supportedReasoningEfforts: [{ reasoningEffort: "low" }],
+      },
+    ];
+    const invalid = createSessionHarness({ thinkingOptionId: "high" }, { models });
+    try {
+      await expect(invalid.session.connect()).rejects.toThrow(
+        "reasoning effort 'high' is not available",
+      );
+    } finally {
+      await invalid.session.close();
+    }
+    const valid = createSessionHarness({ thinkingOptionId: "low" }, { models });
+    try {
+      await valid.session.connect();
+      await expect(valid.session.setThinkingOption!("high")).rejects.toThrow(
+        "reasoning effort 'high' is not available",
+      );
+      expect(valid.session.describePersistence()).toBeNull();
+      expect(await valid.session.getRuntimeInfo()).toMatchObject({ thinkingOptionId: "low" });
+    } finally {
+      await valid.session.close();
+    }
+  });
+
   test("maps legacy Fast commands to the catalog's request id", async () => {
     const { session, appServer } = await createConnectedSession();
     try {
@@ -394,11 +437,8 @@ describe("Codex app-server provider features", () => {
     "o3",
     "o4-mini",
     "gpt-6-unknown",
-  ])("does not expose or restore Fast for %s", async (model) => {
-    const { session, appServer } = await createConnectedSession({
-      model,
-      featureValues: { fast_mode: true },
-    });
+  ])("does not expose Fast for %s", async (model) => {
+    const { session, appServer } = await createConnectedSession({ model });
     try {
       expect(session.features.map((feature) => feature.id)).toEqual(["plan_mode"]);
       await expect(session.setFeature?.("fast_mode", true)).rejects.toThrow(
@@ -486,28 +526,16 @@ describe("Codex app-server provider features", () => {
     ]);
   });
 
-  test("constructor ignores restored fast mode when model does not support it", async () => {
-    const { session, appServer } = await createConnectedSession({
+  test("rejects restored Fast for a model absent from the catalog", async () => {
+    const { session } = createSessionHarness({
       model: "gpt-3.5-turbo",
       featureValues: { fast_mode: true },
     });
-
-    expect(session.features).toEqual([
-      {
-        type: "toggle",
-        id: "plan_mode",
-        label: "Plan",
-        description: "Switch Codex into planning-only collaboration mode",
-        tooltip: "Toggle plan mode",
-        icon: "list-todo",
-        value: false,
-      },
-    ]);
-
-    await session.startTurn("hello");
-    await expect(appServer.waitForTurnStart()).resolves.toMatchObject({
-      serviceTier: "default",
-    });
+    try {
+      await expect(session.connect()).rejects.toThrow("Codex speed 'fast' is not available");
+    } finally {
+      await session.close();
+    }
   });
 
   test("selecting Fast sends the catalog service tier", async () => {

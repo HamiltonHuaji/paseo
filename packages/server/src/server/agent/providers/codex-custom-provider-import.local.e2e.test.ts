@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import type { AgentSession, AgentStreamEvent } from "../agent-sdk-types.js";
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { CodexAppServerAgentClient } from "./codex-app-server-agent.js";
 
@@ -80,6 +81,16 @@ async function startResponsesEndpoint(): Promise<{
     requestCount: () => requests,
     bodies,
   };
+}
+
+function expectExecution(
+  body: Record<string, unknown> | undefined,
+  model: string,
+  effort: string,
+  tier: string,
+): void {
+  expect(body).toMatchObject({ model, reasoning: { effort } });
+  expect(body?.service_tier ?? "default").toBe(tier);
 }
 
 async function closeServer(server: Server): Promise<void> {
@@ -209,8 +220,7 @@ stream_max_retries=0
         (await session.listCommands()).some((command) => command.name === "context-proof"),
       ).toBe(true);
       await session.run("/context-proof Reply with done.");
-      expect(bodies.at(-1)).toMatchObject({ model, reasoning: { effort } });
-      expect(bodies.at(-1)?.service_tier ?? "default").toBe(tier);
+      expectExecution(bodies.at(-1), model!, effort!, tier!);
       expect(JSON.stringify(bodies.at(-1)?.input)).toContain("Shared skill sentinel");
       const handle = session.describePersistence()!;
       expect(handle.metadata.model).toBeNull();
@@ -229,13 +239,157 @@ stream_max_retries=0
       const restarted = await makeClient().resumeSession(handle);
       cleanups.push(() => restarted.close());
       await restarted.run("defaults after restart");
-      expect(bodies.at(-1)).toMatchObject({ model: nextModel, reasoning: { effort: "medium" } });
-      expect(bodies.at(-1)?.service_tier ?? "default").toBe("default");
+      expectExecution(bodies.at(-1), nextModel, "medium", "default");
       writeConfig(model!, effort!, tier!);
       await restarted.run("defaults after configuration update");
-      expect(bodies.at(-1)).toMatchObject({ model, reasoning: { effort } });
-      expect(bodies.at(-1)?.service_tier ?? "default").toBe(tier);
+      expectExecution(bodies.at(-1), model!, effort!, tier!);
+      await restarted.setModel!(model!);
+      await restarted.setThinkingOption!("low");
+      await restarted.setFeature!("service_tier", "default");
+      const selected = restarted.describePersistence()!;
+      expect(selected.metadata).toMatchObject({
+        model,
+        thinkingOptionId: "low",
+        featureValues: { service_tier: "default" },
+      });
       await restarted.close();
+      writeConfig(nextModel, "high", "priority");
+      const explicit = await makeClient().resumeSession(selected);
+      cleanups.push(() => explicit.close());
+      await explicit.run("explicit choices survive changed defaults and restart");
+      expectExecution(bodies.at(-1), model!, "low", "default");
+      await explicit.close();
+      writeConfig(model!, effort!, tier!);
+      const config = { provider: "codex", cwd };
+      const imported = await makeClient().importSession(
+        { providerHandleId: handle.sessionId, cwd },
+        { config, storedConfig: config },
+      );
+      cleanups.push(() => imported.session.close());
+      expect(imported.session.id).toBe(handle.sessionId);
+      expect(JSON.stringify(imported.timeline)).toContain("defaults after restart");
+      const turn = async (active: AgentSession, prompt: string) => {
+        const events: AgentStreamEvent[] = [];
+        const unsubscribe = active.subscribe((event) => events.push(event));
+        try {
+          await active.run(prompt);
+        } finally {
+          unsubscribe();
+        }
+        expect(bodies.at(-1)).toMatchObject({ model, reasoning: { effort } });
+        expect(bodies.at(-1)?.service_tier ?? "default").toBe(tier);
+        const user = events.findLast(
+          (event) => event.type === "timeline" && event.item.type === "user_message",
+        );
+        if (user?.type !== "timeline" || user.item.type !== "user_message" || !user.item.messageId)
+          throw new Error("Missing native user message boundary");
+        return user.item.messageId;
+      };
+      const boundary = await turn(imported.session, "continue the imported source");
+      const fork = await makeClient().forkSession(imported.session, {
+        boundaryMessageId: boundary,
+        isLatestCompletedTurn: true,
+        targetConfig: config,
+      });
+      cleanups.push(() => fork.close());
+      expect(fork.id).not.toBe(handle.sessionId);
+      expect(fork.describePersistence()?.metadata.paseoCodexHome).toBe(
+        handle.metadata.paseoCodexHome,
+      );
+      await turn(fork, "execute the conversation fork");
+      await fork.close();
+      const copied = await makeClient().importSession(
+        { providerHandleId: handle.sessionId, cwd, fork: true },
+        { config, storedConfig: config },
+      );
+      cleanups.push(() => copied.session.close());
+      expect(copied.session.id).not.toBe(handle.sessionId);
+      await turn(copied.session, "keep this copy turn");
+      const rewindBoundary = await turn(copied.session, "remove this copy turn");
+      const beforeRewind = copied.session.describePersistence()!;
+      await copied.session.revertConversation!({ messageId: rewindBoundary });
+      const rewound = copied.session.describePersistence()!;
+      expect(rewound.sessionId).not.toBe(beforeRewind.sessionId);
+      expect(rewound.metadata.paseoCodexHome).toBe(handle.metadata.paseoCodexHome);
+      expect(rewound.metadata.branchOperations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ operation: "rewind", sourceThreadId: beforeRewind.sessionId }),
+        ]),
+      );
+      await copied.session.close();
+      await client.archiveNativeSession(rewound);
+      const archived = await makeClient().resumeSession(rewound, undefined, undefined, {
+        purpose: "history",
+      });
+      cleanups.push(() => archived.close());
+      const archivedEvents = [];
+      for await (const event of archived.streamHistory()) archivedEvents.push(event);
+      expect(JSON.stringify(archivedEvents)).toContain("keep this copy turn");
+      expect(JSON.stringify(archivedEvents)).not.toContain("remove this copy turn");
+      await archived.close();
+      await client.unarchiveNativeSession(rewound);
+      const restored = await makeClient().resumeSession(rewound);
+      cleanups.push(() => restored.close());
+      await turn(restored, "continue restored branch");
+      await restored.close();
+      await imported.session.close();
+      expect(existsSync(path.join(home, "sessions"))).toBe(false);
+      const legacyClient = new CodexAppServerAgentClient(createTestLogger(), {
+        env: { CODEX_HOME: home, PASEO_CODEX_STORAGE: "global" },
+      });
+      const legacy = await legacyClient.createSession(config);
+      cleanups.push(() => legacy.close());
+      await turn(legacy, "existing user-home session");
+      const legacyHandle = legacy.describePersistence()!;
+      await legacy.close();
+      const discovered: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await client.listImportableSessionsPage({ cwd, limit: 100, cursor });
+        discovered.push(...page.sessions.map((entry) => entry.providerHandleId));
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(discovered).toContain(legacyHandle.sessionId);
+      const legacyImported = await makeClient().importSession(
+        { providerHandleId: legacyHandle.sessionId, cwd },
+        { config, storedConfig: config },
+      );
+      cleanups.push(() => legacyImported.session.close());
+      expect(legacyImported.session.describePersistence()?.metadata.paseoCodexHome).toBe(home);
+      await legacyImported.session.close();
+      try {
+        const legacyCopy = await makeClient().importSession(
+          { providerHandleId: legacyHandle.sessionId, cwd, fork: true },
+          { config, storedConfig: config },
+        );
+        cleanups.push(() => legacyCopy.session.close());
+        expect(legacyCopy.persistence.metadata?.paseoCodexHome).toBe(
+          handle.metadata.paseoCodexHome,
+        );
+        expect(legacyCopy.persistence.sessionId).not.toBe(legacyHandle.sessionId);
+        expect(JSON.stringify(legacyCopy.timeline)).toContain("existing user-home session");
+        await turn(legacyCopy.session, "continue legacy copy in project storage");
+        await legacyCopy.session.close();
+      } catch (error) {
+        // Codex 0.162.1 cannot resolve a paginated source tree through a path in
+        // another home. Future native versions may support the same request.
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain(
+          "cannot copy this session between Codex storage homes",
+        );
+      }
+      const originalLegacy = await legacyClient.resumeSession(legacyHandle, undefined, undefined, {
+        purpose: "history",
+      });
+      cleanups.push(() => originalLegacy.close());
+      const legacyEvents = [];
+      for await (const event of originalLegacy.streamHistory()) legacyEvents.push(event);
+      expect(JSON.stringify(legacyEvents)).toContain("existing user-home session");
+      expect(JSON.stringify(legacyEvents)).not.toContain("continue legacy copy in project storage");
+      await originalLegacy.close();
+      expect(readFileSync(path.join(skills, "SKILL.md"), "utf8")).toContain(
+        "Shared skill sentinel",
+      );
       execFileSync("git", ["-C", cwd, "worktree", "remove", worktree]);
       const history = await makeClient().resumeSession(handle, undefined, undefined, {
         purpose: "history",
