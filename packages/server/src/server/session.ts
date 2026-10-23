@@ -694,6 +694,7 @@ export class Session {
     return this.hostSourceId;
   }
   private hostSourceId: string;
+  private readonly serverId?: string;
   setHostSource(sourceId: string): void {
     this.hostSourceId = sourceId;
     this.connectedHostSession?.setSource(sourceId);
@@ -898,6 +899,7 @@ export class Session {
     this.clientCapabilities = parseClientCapabilities(clientCapabilities);
     this.sessionId = uuidv4();
     this.hostSourceId = hostSource(options);
+    this.serverId = serverId;
     this.connectedHostSession = createHostSession(options, this);
     this.onMessage = onMessage;
     this.onMessageToSource = onMessageToSource
@@ -8718,6 +8720,12 @@ export class Session {
         cwd: snapshot.cwd,
       });
       forkContext.attachment.sourceAgentId = msg.agentId;
+      forkContext.attachment.sourceHostId = this.serverId;
+      forkContext.attachment.sourceProviderSessionId = snapshot.persistence?.sessionId;
+      const sourceTree = snapshot.persistence?.metadata?.providerSessionTreeId;
+      forkContext.attachment.sourceProviderSessionTreeId =
+        typeof sourceTree === "string" ? sourceTree : undefined;
+      forkContext.attachment.boundaryMessageId = forkContext.boundaryMessageId ?? undefined;
 
       this.emit({
         type: "agent.fork_context.response",

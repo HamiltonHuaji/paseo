@@ -85,6 +85,28 @@ Permission requests are notification checkpoints, not the end of that subscripti
 The permission notification includes the normalized request plus the child and request IDs, so the caller can inspect it and respond without fetching agent status.
 A watched child that closes before its finish event also notifies the caller so delegated work cannot disappear silently during archive or workspace teardown.
 
+### Conversation lineage
+
+Keep conversation origins separate from management labels. Forking, copying, and rewinding do
+not create a managed parent or an archive cascade. Paseo IDs remain stable across rewind;
+native branch IDs remain aliases, and each operation retains its source and result identity.
+
+Resolve an origin using its source host and stable Paseo ID. Native headers alone do not prove
+the source host: imported files may come from another machine. Keep their host unknown, retain
+missing and ambiguous owners, and draw no local parent edge for them. Multiple imports of one
+native ID remain candidates; a saved explicit Paseo source ID is authoritative. Text copies carry
+the original host with their attachment, including when the destination host changes.
+
+Legacy records with only `forkedFrom.agentId` cannot distinguish an explicit operation from old
+provider inference. Preserve that ID but leave its host and operation unknown. Only recorded
+local native-fork/import-copy operations can supply the local host; saved rewind receipts retain
+their stable session owner. Recovery reads native headers and saved receipts without resuming a
+provider writer. Missing boundaries and native tree IDs stay unknown.
+
+The Sessions relationship details require `server_info.features.sessionLineage`. Older snapshots
+still parse; they do not establish host-qualified parentage. The older `forkedFrom` field remains
+available for wire compatibility.
+
 ## Provider-managed child agents
 
 Some providers can create their own child sessions inside one provider runtime. OMP's task tool reports these with `child_session` events; `AgentManager` imports the live provider handle, stamps `paseo.parent-agent-id`, and surfaces the result as a normal subagent in the parent's subagents track.

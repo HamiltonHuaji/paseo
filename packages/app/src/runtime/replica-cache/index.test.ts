@@ -1124,3 +1124,43 @@ it("retains semantic agent messages across disk-cache reconstruction", async () 
   await writer.flush();
   expect(await createCache(storage).readTimeline(SERVER_ID, "agent-1")).toEqual(value);
 });
+
+it("preserves source host, unresolved lineage and repeated rewinds in the replica cache", async () => {
+  const storage = new MemoryStorage();
+  const writer = createCache(storage);
+  const baseline = directory();
+  const value = baseline.agents.get("agent-1")!;
+  value.forkedFrom = {
+    agentId: "source",
+    forkedAt: value.createdAt.toISOString(),
+    sourceHostId: "remote-host",
+    operation: "native-fork",
+  };
+  value.sessionLineage = [
+    {
+      operation: "native-fork",
+      createdAt: value.createdAt.toISOString(),
+      sourceHostId: "remote-host",
+      sourceProviderSessionId: "old-native",
+      sourceResolution: "ambiguous",
+      candidateAgentIds: ["a", "b"],
+      sourceEvidence: "provider-history",
+    },
+    ...[1, 2].map((id) => ({
+      operation: "rewind" as const,
+      createdAt: value.createdAt.toISOString(),
+      sourceHostId: SERVER_ID,
+      sourceAgentId: value.id,
+      sourceProviderSessionId: `native-${id}`,
+      resultProviderSessionId: `native-${id + 1}`,
+      boundaryMessageId: `boundary-${id}`,
+      sourceResolution: "resolved" as const,
+      sourceEvidence: "paseo-operation" as const,
+    })),
+  ];
+  commitDirectory(writer, SERVER_ID, baseline);
+  await writer.flush();
+  const restored = (await createCache(storage).readDirectory(SERVER_ID)).agents.get("agent-1");
+  expect(restored?.forkedFrom).toEqual(value.forkedFrom);
+  expect(restored?.sessionLineage).toEqual(value.sessionLineage);
+});

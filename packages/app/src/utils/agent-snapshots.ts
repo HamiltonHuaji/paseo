@@ -71,6 +71,7 @@ export function projectAgentSnapshot(agent: Agent): AgentSnapshotPayload {
     lastUserMessageAt: agent.lastUserMessageAt?.toISOString() ?? null,
     lastAssistantMessageAt: agent.lastAssistantMessageAt?.toISOString() ?? null,
     forkedFrom: agent.forkedFrom,
+    sessionLineage: agent.sessionLineage,
     status: agent.status,
     ...projectActiveTurn(agent),
     capabilities: agent.capabilities,
@@ -121,6 +122,7 @@ export function normalizeAgentSnapshot(snapshot: AgentSnapshotPayload, serverId:
       ? new Date(snapshot.lastAssistantMessageAt)
       : null,
     forkedFrom: snapshot.forkedFrom,
+    sessionLineage: snapshot.sessionLineage,
     lastActivityAt: updatedAt,
     capabilities: snapshot.capabilities,
     currentModeId: snapshot.currentModeId,

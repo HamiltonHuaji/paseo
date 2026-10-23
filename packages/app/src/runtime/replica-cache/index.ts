@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   AgentStatusSchema,
+  AgentForkOriginSchema,
+  AgentSessionLineageSchema,
   AgentTimelineItemPayloadSchema,
   WorkspaceGitHubRuntimePayloadSchema,
 } from "@getpaseo/protocol/messages";
@@ -231,7 +233,8 @@ const StoredAgentSnapshotSchema = z.strictObject({
   updatedAt: IsoDateSchema,
   lastUserMessageAt: IsoDateSchema.nullable(),
   lastAssistantMessageAt: IsoDateSchema.nullable().optional(),
-  forkedFrom: z.strictObject({ agentId: z.string(), forkedAt: IsoDateSchema }).optional(),
+  forkedFrom: AgentForkOriginSchema.optional(),
+  sessionLineage: z.array(AgentSessionLineageSchema).optional(),
   status: AgentStatusSchema,
   activeTurn: z
     .strictObject({
@@ -623,6 +626,7 @@ function serializeConversationMetadata(agent: Agent) {
   return {
     lastAssistantMessageAt: agent.lastAssistantMessageAt?.toISOString() ?? null,
     forkedFrom: agent.forkedFrom,
+    sessionLineage: agent.sessionLineage,
     experimentTouches: agent.experimentTouches,
   };
 }

@@ -46,6 +46,9 @@ export const styles = StyleSheet.create((theme) => ({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
+  relationships: { borderBottomWidth: 1, borderBottomColor: theme.colors.border },
+  relationshipList: { maxHeight: 240 },
+  relationshipEntry: { padding: theme.spacing[2], gap: theme.spacing[1] },
   preview: { gap: theme.spacing[2], flex: 1 },
   row: {
     flexDirection: "row",

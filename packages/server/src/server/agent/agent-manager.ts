@@ -1,4 +1,10 @@
-import { readInitialSessionIds, recoverSessionLineage } from "./session-lineage.js";
+import {
+  readInitialSessionIds,
+  recoverSessionLineage,
+  recordSessionOperation,
+  candidateResolution,
+  sessionOperationMetadata,
+} from "./session-lineage.js";
 import { projectTimelineRows } from "./timeline-projection.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
@@ -319,17 +325,25 @@ function restoreLastAssistantMessageTime(agent: ManagedAgent, rows: AgentTimelin
 }
 
 function initialConversationMetadata(
-  options?: Pick<ManagedAgent, "lastAssistantMessageAt" | "forkedFrom" | "providerSessionIds">,
+  options?: Pick<
+    ManagedAgent,
+    "lastAssistantMessageAt" | "forkedFrom" | "sessionLineage" | "providerSessionIds"
+  >,
 ) {
   return {
     lastAssistantMessageAt: options?.lastAssistantMessageAt ?? null,
     forkedFrom: options?.forkedFrom,
+    sessionLineage: options?.sessionLineage,
     providerSessionIds: options?.providerSessionIds ?? [],
   };
 }
 
 export interface CreateAgentOptions {
   contextForkSourceAgentId?: string;
+  contextForkBoundaryMessageId?: string;
+  contextForkSourceHostId?: string;
+  contextForkSourceProviderSessionId?: string;
+  contextForkSourceProviderSessionTreeId?: string;
   labels?: Record<string, string>;
   initialPrompt?: string;
   env?: Record<string, string>;
@@ -341,6 +355,7 @@ export interface CreateAgentOptions {
 }
 
 export interface AgentManagerOptions {
+  serverId?: string;
   pluginLifecycle?: PluginLifecycle;
   /** An internal workspace makes every agent created inside it internal. */
   clients?: ProviderClientMap;
@@ -453,6 +468,7 @@ interface ManagedAgentBase {
   lastUserMessageAt: Date | null;
   lastAssistantMessageAt?: Date | null;
   forkedFrom?: StoredAgentRecord["forkedFrom"];
+  sessionLineage?: StoredAgentRecord["sessionLineage"];
   providerSessionIds?: string[];
   activeTurnId: string | null;
   activeTurnStartedAt: Date | null;
@@ -802,8 +818,10 @@ export class AgentManager {
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
   private readonly beforeSteerUnavailableFallback?: AgentManagerOptions["beforeSteerUnavailableFallback"];
   private acceptingAgentRegistrations = true;
+  private readonly serverId?: string;
 
   constructor(options: AgentManagerOptions) {
+    this.serverId = options.serverId;
     this.pluginLifecycle = options.pluginLifecycle;
     this.timelineStore = options.timelineStore ?? new InMemoryAgentTimelineStore();
     this.idFactory = options.idFactory ?? (() => randomUUID());
@@ -1395,7 +1413,18 @@ export class AgentManager {
         throw new Error("The forked provider session does not match the requested provider");
       }
       const registered = await this.registerSession(session, storedConfig, resolvedAgentId, {
+        sessionLineage: [
+          recordSessionOperation({
+            operation: "native-fork",
+            sourceHostId: this.serverId,
+            sourceAgentId: sourceAgent.id,
+            sourcePersistence: sourceAgent.persistence,
+            resultPersistence: persistence,
+            boundaryMessageId: boundary.boundaryMessageId,
+          }),
+        ],
         forkedFrom: {
+          sourceHostId: this.serverId,
           agentId: sourceAgent.id,
           forkedAt: new Date().toISOString(),
           operation: "native-fork",
@@ -1462,14 +1491,9 @@ export class AgentManager {
     const createOptions = this.buildCreateSessionOptions(options);
     const session = await client.createSession(providerLaunchConfig, launchContext, createOptions);
     await this.requireExternalMcpSupport(session, storedConfig);
+    const copyMetadata = await this.textCopyMetadata(options, session.describePersistence());
     const agent = await this.registerSession(session, storedConfig, resolvedAgentId, {
-      forkedFrom: options.contextForkSourceAgentId
-        ? {
-            agentId: options.contextForkSourceAgentId,
-            forkedAt: new Date().toISOString(),
-            operation: "text-copy",
-          }
-        : undefined,
+      ...copyMetadata,
       labels: options.labels,
       initialTitle: options.initialTitle,
       workspaceId: options.workspaceId,
@@ -1482,6 +1506,36 @@ export class AgentManager {
       });
     }
     return agent;
+  }
+
+  private async textCopyMetadata(
+    options: CreateAgentOptions,
+    resultPersistence: AgentPersistenceHandle | null,
+  ) {
+    if (!options.contextForkSourceAgentId) return {};
+    const localSource =
+      Boolean(options.contextForkSourceHostId) && options.contextForkSourceHostId === this.serverId;
+    const copySource = localSource
+      ? (this.agents.get(options.contextForkSourceAgentId) ??
+        (await this.registry?.get(options.contextForkSourceAgentId)))
+      : undefined;
+    const sourcePersistence = options.contextForkSourceProviderSessionId
+      ? {
+          sessionId: options.contextForkSourceProviderSessionId,
+          metadata: { providerSessionTreeId: options.contextForkSourceProviderSessionTreeId },
+        }
+      : copySource?.persistence;
+    return sessionOperationMetadata(
+      recordSessionOperation({
+        operation: "text-copy",
+        sourceHostId: options.contextForkSourceHostId,
+        sourceAgentId: options.contextForkSourceAgentId,
+        sourceResolution: localSource && !copySource ? "missing" : undefined,
+        sourcePersistence,
+        resultPersistence,
+        boundaryMessageId: options.contextForkBoundaryMessageId,
+      }),
+    );
   }
 
   private buildCreateSessionOptions(options?: {
@@ -1504,6 +1558,7 @@ export class AgentManager {
       lastUserMessageAt?: Date | null;
       lastAssistantMessageAt?: Date | null;
       forkedFrom?: StoredAgentRecord["forkedFrom"];
+      sessionLineage?: StoredAgentRecord["sessionLineage"];
       providerSessionIds?: string[];
       labels?: Record<string, string>;
       workspaceId?: string;
@@ -1539,6 +1594,7 @@ export class AgentManager {
       lastUserMessageAt?: Date | null;
       lastAssistantMessageAt?: Date | null;
       forkedFrom?: StoredAgentRecord["forkedFrom"];
+      sessionLineage?: StoredAgentRecord["sessionLineage"];
       providerSessionIds?: string[];
       labels?: Record<string, string>;
       workspaceId?: string;
@@ -1672,18 +1728,7 @@ export class AgentManager {
       );
       const timelineRows = buildImportedTimelineRows(imported.timeline);
       const initialTitle = resolveImportedAgentTitle(importedConfig, timelineRows);
-      const sources =
-        input.fork && this.registry
-          ? (await this.registry.list()).filter(
-              (record) =>
-                record.provider === input.provider &&
-                (record.persistence?.sessionId === input.providerHandleId ||
-                  record.providerSessionIds?.includes(input.providerHandleId)),
-            )
-          : [];
-      // An imported native branch may have multiple managed owners. Keep that
-      // ambiguity instead of attributing the copy to an arbitrary session.
-      const source = sources.length === 1 ? sources[0] : undefined;
+      const lineage = await this.importLineageMetadata(input, imported.persistence);
 
       handedToRegistration = true;
       const agent = await this.registerSession(imported.session, importedConfig, resolvedAgentId, {
@@ -1692,15 +1737,7 @@ export class AgentManager {
         timelineRows,
         timelineNextSeq: timelineRows.length + 1,
         persistence: imported.persistence,
-        forkedFrom: source
-          ? {
-              agentId: source.id,
-              forkedAt: new Date().toISOString(),
-              operation: "import-copy",
-              sourceProviderSessionId: input.providerHandleId,
-              resultProviderSessionId: imported.persistence.sessionId,
-            }
-          : undefined,
+        ...lineage,
         historyPrimed: true,
         initialTitle,
         publishWhenReady: true,
@@ -1715,6 +1752,43 @@ export class AgentManager {
         await this.closeUnregisteredSession(imported.session);
       }
     }
+  }
+
+  private async importLineageMetadata(
+    input: { provider: AgentProvider; providerHandleId: string; fork?: boolean },
+    resultPersistence: AgentPersistenceHandle,
+  ) {
+    const nativeParent = resultPersistence.metadata?.providerForkedFromId;
+    let sourceNativeId = typeof nativeParent === "string" ? nativeParent : undefined;
+    if (input.fork) sourceNativeId = input.providerHandleId;
+    if (!sourceNativeId) return {};
+    const records = (await this.registry?.list()) ?? [];
+    const sources = records.filter(
+      (record) =>
+        record.provider === input.provider &&
+        (record.persistence?.sessionId === sourceNativeId ||
+          record.providerSessionIds?.includes(sourceNativeId)),
+    );
+    const source = input.fork && sources.length === 1 ? sources[0] : undefined;
+    const sourceHostId = input.fork ? this.serverId : undefined;
+    return sessionOperationMetadata(
+      recordSessionOperation({
+        operation: input.fork ? "import-copy" : "provider-fork",
+        sourceEvidence: input.fork ? "paseo-operation" : "provider-history",
+        sourceHostId,
+        sourceAgentId: source?.id,
+        sourcePersistence: { sessionId: sourceNativeId, metadata: source?.persistence?.metadata },
+        resultPersistence,
+        candidateAgentIds:
+          sources.length > 1 || !sourceHostId
+            ? sources.map((record) => record.id).sort()
+            : undefined,
+        sourceResolution: candidateResolution(
+          sources.map((record) => record.id),
+          sourceHostId,
+        ),
+      }),
+    );
   }
 
   // Hot-reload an active agent session with config overrides. By default the
@@ -1820,6 +1894,7 @@ export class AgentManager {
         lastUserMessageAt: existing.lastUserMessageAt,
         lastAssistantMessageAt: existing.lastAssistantMessageAt,
         forkedFrom: existing.forkedFrom,
+        sessionLineage: existing.sessionLineage,
         providerSessionIds: existing.providerSessionIds,
         historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
         lastUsage: preservedLastUsage,
@@ -2020,8 +2095,8 @@ export class AgentManager {
     if (!this.registry) return;
     const records = await this.registry.list();
     const initialIds = await readInitialSessionIds(paseoHome);
-    for (const [provider, client] of this.clients) {
-      if (!client.readSessionLineage) continue;
+    for (const provider of new Set(records.map((record) => record.provider))) {
+      const client = this.clients.get(provider);
       const matching = records.filter(
         (record) => record.provider === provider && record.persistence,
       );
@@ -2029,13 +2104,21 @@ export class AgentManager {
       try {
         const recovered = recoverSessionLineage({
           records: matching,
-          history: await client.readSessionLineage(
-            matching
-              .filter((record) => !record.lastAssistantMessageAt)
-              .map((record) => record.persistence!.sessionId),
-            matching.map((record) => record.persistence!),
-          ),
+          history:
+            (await client
+              ?.readSessionLineage?.(
+                matching
+                  .filter((record) => !record.lastAssistantMessageAt)
+                  .map((record) => record.persistence!.sessionId),
+                matching.map((record) => record.persistence!),
+              )
+              .catch((err) => {
+                this.logger.warn({ err, provider }, "Unable to read native session lineage");
+                return [];
+              })) ?? [],
           initialIds: initialIds,
+          sourceHostId: this.serverId,
+          sourceRecords: records,
         });
         for (const record of matching) {
           const metadata = recovered.get(record.id);
@@ -2044,6 +2127,7 @@ export class AgentManager {
             (JSON.stringify(record.providerSessionIds) !==
               JSON.stringify(metadata.providerSessionIds) ||
               JSON.stringify(record.forkedFrom) !== JSON.stringify(metadata.forkedFrom) ||
+              JSON.stringify(record.sessionLineage) !== JSON.stringify(metadata.sessionLineage) ||
               record.lastAssistantMessageAt !== metadata.lastAssistantMessageAt)
           ) {
             await this.registry.upsert({ ...record, ...metadata });
@@ -2248,6 +2332,7 @@ export class AgentManager {
           ? new Date(record.lastAssistantMessageAt)
           : null,
         forkedFrom: record.forkedFrom,
+        sessionLineage: record.sessionLineage,
         providerSessionIds: record.providerSessionIds,
         lastUsage: undefined,
         lastError: record.lastError ?? undefined,
@@ -3514,6 +3599,7 @@ export class AgentManager {
 
     const previousPersistence = agent.persistence;
     const previousAliases = agent.providerSessionIds;
+    const previousLineage = agent.sessionLineage;
     const previousError = agent.lastError;
     let mutation: void | { rollback: () => Promise<void> } = undefined;
     const lock = this.runs.createPendingRun(agentId);
@@ -3556,6 +3642,19 @@ export class AgentManager {
       this.refreshSessionPersistence(agent);
       await this.refreshSessionState(agent, { emit: false });
       agent.lastError = previousError;
+      if (mode !== "files") {
+        agent.sessionLineage = [
+          ...(previousLineage ?? []),
+          recordSessionOperation({
+            operation: "rewind",
+            sourceHostId: this.serverId,
+            sourceAgentId: agent.id,
+            sourcePersistence: previousPersistence,
+            resultPersistence: agent.persistence,
+            boundaryMessageId: providerMessageId,
+          }),
+        ];
+      }
       await this.persistSnapshot(agent);
       this.emitState(agent, { persist: false });
       this.logger.info(
@@ -3575,6 +3674,7 @@ export class AgentManager {
       }
       agent.persistence = previousPersistence;
       agent.providerSessionIds = previousAliases;
+      agent.sessionLineage = previousLineage;
       agent.lastError = error instanceof Error ? error.message : String(error);
       await this.persistSnapshot(agent);
       this.emitState(agent, { persist: false });
@@ -3836,6 +3936,7 @@ export class AgentManager {
       lastUserMessageAt?: Date | null;
       lastAssistantMessageAt?: Date | null;
       forkedFrom?: StoredAgentRecord["forkedFrom"];
+      sessionLineage?: StoredAgentRecord["sessionLineage"];
       providerSessionIds?: string[];
       labels?: Record<string, string>;
       timeline?: AgentTimelineItem[];
@@ -4033,6 +4134,7 @@ export class AgentManager {
           lastUserMessageAt?: Date | null;
           lastAssistantMessageAt?: Date | null;
           forkedFrom?: StoredAgentRecord["forkedFrom"];
+          sessionLineage?: StoredAgentRecord["sessionLineage"];
           providerSessionIds?: string[];
           labels?: Record<string, string>;
           historyPrimed?: boolean;
@@ -4046,7 +4148,7 @@ export class AgentManager {
       | undefined;
   }): ActiveManagedAgent {
     const { resolvedAgentId, session, config, now, durableTimelineHasRows, options } = params;
-    const { lastAssistantMessageAt, forkedFrom, providerSessionIds } =
+    const { lastAssistantMessageAt, forkedFrom, sessionLineage, providerSessionIds } =
       initialConversationMetadata(options);
     return {
       id: resolvedAgentId,
@@ -4081,6 +4183,7 @@ export class AgentManager {
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
       lastAssistantMessageAt,
       forkedFrom,
+      sessionLineage,
       providerSessionIds,
       lastUsage: options?.lastUsage,
       lastError: options?.lastError,
@@ -4827,6 +4930,24 @@ export class AgentManager {
         ]),
       );
       agent.persistence = attachPersistenceCwd(handle, agent.cwd);
+      // Some providers allocate the result branch only at the first prompt.
+      // Fill it once; subsequent rewinds must retain the original copy identity.
+      const resultTree = handle.metadata?.providerSessionTreeId;
+      agent.sessionLineage = agent.sessionLineage?.map((entry) =>
+        entry.operation === "text-copy" && !entry.resultProviderSessionId
+          ? {
+              ...entry,
+              resultProviderSessionId: handle.sessionId,
+              resultProviderSessionTreeId: typeof resultTree === "string" ? resultTree : undefined,
+            }
+          : entry,
+      );
+      if (
+        agent.forkedFrom?.operation === "text-copy" &&
+        !agent.forkedFrom.resultProviderSessionId
+      ) {
+        agent.forkedFrom = { ...agent.forkedFrom, resultProviderSessionId: handle.sessionId };
+      }
     }
   }
 

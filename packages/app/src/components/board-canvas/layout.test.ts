@@ -1,6 +1,7 @@
 import {
   arrangeSessions,
   sessionNodes,
+  sessionsForCanvas,
   SESSION_CARD_SIZE,
   type CanvasSession,
 } from "@/screens/session-canvas/model";
@@ -212,3 +213,47 @@ function expectRouteClear(points: { x: number; y: number }[], cards: ResolvedPla
     }
   }
 }
+
+describe("host-qualified session relationships", () => {
+  it("never connects a foreign or unresolved origin to a local session with the same ID", () => {
+    const source: CanvasSession = {
+      id: "same-id",
+      title: "Local source",
+      provider: "codex",
+      status: "closed",
+      createdAt: new Date("2026-10-01T10:00:00Z"),
+      lastUserMessageAt: null,
+    };
+    const origin = {
+      operation: "native-fork" as const,
+      sourceHostId: "remote",
+      sourceAgentId: source.id,
+      sourceProviderSessionId: "same-native-id",
+      resultProviderSessionId: "branch",
+      createdAt: source.createdAt.toISOString(),
+      sourceResolution: "resolved" as const,
+      sourceEvidence: "paseo-operation" as const,
+    };
+    const fork: CanvasSession = {
+      ...source,
+      id: "fork",
+      forkedFrom: { agentId: source.id, forkedAt: origin.createdAt },
+      sessionLineage: [origin],
+    };
+    const relatedNodes = (child: CanvasSession) =>
+      sessionNodes(sessionsForCanvas([source, child], "local"), "Untitled");
+    expect(relatedNodes(fork)[1].basedOn).toBeNull();
+    expect(
+      relatedNodes({ ...fork, sessionLineage: [{ ...origin, sourceHostId: "local" }] })[1].basedOn,
+    ).toBe(source.id);
+    for (const sourceResolution of ["missing", "ambiguous", "unknown-host"] as const) {
+      expect(
+        relatedNodes({
+          ...fork,
+          sessionLineage: [{ ...origin, sourceHostId: "local", sourceResolution }],
+        })[1].basedOn,
+      ).toBeNull();
+    }
+    expect(relatedNodes({ ...fork, sessionLineage: undefined })[1].basedOn).toBeNull();
+  });
+});

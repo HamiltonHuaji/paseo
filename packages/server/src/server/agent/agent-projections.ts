@@ -92,6 +92,7 @@ export function toStoredAgentRecord(
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     lastAssistantMessageAt: agent.lastAssistantMessageAt?.toISOString() ?? null,
     forkedFrom: agent.forkedFrom,
+    sessionLineage: agent.sessionLineage,
     providerSessionIds: Array.from(
       new Set([
         ...(agent.providerSessionIds ?? []),
@@ -142,6 +143,7 @@ export function toAgentPayload(
     lastUserMessageAt: agent.lastUserMessageAt ? agent.lastUserMessageAt.toISOString() : null,
     lastAssistantMessageAt: agent.lastAssistantMessageAt?.toISOString() ?? null,
     forkedFrom: agent.forkedFrom,
+    sessionLineage: agent.sessionLineage,
     status: agent.lifecycle,
     activeTurn: agent.activeTurnId
       ? {
@@ -258,6 +260,7 @@ export function buildStoredAgentPayload(
     lastUserMessageAt: lastUserMessageAt ? lastUserMessageAt.toISOString() : null,
     ...projectStoredConversation(record),
     forkedFrom: record.forkedFrom,
+    sessionLineage: record.sessionLineage,
     status: record.lastStatus,
     capabilities: defaultCapabilities,
     currentModeId: record.lastModeId ?? null,
@@ -292,6 +295,7 @@ export function toAgentListItemPayload(agent: AgentSnapshotPayload): AgentListIt
     lastUserMessageAt: agent.lastUserMessageAt,
     lastAssistantMessageAt: agent.lastAssistantMessageAt,
     forkedFrom: agent.forkedFrom,
+    sessionLineage: agent.sessionLineage,
     archivedAt: agent.archivedAt ?? null,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,

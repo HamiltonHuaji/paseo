@@ -913,7 +913,32 @@ const AgentActiveTurnPayloadSchema = z.object({
   startedAt: z.string().nullable(),
 });
 
+export const AgentSessionLineageSchema = z.object({
+  operation: z.enum([
+    "native-fork",
+    "text-copy",
+    "import-copy",
+    "rewind",
+    "provider-fork",
+    "unknown",
+  ]),
+  createdAt: z.string(),
+  sourceHostId: z.string().optional(),
+  sourceAgentId: z.string().optional(),
+  sourceProviderSessionId: z.string().optional(),
+  resultProviderSessionId: z.string().optional(),
+  sourceProviderSessionTreeId: z.string().optional(),
+  resultProviderSessionTreeId: z.string().optional(),
+  boundaryMessageId: z.string().optional(),
+  sourceResolution: z.enum(["resolved", "missing", "ambiguous", "unknown-host"]),
+  candidateAgentIds: z.array(z.string()).optional(),
+  // Provider ancestry is evidence of a branch, not of which managed import owns it.
+  sourceEvidence: z.enum(["paseo-operation", "provider-history"]),
+});
+export type AgentSessionLineage = z.infer<typeof AgentSessionLineageSchema>;
+
 export const AgentForkOriginSchema = z.object({
+  sourceHostId: z.string().optional(),
   agentId: z.string(),
   forkedAt: z.string(),
   operation: z.enum(["native-fork", "text-copy", "import-copy"]).optional(),
@@ -937,6 +962,7 @@ export const AgentSnapshotPayloadSchema = z.object({
   lastUserMessageAt: z.string().nullable(),
   lastAssistantMessageAt: z.string().nullable().optional(),
   forkedFrom: AgentForkOriginSchema.optional(),
+  sessionLineage: z.array(AgentSessionLineageSchema).optional(),
   status: AgentStatusSchema,
   activeTurn: AgentActiveTurnPayloadSchema.nullable().optional(),
   capabilities: AgentCapabilityFlagsSchema,
@@ -975,6 +1001,7 @@ export const AgentListItemPayloadSchema = z.object({
   lastUserMessageAt: z.string().nullable(),
   lastAssistantMessageAt: z.string().nullable().optional(),
   forkedFrom: AgentForkOriginSchema.optional(),
+  sessionLineage: z.array(AgentSessionLineageSchema).optional(),
   archivedAt: z.string().nullable().optional(),
   requiresAttention: z.boolean().optional(),
   attentionReason: z.enum(["finished", "error", "permission"]).nullable().optional(),
@@ -1235,6 +1262,10 @@ export const TextAttachmentSchema = z
     mimeType: z.literal("text/plain"),
     contextKind: z.string().optional(),
     sourceAgentId: z.string().optional(),
+    sourceHostId: z.string().optional(),
+    sourceProviderSessionId: z.string().optional(),
+    sourceProviderSessionTreeId: z.string().optional(),
+    boundaryMessageId: z.string().optional(),
     title: z.string().nullable().optional(),
     text: z.string(),
     externalResource: ExternalResourceAttachmentMetadataSchema.optional(),
@@ -3873,6 +3904,7 @@ export const ServerInfoStatusPayloadSchema = z
         "terminal-size-ownership": z.boolean().optional(),
         // COMPAT(rewind): added in v0.1.X, drop the gate when floor >= v0.1.X.
         rewind: z.boolean().optional(),
+        sessionLineage: z.boolean().optional(),
         // COMPAT(agentTimelinePromptIndex): added in v0.2.X, drop the gate when floor >= v0.2.X.
         agentTimelinePromptIndex: z.boolean().optional(),
         // COMPAT(agentHistorySearch): added in v0.3.0, remove gate after 2027-02-07.

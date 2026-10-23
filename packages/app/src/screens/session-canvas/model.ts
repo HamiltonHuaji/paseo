@@ -13,6 +13,7 @@ export type CanvasSession = Pick<
   | "lastUserMessageAt"
   | "lastAssistantMessageAt"
   | "forkedFrom"
+  | "sessionLineage"
   | "workspaceId"
   | "archivedAt"
 >;
@@ -23,6 +24,8 @@ export function sessionTime(session: CanvasSession, time: SessionTime): number |
     case "created":
       return session.createdAt.getTime();
     case "forked":
+      const origin = session.sessionLineage?.find((entry) => entry.operation !== "rewind");
+      if (origin) return Date.parse(origin.createdAt);
       return session.forkedFrom ? Date.parse(session.forkedFrom.forkedAt) : null;
     case "reply":
       return session.lastAssistantMessageAt?.getTime() ?? null;
@@ -80,4 +83,27 @@ export function arrangeSessions(
     width: SESSION_CARD_SIZE.width,
     height: SESSION_CARD_SIZE.height,
   }));
+}
+
+/** Qualify relationships before feeding the existing layout and edge renderer. */
+export function sessionsForCanvas(sessions: CanvasSession[], serverId: string): CanvasSession[] {
+  return sessions.map((session) => {
+    const origin = session.sessionLineage?.find((entry) => entry.operation !== "rewind");
+    const source =
+      origin?.sourceHostId === serverId && origin.sourceResolution === "resolved"
+        ? origin.sourceAgentId
+        : undefined;
+    return {
+      ...session,
+      forkedFrom:
+        source && source !== session.id && origin
+          ? {
+              ...session.forkedFrom,
+              agentId: source,
+              sourceHostId: serverId,
+              forkedAt: origin.createdAt,
+            }
+          : undefined,
+    };
+  });
 }

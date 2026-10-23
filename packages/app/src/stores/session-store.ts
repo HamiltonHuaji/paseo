@@ -82,6 +82,7 @@ export interface Agent {
   lastUserMessageAt: Date | null;
   lastAssistantMessageAt?: Date | null;
   forkedFrom?: AgentSnapshotPayload["forkedFrom"];
+  sessionLineage?: AgentSnapshotPayload["sessionLineage"];
   lastActivityAt: Date;
   capabilities: AgentCapabilityFlags;
   currentModeId: string | null;

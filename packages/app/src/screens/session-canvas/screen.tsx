@@ -6,7 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { BackHandler, Text, View } from "react-native";
+import { BackHandler, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/shallow";
 import { ArrowDown, ArrowUp, ArrowUpRight, Pencil, RotateCcw, X } from "lucide-react-native";
@@ -18,6 +18,7 @@ import { EditingTextInput } from "@/components/ui/text-input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { getHostRuntimeStore, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useHostFeature } from "@/runtime/host-features";
 import { useAppVisible } from "@/hooks/use-app-visible";
 import { useSessionStore } from "@/stores/session-store";
 import {
@@ -25,7 +26,13 @@ import {
   type WorkspacePaneContentModel,
 } from "@/screens/workspace/workspace-pane-content";
 import { DEFAULT_SESSION_LAYOUT, useSessionCanvasLayout } from "./layout-store";
-import { SESSION_CARD_SIZE, sessionNodes, type CanvasSession, type SessionTime } from "./model";
+import {
+  SESSION_CARD_SIZE,
+  sessionNodes,
+  sessionsForCanvas,
+  type CanvasSession,
+  type SessionTime,
+} from "./model";
 import { styles } from "./styles";
 
 const subscribeHydration = (notify: () => void) =>
@@ -59,6 +66,11 @@ export function SessionCanvasScreen({
     ),
   );
   const connected = useHostRuntimeIsConnected(serverId);
+  const supportsLineage = useHostFeature(serverId, "sessionLineage");
+  const canvasSessions = useMemo(
+    () => sessionsForCanvas(sessions, supportsLineage ? serverId : ""),
+    [sessions, serverId, supportsLineage],
+  );
   const key = JSON.stringify([serverId, workspaceId]);
   const layout = useSessionCanvasLayout((state) => state.workspaces[key] ?? DEFAULT_SESSION_LAYOUT);
   const hydrated = useSyncExternalStore(
@@ -70,8 +82,8 @@ export function SessionCanvasScreen({
   const arrange = useSessionCanvasLayout((state) => state.arrange);
   const move = useSessionCanvasLayout((state) => state.move);
   useEffect(() => {
-    if (interactive && hydrated) sync(key, sessions);
-  }, [interactive, hydrated, key, sessions, sync]);
+    if (interactive && hydrated) sync(key, canvasSessions);
+  }, [interactive, hydrated, key, canvasSessions, sync]);
   const close = useCallback(() => setSelectedId(null), []);
   const selected = sessions.find((session) => session.id === selectedId);
   const viewedTimelineSync = useSessionStore(
@@ -102,7 +114,10 @@ export function SessionCanvasScreen({
     () => (selectedId ? buildConversation(selectedId, close) : null),
     [selectedId, buildConversation, close],
   );
-  const nodes = useMemo(() => sessionNodes(sessions, t("sessionCanvas.untitled")), [sessions, t]);
+  const nodes = useMemo(
+    () => sessionNodes(canvasSessions, t("sessionCanvas.untitled")),
+    [canvasSessions, t],
+  );
   const sizes = useMemo(
     () => new Map(sessions.map((session) => [session.id, SESSION_CARD_SIZE])),
     [sessions],
@@ -136,16 +151,17 @@ export function SessionCanvasScreen({
     [i18n.language],
   );
   const changeTime = useCallback(
-    (time: SessionTime) => arrange(key, sessions, time, layout.order),
-    [arrange, key, sessions, layout.order],
+    (time: SessionTime) => arrange(key, canvasSessions, time, layout.order),
+    [arrange, key, canvasSessions, layout.order],
   );
   const changeOrder = useCallback(
-    () => arrange(key, sessions, layout.time, layout.order === "oldest" ? "newest" : "oldest"),
-    [arrange, key, sessions, layout.time, layout.order],
+    () =>
+      arrange(key, canvasSessions, layout.time, layout.order === "oldest" ? "newest" : "oldest"),
+    [arrange, key, canvasSessions, layout.time, layout.order],
   );
   const rearrange = useCallback(
-    () => arrange(key, sessions, layout.time, layout.order),
-    [arrange, key, sessions, layout.time, layout.order],
+    () => arrange(key, canvasSessions, layout.time, layout.order),
+    [arrange, key, canvasSessions, layout.time, layout.order],
   );
   const moveCard = useCallback((placement: BoardPlacement) => move(key, placement), [move, key]);
   const renderPreview = useCallback(
@@ -154,12 +170,15 @@ export function SessionCanvasScreen({
       return session ? (
         <SessionPreview
           session={session}
-          source={byId.get(session.forkedFrom?.agentId ?? "")}
+          source={byId.get(
+            canvasSessions.find((candidate) => candidate.id === id)?.forkedFrom?.agentId ?? "",
+          )}
+          supportsLineage={supportsLineage}
           format={format}
         />
       ) : null;
     },
-    [byId, format],
+    [byId, canvasSessions, format, supportsLineage],
   );
   const rename = useCallback(() => {
     if (selectedId) onRename(selectedId);
@@ -267,6 +286,11 @@ export function SessionCanvasScreen({
                 accessibilityLabel={t("common.actions.close")}
               />
             </View>
+            {supportsLineage ? (
+              <SessionLineageDetails session={selected} />
+            ) : (
+              <Text style={styles.muted}>{t("sessionCanvas.lineageUpgrade")}</Text>
+            )}
             <WorkspacePaneContent
               content={conversation}
               isWorkspaceFocused={interactive}
@@ -290,13 +314,16 @@ export function SessionCanvasScreen({
 function SessionPreview({
   session,
   source,
+  supportsLineage,
   format,
 }: {
   session: CanvasSession;
   source?: CanvasSession;
+  supportsLineage: boolean;
   format: Intl.DateTimeFormat;
 }) {
   const { t } = useTranslation();
+  const origin = session.sessionLineage?.find((entry) => entry.operation !== "rewind");
   const times = [
     [t("sessionCanvas.created"), session.createdAt],
     [t("sessionCanvas.forked"), session.forkedFrom ? new Date(session.forkedFrom.forkedAt) : null],
@@ -322,11 +349,12 @@ function SessionPreview({
           </View>
         ))}
       </View>
-      {session.forkedFrom ? (
-        <Text style={styles.muted} numberOfLines={1}>
-          {t("sessionCanvas.from", {
-            title: source?.title || session.forkedFrom.agentId.slice(0, 8),
-          })}
+      {supportsLineage && origin ? (
+        <Text style={styles.muted} numberOfLines={2}>
+          {t(`sessionCanvas.operations.${origin.operation}`)} ·{" "}
+          {t(`sessionCanvas.resolutions.${origin.sourceResolution}`)}
+          {" · "}
+          {source?.title || origin.sourceAgentId || origin.sourceProviderSessionId || "—"}
         </Text>
       ) : null}
     </View>
@@ -337,4 +365,52 @@ function sessionStatusVariant(status: CanvasSession["status"]) {
   if (status === "running") return "success";
   if (status === "error") return "error";
   return "muted";
+}
+
+function SessionLineageDetails({ session }: { session: CanvasSession }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const entries = session.sessionLineage ?? [];
+  if (!entries.length) return null;
+  return (
+    <View style={styles.relationships}>
+      <Button size="sm" variant="ghost" onPress={toggleExpanded} testID="session-lineage-toggle">
+        {t("sessionCanvas.relationships", { count: entries.length })}
+      </Button>
+      {expanded ? (
+        <ScrollView style={styles.relationshipList} testID="session-lineage-details">
+          {entries.map((entry) => (
+            <View
+              key={`${entry.createdAt}:${entry.operation}:${entry.resultProviderSessionId}:${entry.boundaryMessageId}`}
+              style={styles.relationshipEntry}
+            >
+              <Text style={styles.text}>
+                {t(`sessionCanvas.operations.${entry.operation}`)} · {entry.createdAt}
+              </Text>
+              <Text style={styles.text}>
+                {t(`sessionCanvas.resolutions.${entry.sourceResolution}`)}
+              </Text>
+              {[
+                [t("sessionCanvas.sourceHost"), entry.sourceHostId],
+                [t("sessionCanvas.sourceSession"), entry.sourceAgentId],
+                [t("sessionCanvas.sourceNative"), entry.sourceProviderSessionId],
+                [t("sessionCanvas.resultNative"), entry.resultProviderSessionId],
+                [t("sessionCanvas.sourceTree"), entry.sourceProviderSessionTreeId],
+                [t("sessionCanvas.resultTree"), entry.resultProviderSessionTreeId],
+                [t("sessionCanvas.boundary"), entry.boundaryMessageId],
+                ...(entry.candidateAgentIds?.length
+                  ? [[t("sessionCanvas.candidates"), entry.candidateAgentIds.join(", ")]]
+                  : []),
+              ].map(([label, value]) => (
+                <Text key={label} selectable style={styles.muted}>
+                  {label}: {value || t("sessionCanvas.unknown")}
+                </Text>
+              ))}
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+    </View>
+  );
 }

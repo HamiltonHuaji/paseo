@@ -258,13 +258,7 @@ async function resolveSessionCreateAgent(
   return {
     config: sessionConfig,
     createOptions: {
-      contextForkSourceAgentId: input.attachments?.flatMap((attachment) =>
-        attachment.type === "text" &&
-        attachment.contextKind === "chat_history" &&
-        attachment.sourceAgentId
-          ? [attachment.sourceAgentId]
-          : [],
-      )[0],
+      ...contextForkOptions(input.attachments),
       labels: input.labels,
       initialPrompt: trimmedPrompt,
       env: input.env,
@@ -585,4 +579,21 @@ async function resolveMcpCwd(params: {
 function requireAgentMessages(dependencies: CreateAgentCommandDependencies): AgentMessageDelivery {
   if (!dependencies.agentMessages) throw new Error("Agent message delivery is not configured");
   return dependencies.agentMessages;
+}
+
+function contextForkOptions(attachments: Parameters<typeof buildAgentPrompt>[2]) {
+  const sources =
+    attachments?.filter(
+      (attachment) => attachment.type === "text" && attachment.contextKind === "chat_history",
+    ) ?? [];
+  // A prompt assembled from multiple conversations has no single parent.
+  if (sources.length !== 1 || sources[0]?.type !== "text") return {};
+  const source = sources[0];
+  return {
+    contextForkSourceAgentId: source.sourceAgentId,
+    contextForkSourceHostId: source.sourceHostId,
+    contextForkSourceProviderSessionId: source.sourceProviderSessionId,
+    contextForkSourceProviderSessionTreeId: source.sourceProviderSessionTreeId,
+    contextForkBoundaryMessageId: source.boundaryMessageId,
+  };
 }
