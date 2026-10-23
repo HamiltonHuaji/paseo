@@ -1,4 +1,9 @@
-# Viewer migration and TCP acceptance — 2026-10-23
+# Viewer migration and TCP acceptance — v0.13.1
+
+This is historical evidence for the published v0.13.1 transport replacement. On 2026-10-23 the
+user rejected that replacement during the baseline bump and required the tuned v0.9.20 Viewer
+behavior. These same-version correctness checks do not establish mixed-version compatibility or
+equivalent forwarding latency. Current correction: [Viewer continuity review](../contracts/reviews/viewer-0.9.20-continuity.md).
 
 The 0.13 migration retained VIEWER-01–04 in `5c32d1c8bdc7d25b42589e87c18bccc861d5d53f`.
 The VIEWER-05 implementation starts from `be947977dd37d9834e8930cc84eaf7cdff5a76ff` on

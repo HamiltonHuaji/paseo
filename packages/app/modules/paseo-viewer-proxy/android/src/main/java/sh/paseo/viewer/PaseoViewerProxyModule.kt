@@ -12,7 +12,7 @@ class PaseoViewerProxyModule : Module() {
   private val sink: (String, Map<String, Any>) -> Unit = { name, payload -> sendEvent(name, payload) }
   override fun definition() = ModuleDefinition {
     Name("PaseoViewerProxy")
-    Events("onOpen", "onData", "onEnd", "onReset", "onStopped")
+    Events("onRequest", "onCancel", "onStopped")
 
     OnCreate {
       ViewerProxyService.eventSink = sink
@@ -41,21 +41,18 @@ class PaseoViewerProxyModule : Module() {
     AsyncFunction("removeListener") Coroutine { serverId: String ->
       withContext(Dispatchers.IO) { ViewerProxyService.instance?.removeListener(serverId) }
     }
-    AsyncFunction("resume") Coroutine { id: String ->
-      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.resume(id) }
+    AsyncFunction("headers") Coroutine { id: String, status: Int, headers: Map<String, String> ->
+      withContext(Dispatchers.IO) { requireNotNull(ViewerProxyService.instance).proxy.headers(id, status, headers) }
     }
     AsyncFunction("getServiceId") { ViewerProxyService.instance?.serviceId }
-    AsyncFunction("getState") Coroutine { ->
-      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.state() ?: emptyList() }
-    }
     AsyncFunction("write") Coroutine { id: String, base64: String ->
       withContext(Dispatchers.IO) { requireNotNull(ViewerProxyService.instance).proxy.write(id, base64) }
     }
-    AsyncFunction("end") Coroutine { id: String ->
-      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.end(id) }
+    AsyncFunction("finish") Coroutine { id: String ->
+      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.finish(id) }
     }
-    AsyncFunction("reset") Coroutine { id: String ->
-      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.reset(id) }
+    AsyncFunction("fail") Coroutine { id: String ->
+      withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.fail(id) }
     }
   }
 }

@@ -273,6 +273,116 @@ async function waitForCapturedLog(
     await withTimeout(exited, 10000, "Local relay did not stop");
   };
 
+  test.each([true, false])(
+    "viewer HTTP forwarding preserves independent resources over encrypted relay (framing v2: %s)",
+    async (modernFraming) => {
+      const { createLocalViewerHttpProxy } =
+        await import("@getpaseo/client/node/local-viewer-http-proxy");
+      const { createViewerHttpUpstream } =
+        await import("@getpaseo/client/internal/viewer-http-upstream");
+      const { Agent, get } = await import("node:http");
+      await startRelay({ useLocalRelay: true });
+      const daemon = await createTestPaseoDaemon({
+        mcpEnabled: false,
+        relayEnabled: true,
+        relayEndpoint: `127.0.0.1:${relayPort}`,
+        relayUseTls: false,
+        relayPublicUseTls: false,
+      });
+      const control = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
+      const root = await mkdtemp(path.join(os.tmpdir(), "paseo-viewer-http-relay-"));
+      const { serverId, daemonPublicKeyB64 } = decodeOfferFromFragmentUrl(
+        await getPairingOfferUrl({
+          paseoHome: daemon.paseoHome,
+          relayEndpoint: daemon.config.relayEndpoint,
+        }),
+      );
+      const upstream = createViewerHttpUpstream({
+        createClient: (connection) =>
+          new DaemonClient({
+            ...(connection.type === "relay"
+              ? {
+                  url: buildRelayWebSocketUrl({
+                    endpoint: connection.relayEndpoint,
+                    useTls: false,
+                    serverId,
+                    role: "client",
+                  }),
+                  e2ee: { enabled: true, daemonPublicKeyB64: connection.daemonPublicKeyB64 },
+                }
+              : { url: `ws://${connection.endpoint}/ws` }),
+            capabilities: { viewer_http_framing_v2: modernFraming, tunnel_stream_v3: false },
+            reconnect: { enabled: true, baseDelayMs: 100, maxDelayMs: 500 },
+          }),
+        onError: () => {},
+      });
+      const proxy = await createLocalViewerHttpProxy({ fetch: upstream.fetch });
+      const agent = new Agent({ keepAlive: true, maxSockets: 8 });
+      const response = (entry: string) =>
+        new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+          get(`${proxy.origin}${entry}`, { agent }, resolve).on("error", reject);
+        });
+      const read = async (entry: string) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of await response(entry)) chunks.push(Buffer.from(chunk));
+        return Buffer.concat(chunks);
+      };
+      try {
+        await writeFile(path.join(root, "index.html"), "Independent HTTP viewer");
+        const payload = randomBytes(8 * 1024 * 1024);
+        await writeFile(path.join(root, "artifact.bin"), payload);
+        await control.connect();
+        const workspace = await control.createWorkspace({
+          source: { kind: "directory", path: root },
+        });
+        const projectId = workspace.workspace!.projectId;
+        const card = await control.createWorkCard({
+          projectId,
+          preset: "topic",
+          title: "HTTP relay viewer",
+          body: "Fixture",
+          viewers: { mounts: { files: root }, entries: { Report: "files/index.html" } },
+        });
+        const report = (await control.resolveWorkViewers({ projectId, objectId: card.object.id }))
+          .entries[0]!.path;
+        const direct = { type: "directTcp" as const, endpoint: `127.0.0.1:${daemon.port}` };
+        upstream.updateRoute(direct);
+        expect((await read(report)).toString()).toBe("Independent HTTP viewer");
+        upstream.updateRoute({
+          type: "relay",
+          relayEndpoint: `127.0.0.1:${relayPort}`,
+          useTls: false,
+          daemonPublicKeyB64,
+        });
+        const artifact = report.replace("index.html", "artifact.bin");
+        const paused = await response(artifact);
+        paused.pause();
+        try {
+          expect(
+            await Promise.all(
+              Array.from({ length: 6 }, async () => (await read(report)).toString()),
+            ),
+          ).toEqual(Array(6).fill("Independent HTTP viewer"));
+        } finally {
+          paused.destroy();
+        }
+        expect((await read(artifact)).equals(payload)).toBe(true);
+        const origin = proxy.origin;
+        upstream.updateRoute(direct);
+        expect((await read(report)).toString()).toBe("Independent HTTP viewer");
+        expect(proxy.origin).toBe(origin);
+      } finally {
+        agent.destroy();
+        await proxy.close();
+        await upstream.close();
+        await control.close();
+        await daemon.close();
+        await stopRelay();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
   test("viewer TCP forwarding keeps its origin across direct and encrypted relay generations", async () => {
     const { createLocalTunnelForwarder } =
       await import("@getpaseo/client/node/local-tunnel-forwarder");

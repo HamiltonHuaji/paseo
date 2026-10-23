@@ -9,9 +9,38 @@ import {
   encodeTerminalStreamFrame,
   FileTransferOpcode,
   TerminalStreamOpcode,
+  encodeViewerHttpFrame,
+  ViewerHttpOpcode,
 } from "./index.js";
 
 describe("binary frame demux", () => {
+  it("keeps v0.9 Viewer wire bytes scoped to the negotiated peer", () => {
+    const legacyData = new Uint8Array([0x30, 1, 0x72, 1, 2]);
+    expect(decodeBinaryFrame(legacyData)).toBeNull();
+    expect(decodeBinaryFrame(legacyData, "v1")).toEqual({
+      kind: "viewer_http",
+      frame: { opcode: ViewerHttpOpcode.Data, requestId: "r", payload: new Uint8Array([1, 2]) },
+    });
+    expect(
+      encodeViewerHttpFrame({
+        opcode: ViewerHttpOpcode.Credit,
+        requestId: "r",
+        framing: "v1",
+        payload: new Uint8Array([0, 0x10, 0, 0]),
+      }),
+    ).toEqual(new Uint8Array([0x35, 1, 0x72, 0, 0x10, 0, 0]));
+    const hostFrame = encodeHostRouteFrame("r", new Uint8Array([1, 2]));
+    expect(decodeBinaryFrame(hostFrame)?.kind).toBe("host_route");
+    expect(
+      decodeBinaryFrame(
+        encodeViewerHttpFrame({
+          opcode: ViewerHttpOpcode.Data,
+          requestId: "r",
+          payload: new Uint8Array([1, 2]),
+        }),
+      )?.kind,
+    ).toBe("viewer_http");
+  });
   it("routes terminal frames by opcode", () => {
     expect(
       decodeBinaryFrame(

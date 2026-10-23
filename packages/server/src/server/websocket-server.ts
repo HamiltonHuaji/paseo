@@ -1982,7 +1982,7 @@ export class VoiceAssistantWebSocketServer {
       features: {
         experimentViewerTransport: true,
         tunnelStreamV3: true,
-        viewerHttpProxy: session.supports(CLIENT_CAPS.viewerHttpFramingV2),
+        viewerHttpProxy: true,
         viewerHttpFramingV2: true,
         viewerHttpFlowControl: true,
         experimentViewerListenControl:
@@ -2456,7 +2456,13 @@ export class VoiceAssistantWebSocketServer {
     if (!asBytes) {
       return false;
     }
-    const decodedFrame = decodeBinaryFrame(asBytes);
+    // COMPAT(viewerHttpFraming): added in v0.13.2; remove after the v0.9 client floor
+    // retires. Negotiate on the physical source: hostLinks also contains ordinary
+    // clients after their first RPC, so membership cannot identify a host transport.
+    const legacyViewer =
+      activeConnection?.session.supportsForSource(CLIENT_CAPS.viewerHttpProxy, ws) === true &&
+      !activeConnection.session.supportsForSource(CLIENT_CAPS.viewerHttpFramingV2, ws);
+    const decodedFrame = decodeBinaryFrame(asBytes, legacyViewer ? "v1" : "v2");
     if (asBytes[0] === HOST_ROUTE_OPCODE && !decodedFrame) {
       ws.close(1008, "Invalid host routing frame");
       return true;

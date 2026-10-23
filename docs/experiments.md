@@ -537,20 +537,18 @@ five idle minutes; an expired cursor returns HTTP 410 with `{"error":"cursor_exp
 `limit` to request a page size from 1 through 1000; the default is 200. Listings never expose host
 filesystem paths.
 
-Use direct access when the published viewer endpoint has passed a client-side reachability check.
-Only the desktop daemon manager can establish that a daemon's loopback endpoint is local; a remote
-Host's `desktopManaged` flag does not establish that identity. Otherwise desktop and Android use
-one stable TCP listener for `(serverId, service:viewers)`, backed by a dedicated daemon connection.
-Each accepted socket owns one tunnel and one target socket, including all its HTTP keep-alive
-requests. Both directions have bounded credit returned after socket writes, directional FIN,
-and explicit reset. The `tunnelStreamV3` capability requires both peers to implement those semantics.
-The retained HTTP resource API remains available to SDK consumers.
+Desktop and Android retain the v0.9.20 HTTP resource proxy. A stable local listener uses a
+dedicated connection pool per host. Resource requests share ready connections; relay pool expansion
+runs without blocking a new resource on a cold handshake. Preserve the existing fair send pipeline,
+window sizes and cancellation behavior during baseline upgrades.
 
-HostRuntime supplies route generations. New sockets wait for the selected generation; healthy old
-streams drain on their original connection. A disconnect resets that generation's streams while
-preserving the listener. Resolve the named `viewers` service for every new stream so daemon restarts
-and runtime rebinding use the actual endpoint. See the
-[pinned transport requirements](refactors/experiment-viewer-transport-spec.md) for the full contract.
+Viewer HTTP framing is negotiated per physical peer. v0.9.20 peers keep their original namespace;
+new peers use the namespace that does not overlap Connected Hosts routing. The published v0.13.1
+TCP API remains accepted for installed consumers, but product Viewer opening uses the HTTP proxy.
+See [VIEWER-02/05](contracts/viewers.md) for continuity and the separate future transport scope.
+
+Clients without a local proxy may open a network-scoped viewer over a direct daemon connection.
+A remote daemon's loopback address is not the browser's loopback address.
 
 The system browser uses an ordinary `http://127.0.0.1:<port>/view/...` URL. The loopback
 listener and URL survive browser tab closes and route changes. Persist port assignments within each

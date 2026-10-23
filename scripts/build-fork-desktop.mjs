@@ -5,13 +5,25 @@ import { readForkBuildMetadata } from "./fork-version-utils.mjs";
 const requireFromDesktop = createRequire(
   new URL("../packages/desktop/package.json", import.meta.url),
 );
+const buildArgs = process.argv.slice(2);
+// electron-builder parses duplicate --publish values as an array, which bypasses
+// its "never" comparison. This wrapper owns the single non-publishing policy.
+if (
+  buildArgs.some(
+    (arg) => arg === "--publish" || arg.startsWith("--publish=") || arg.startsWith("-p"),
+  )
+) {
+  throw new Error(
+    "Omit --publish/-p: fork builds never publish; the release workflow uploads artifacts.",
+  );
+}
 const result = spawnSync(
   process.execPath,
   [
     requireFromDesktop.resolve("electron-builder/cli.js"),
     "--config",
     "electron-builder.yml",
-    ...process.argv.slice(2),
+    ...buildArgs,
     `-c.extraMetadata.version=${readForkBuildMetadata().version}`,
     "--publish",
     "never",

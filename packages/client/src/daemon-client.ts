@@ -1528,7 +1528,7 @@ export class DaemonClient {
     headers: Record<string, string>;
     signal?: AbortSignal;
   }): Promise<{ status: number; headers: Record<string, string>; stream: ViewerHttpStream }> {
-    if (this.getLastServerInfoMessage()?.features?.viewerHttpFramingV2 !== true) {
+    if (this.getLastServerInfoMessage()?.features?.viewerHttpProxy !== true) {
       throw new Error("Update the host to use the viewer HTTP proxy");
     }
     if (input.signal?.aborted) throw new Error("Viewer request cancelled");
@@ -1540,6 +1540,7 @@ export class DaemonClient {
       () => this.viewerHttpStreams.delete(requestId),
       // COMPAT(viewerHttpFlowControl): added after v0.9.5; old daemons use pause/resume.
       this.getLastServerInfoMessage()?.features?.viewerHttpFlowControl === true,
+      this.viewerHttpFraming(),
     );
     this.viewerHttpStreams.set(requestId, stream);
     const onAbort = () => {
@@ -7419,7 +7420,26 @@ export class DaemonClient {
       },
     );
   }
+  // COMPAT(viewerHttpFraming): added in v0.13.2; v0.9 peers use the original HTTP namespace.
+  // Remove after the v0.9 daemon floor retires; host-routing peers retain 0x30.
+  private viewerHttpFraming(): "v1" | "v2" {
+    const features = this.lastServerInfoMessage?.features;
+    return features?.viewerHttpProxy === true &&
+      (features.viewerHttpFramingV2 !== true ||
+        this.config.capabilities?.[CLIENT_CAPS.viewerHttpFramingV2] === false)
+      ? "v1"
+      : "v2";
+  }
+
   private tryHandleBinaryFrame(rawBytes: Uint8Array): boolean {
+    const viewerFrame = decodeViewerHttpFrame(rawBytes, this.viewerHttpFraming());
+    if (viewerFrame) {
+      this.consecutiveLivenessFailures = 0;
+      this.viewerHttpStreams.get(viewerFrame.requestId)?.handleFrame(viewerFrame);
+      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
+      return true;
+    }
+
     const hostFrame = decodeHostRouteFrame(rawBytes);
     if (rawBytes[0] === HOST_ROUTE_OPCODE && !hostFrame) {
       this.disposeTransport(1008, "Invalid host routing frame");
@@ -7448,14 +7468,6 @@ export class DaemonClient {
     if (tunnelFrame) {
       this.consecutiveLivenessFailures = 0;
       this.tunnels.get(tunnelFrame.tunnelId)?.handleFrame(tunnelFrame);
-      this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
-      return true;
-    }
-
-    const viewerFrame = decodeViewerHttpFrame(rawBytes);
-    if (viewerFrame) {
-      this.consecutiveLivenessFailures = 0;
-      this.viewerHttpStreams.get(viewerFrame.requestId)?.handleFrame(viewerFrame);
       this.runtimeMetrics?.recordBinaryFrame("other", rawBytes.byteLength, 0);
       return true;
     }

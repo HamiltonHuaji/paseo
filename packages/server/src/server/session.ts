@@ -2644,7 +2644,7 @@ export class Session {
     source?: object,
   ): Promise<void> {
     if (!source) throw new Error("Viewer HTTP requests require a physical client connection");
-    if (!this.supportsForSource(CLIENT_CAPS.viewerHttpFramingV2, source)) {
+    if (!this.supportsForSource(CLIENT_CAPS.viewerHttpProxy, source)) {
       throw new Error("Viewer HTTP proxy requires a newer Paseo client");
     }
     const owner = this.delivery.operation(
@@ -2656,6 +2656,7 @@ export class Session {
         msg,
         owner,
         this.supportsForSource(CLIENT_CAPS.viewerHttpFlowControl, source),
+        this.supportsForSource(CLIENT_CAPS.viewerHttpFramingV2, source) ? "v2" : "v1",
       );
       this.emitForSource(
         {

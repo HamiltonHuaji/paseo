@@ -3,6 +3,7 @@ import {
   ViewerHttpOpcode,
   VIEWER_HTTP_WINDOW_BYTES,
   type ViewerHttpFrame,
+  type ViewerHttpFraming,
   viewerHttpCreditPayload,
 } from "@getpaseo/protocol/binary-frames/index";
 
@@ -24,6 +25,7 @@ export class ViewerHttpStream {
     private readonly send: (frame: Uint8Array) => void,
     private readonly onClosed: () => void,
     private readonly flowControlled: boolean,
+    private readonly framing: ViewerHttpFraming = "v2",
   ) {
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
@@ -91,7 +93,7 @@ export class ViewerHttpStream {
 
   private control(opcode: ViewerHttpOpcode): void {
     if (this.closed) return;
-    this.send(encodeViewerHttpFrame({ opcode, requestId: this.id }));
+    this.send(encodeViewerHttpFrame({ opcode, requestId: this.id, framing: this.framing }));
   }
 
   private grant(bytes: number): void {
@@ -99,6 +101,7 @@ export class ViewerHttpStream {
       encodeViewerHttpFrame({
         opcode: ViewerHttpOpcode.Credit,
         requestId: this.id,
+        framing: this.framing,
         payload: viewerHttpCreditPayload(bytes),
       }),
     );

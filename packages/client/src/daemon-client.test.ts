@@ -2914,6 +2914,68 @@ test("readFile hides legacy base64 behind bytes", async () => {
   expect(new TextDecoder().decode(result.bytes)).toBe("hello");
 });
 
+test.each([false, true])(
+  "Viewer HTTP accepts legacy and current daemon framing (v2: %s)",
+  async (modernFraming) => {
+    const mock = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "viewer-framing",
+      transportFactory: () => mock.transport,
+      reconnect: { enabled: false },
+    });
+    clients.push(client);
+    const connected = client.connect();
+    mock.triggerOpen({
+      features: {
+        viewerHttpProxy: true,
+        viewerHttpFlowControl: true,
+        ...(modernFraming ? { viewerHttpFramingV2: true } : {}),
+      },
+    });
+    await connected;
+    const pending = client.fetchViewerHttp({
+      method: "GET",
+      path: "/view/report.html",
+      headers: {},
+    });
+    const requestId = String(parseSentFrame(mock.sent[0]).requestId);
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "viewer.http.fetch.response",
+        payload: { requestId, status: 200, headers: { "content-type": "text/html" } },
+      }),
+    );
+    const { stream } = await pending;
+    const body: number[] = [];
+    let ended = false;
+    stream.setHandlers({
+      onData(bytes) {
+        body.push(...bytes);
+        stream.consumed(bytes.length);
+      },
+      onEnd() {
+        ended = true;
+      },
+      onReset() {
+        throw new Error("Unexpected Viewer reset");
+      },
+    });
+    const id = new TextEncoder().encode(requestId);
+    const wire = (opcode: number, bytes: number[] = []) =>
+      new Uint8Array([opcode, id.length, ...id, ...bytes]);
+    // Literal bytes from the two released formats, independent of the current encoder.
+    mock.triggerMessage(wire(modernFraming ? 0x40 : 0x30, [97, 98, 99]));
+    mock.triggerMessage(wire(modernFraming ? 0x41 : 0x31));
+    await stream.whenClosed();
+    expect(body).toEqual([97, 98, 99]);
+    expect(ended).toBe(true);
+    const credits = mock.sent.filter((frame) => typeof frame !== "string").map(assertUint8Array);
+    expect(credits).toHaveLength(2);
+    expect(credits.every((frame) => frame[0] === (modernFraming ? 0x45 : 0x35))).toBe(true);
+  },
+);
+
 test("readFile resolves from binary file frames when the daemon supports them", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();

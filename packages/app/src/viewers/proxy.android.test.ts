@@ -24,8 +24,8 @@ const fixture = vi.hoisted(() => {
   };
 });
 vi.mock("expo-modules-core", () => ({ requireNativeModule: () => fixture.native }));
-vi.mock("@getpaseo/client/internal/tunnel-upstream", () => ({
-  createTunnelUpstream: () => fixture.upstream,
+vi.mock("@getpaseo/client/internal/viewer-http-upstream", () => ({
+  createViewerHttpUpstream: () => fixture.upstream,
 }));
 vi.mock("./client", () => ({ createViewerClient: vi.fn() }));
 

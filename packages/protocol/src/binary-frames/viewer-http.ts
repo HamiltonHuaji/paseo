@@ -11,6 +11,10 @@ export const ViewerHttpOpcode = {
 
 export type ViewerHttpOpcode = (typeof ViewerHttpOpcode)[keyof typeof ViewerHttpOpcode];
 
+// COMPAT(viewerHttpFraming): added in v0.13.2. v0.9.20 used 0x30..0x35 before host routing
+// claimed 0x30. Select the namespace per peer; remove v1 after the v0.9 client floor retires.
+export type ViewerHttpFraming = "v1" | "v2";
+
 export interface ViewerHttpFrame {
   opcode: ViewerHttpOpcode;
   requestId: string;
@@ -38,6 +42,7 @@ export function encodeViewerHttpFrame(input: {
   opcode: ViewerHttpOpcode;
   requestId: string;
   payload?: Uint8Array | ArrayBuffer;
+  framing?: ViewerHttpFraming;
 }): Uint8Array {
   const id = new TextEncoder().encode(input.requestId);
   if (id.length < 1 || id.length > 255) throw new RangeError("Invalid viewer request ID");
@@ -50,26 +55,30 @@ export function encodeViewerHttpFrame(input: {
     throw new RangeError("Viewer control frames cannot contain a body");
   }
   const bytes = new Uint8Array(2 + id.length + payload.length);
-  bytes[0] = input.opcode;
+  bytes[0] = input.opcode - (input.framing === "v1" ? 0x10 : 0);
   bytes[1] = id.length;
   bytes.set(id, 2);
   bytes.set(payload, 2 + id.length);
   return bytes;
 }
 
-export function decodeViewerHttpFrame(bytes: Uint8Array): ViewerHttpFrame | null {
-  if (bytes.length < 3 || !isViewerHttpOpcode(bytes[0])) return null;
+export function decodeViewerHttpFrame(
+  bytes: Uint8Array,
+  framing: ViewerHttpFraming = "v2",
+): ViewerHttpFrame | null {
+  const opcode = bytes[0] + (framing === "v1" ? 0x10 : 0);
+  if (bytes.length < 3 || !isViewerHttpOpcode(opcode)) return null;
   const idLength = bytes[1];
   if (idLength < 1 || idLength > bytes.length - 2) return null;
   const payload = bytes.subarray(2 + idLength);
   if (
-    bytes[0] === ViewerHttpOpcode.Credit
+    opcode === ViewerHttpOpcode.Credit
       ? payload.length !== 4
-      : bytes[0] !== ViewerHttpOpcode.Data && payload.length > 0
+      : opcode !== ViewerHttpOpcode.Data && payload.length > 0
   )
     return null;
   return {
-    opcode: bytes[0],
+    opcode,
     requestId: new TextDecoder().decode(bytes.subarray(2, 2 + idLength)),
     payload,
   };

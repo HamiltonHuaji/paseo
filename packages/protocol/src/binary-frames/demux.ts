@@ -1,5 +1,9 @@
 import { decodeTunnelStreamFrame, type TunnelStreamFrame } from "./tunnel.js";
-import { decodeViewerHttpFrame, type ViewerHttpFrame } from "./viewer-http.js";
+import {
+  decodeViewerHttpFrame,
+  type ViewerHttpFrame,
+  type ViewerHttpFraming,
+} from "./viewer-http.js";
 import { HOST_ROUTE_OPCODE, decodeHostRouteFrame, type HostRouteFrame } from "./host-route.js";
 import {
   decodeFileTransferFrame,
@@ -19,8 +23,11 @@ export type BinaryFrame =
   | { kind: "tunnel"; frame: TunnelStreamFrame }
   | { kind: "viewer_http"; frame: ViewerHttpFrame };
 
-export function decodeBinaryFrame(bytes: Uint8Array): BinaryFrame | null {
-  const viewerFrame = decodeViewerHttpFrame(bytes);
+export function decodeBinaryFrame(
+  bytes: Uint8Array,
+  viewerFraming: ViewerHttpFraming = "v2",
+): BinaryFrame | null {
+  const viewerFrame = decodeViewerHttpFrame(bytes, viewerFraming);
   if (viewerFrame) return { kind: "viewer_http", frame: viewerFrame };
   const tunnelFrame = decodeTunnelStreamFrame(bytes);
   if (tunnelFrame) return { kind: "tunnel", frame: tunnelFrame };

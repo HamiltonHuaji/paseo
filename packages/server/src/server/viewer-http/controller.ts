@@ -5,6 +5,7 @@ import {
   VIEWER_HTTP_DATA_FRAME_BYTES,
   VIEWER_HTTP_WINDOW_BYTES,
   type ViewerHttpFrame,
+  type ViewerHttpFraming,
   viewerHttpCreditBytes,
 } from "@getpaseo/protocol/binary-frames/index";
 import type { OwnedOperation } from "../session/owned-subscriptions/index.js";
@@ -48,6 +49,7 @@ interface ViewerRequest {
 }
 
 interface ActiveRequest {
+  framing: ViewerHttpFraming;
   owner: OwnedOperation;
   request: ClientRequest;
   response: IncomingMessage | null;
@@ -92,6 +94,7 @@ export class ViewerHttpController {
     input: ViewerRequest,
     owner: OwnedOperation,
     flowControlled: boolean,
+    framing: ViewerHttpFraming = "v2",
   ): Promise<{
     status: number;
     headers: Record<string, string>;
@@ -114,6 +117,7 @@ export class ViewerHttpController {
       headers,
     });
     const entry: ActiveRequest = {
+      framing,
       owner,
       request: upstream,
       response: null,
@@ -238,6 +242,7 @@ export class ViewerHttpController {
                 opcode: ViewerHttpOpcode.Data,
                 requestId,
                 payload: piece,
+                framing: entry.framing,
               }),
             ).catch((error: unknown) => {
               sendError = error instanceof Error ? error : new Error(String(error));
@@ -251,7 +256,11 @@ export class ViewerHttpController {
       if (!entry.finished) {
         await this.sendFrame(
           entry,
-          encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.End, requestId }),
+          encodeViewerHttpFrame({
+            opcode: ViewerHttpOpcode.End,
+            requestId,
+            framing: entry.framing,
+          }),
         );
       }
     } catch {
@@ -261,7 +270,11 @@ export class ViewerHttpController {
       if (!entry.finished) {
         await this.sendFrame(
           entry,
-          encodeViewerHttpFrame({ opcode: ViewerHttpOpcode.Reset, requestId }),
+          encodeViewerHttpFrame({
+            opcode: ViewerHttpOpcode.Reset,
+            requestId,
+            framing: entry.framing,
+          }),
         ).catch(() => undefined);
       }
     } finally {
