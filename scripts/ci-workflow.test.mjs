@@ -144,6 +144,13 @@ test("focused contracts stay inside existing required checks", () => {
   assert.match(server, /test:hub-cli-contract/);
   assert.match(server, /npm run test --workspace=@getpaseo\/server/);
   assert.ok(!jobs.has("hub-cli-contract"));
+  assert.match(server, /@openai\/codex@0\.162\.1/);
+  assert.match(server, /working-directory: packages\/server/);
+  assert.match(server, /codex --version/);
+  assert.match(server, /codex-app-server-agent\.local\.e2e\.test\.ts/);
+  assert.match(server, /codex-custom-provider-import\.local\.e2e\.test\.ts/);
+  assert.match(server, /persistence\.e2e\.test\.ts --testNamePattern="closed history"/);
+  assert.match(server, /--maxWorkers=1 --bail=1/);
 
   assert.match(desktop, /test:e2e:renderer/);
   assert.match(desktop, /test:e2e:browser-tabs/);
