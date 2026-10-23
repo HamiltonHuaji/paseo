@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { decodeImportSessionCursor, encodeImportSessionCursor } from "../import-session-cursor.js";
 import { ACPProviderOptionsSchema } from "./acp-options.js";
 import { type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -95,6 +97,8 @@ import {
   type ImportProviderSessionContext,
   type ImportProviderSessionInput,
   type ListImportableSessionsOptions,
+  type ListImportableSessionsPageOptions,
+  type ImportableSessionsPage,
   type McpServerConfig,
   type ProviderCatalog,
   type ResolveAgentCreateConfigInput,
@@ -913,7 +917,19 @@ function isACPCreateConfigUnattended(input: AgentCreateConfigUnattendedInput): b
   );
 }
 
+const ACPImportPageSessionSchema = z.object({
+  sessionId: z.string().min(1),
+  cwd: z.string(),
+  title: z.string().nullish(),
+  updatedAt: z.string().nullish(),
+});
+const ACPImportPageCursorSchema = z.object({
+  nativeCursor: z.string().min(1).nullable(),
+  buffered: z.array(ACPImportPageSessionSchema).max(1000),
+});
+
 export class ACPAgentClient implements AgentClient {
+  private readonly listingContext = randomUUID();
   readonly provider: string;
   private readonly usageProvider?: string;
   readonly capabilities: AgentCapabilityFlags;
@@ -1213,6 +1229,77 @@ export class ACPAgentClient implements AgentClient {
     } finally {
       await this.closeProbe(probe, probeSessionId);
     }
+  }
+
+  async listImportableSessionsPage(
+    options: ListImportableSessionsPageOptions,
+  ): Promise<ImportableSessionsPage> {
+    const context = JSON.stringify([
+      "acp",
+      this.provider,
+      this.listingContext,
+      options.cwd,
+      options.query,
+    ]);
+    const state =
+      options.cursor == null
+        ? undefined
+        : decodeImportSessionCursor(options.cursor, context, ACPImportPageCursorSchema);
+    const limit = Math.max(1, Math.min(options.limit ?? 100, 100));
+    let sessions = state?.buffered ?? [];
+    let nextCursor = state?.nativeCursor ?? null;
+    if (sessions.length === 0) {
+      const probe = await this.spawnProcess(PROBE_ENV);
+      try {
+        if (!probe.initialize.agentCapabilities?.sessionCapabilities?.list) {
+          return {
+            sessions: [],
+            nextCursor: null,
+            incompleteReason: "This ACP agent does not advertise native session listing.",
+          };
+        }
+        // ACP chooses its own source page size. Buffer one bounded native page;
+        // never load/resume each conversation merely to display its list row.
+        const page = z
+          .object({
+            sessions: z.array(ACPImportPageSessionSchema).max(1000),
+            nextCursor: z.string().min(1).nullish(),
+          })
+          .parse(
+            await this.runACPRequest(() =>
+              probe.connection.listSessions(acpSessionListRequest(nextCursor, options.cwd)),
+            ),
+          );
+        if (nextCursor && page.nextCursor === nextCursor)
+          throw new Error(
+            "ACP agent returned a repeated session cursor. Refresh the session list.",
+          );
+        sessions = page.sessions;
+        nextCursor = page.nextCursor ?? null;
+      } finally {
+        await this.closeProbe(probe);
+      }
+    }
+    const buffered = sessions.slice(limit);
+    return {
+      sessions: sessions.slice(0, limit).map((session) => {
+        const lastActivityAt = session.updatedAt ? new Date(session.updatedAt) : new Date(0);
+        if (!Number.isFinite(lastActivityAt.getTime()))
+          throw new Error("ACP agent returned an invalid session timestamp");
+        return {
+          providerHandleId: session.sessionId,
+          cwd: session.cwd,
+          title: session.title ?? null,
+          firstPromptPreview: null,
+          lastPromptPreview: null,
+          lastActivityAt,
+        };
+      }),
+      nextCursor:
+        nextCursor || buffered.length
+          ? encodeImportSessionCursor(context, { nativeCursor: nextCursor, buffered })
+          : null,
+    };
   }
 
   async listImportableSessions(

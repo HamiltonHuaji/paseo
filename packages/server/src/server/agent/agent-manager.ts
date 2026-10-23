@@ -1119,6 +1119,7 @@ export class AgentManager {
       sessions: page.sessions.map((session) => ({ ...session, provider: options.provider })),
       nextCursor: page.nextCursor,
       cwdScoped: page.cwdScoped,
+      incompleteReason: page.incompleteReason,
       providerErrors: [],
     };
   }

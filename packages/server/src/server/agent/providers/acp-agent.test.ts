@@ -2322,15 +2322,21 @@ describe("ACPAgentClient fetchCatalog", () => {
 });
 
 describe("ACPAgentClient listImportableSessions", () => {
-  function makeClient(args: { listSessions: ReturnType<typeof vi.fn>; supportsList?: boolean }) {
+  function makeClient(args: {
+    listSessions: ReturnType<typeof vi.fn>;
+    supportsList?: boolean;
+    loadSession?: ReturnType<typeof vi.fn>;
+  }) {
     class TestACPAgentClient extends ACPAgentClient {
       protected override async spawnProcess(): Promise<SpawnedACPProcess> {
         return {
           child: { kill: vi.fn(), exitCode: 0, signalCode: null, once: vi.fn() },
-          connection: { listSessions: args.listSessions },
+          connection: { listSessions: args.listSessions, loadSession: args.loadSession },
           initialize: {
             agentCapabilities:
-              args.supportsList === false ? {} : { sessionCapabilities: { list: {} } },
+              args.supportsList === false
+                ? {}
+                : { sessionCapabilities: { list: {} }, loadSession: Boolean(args.loadSession) },
           },
         } as unknown as SpawnedACPProcess;
       }
@@ -2345,6 +2351,85 @@ describe("ACPAgentClient listImportableSessions", () => {
       defaultModes: [],
     });
   }
+
+  test("continues beyond 500 through empty and buffered native pages without loading histories", async () => {
+    const row = (index: number) => ({
+      sessionId: `session-${index}`,
+      cwd: "/project",
+      updatedAt: "2026-10-23T00:00:00Z",
+    });
+    const rows = Array.from({ length: 601 }, (_, index) => row(index));
+    const listSessions = vi.fn(async ({ cursor }: { cursor?: string }) => {
+      if (cursor === undefined) return { sessions: [], nextCursor: "first" };
+      if (cursor === "first")
+        return {
+          sessions: rows.slice(0, 250),
+          nextCursor: "second",
+        };
+      return {
+        sessions: rows.slice(250),
+        nextCursor: null,
+      };
+    });
+    const loadSession = vi.fn(() => {
+      throw new Error("Listing must not activate a writer");
+    });
+    const client = makeClient({ listSessions, loadSession });
+    const first = await client.listImportableSessionsPage({
+      cwd: "/project",
+      query: "needle",
+      limit: 17,
+    });
+    expect(first.sessions).toEqual([]);
+    expect(first.nextCursor).not.toBeNull();
+    await expect(
+      client.listImportableSessionsPage({
+        cwd: "/other",
+        query: "needle",
+        cursor: first.nextCursor,
+      }),
+    ).rejects.toThrow("invalid or expired");
+    await expect(
+      client.listImportableSessionsPage({
+        cwd: "/project",
+        query: "other",
+        cursor: first.nextCursor,
+      }),
+    ).rejects.toThrow("invalid or expired");
+    const ids: string[] = [];
+    let cursor = first.nextCursor;
+    do {
+      const page = await client.listImportableSessionsPage({
+        cwd: "/project",
+        query: "needle",
+        limit: 17,
+        cursor,
+      });
+      expect(page.sessions.length).toBeLessThanOrEqual(17);
+      ids.push(...page.sessions.map((session) => session.providerHandleId));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(ids).toEqual(Array.from({ length: 601 }, (_, index) => `session-${index}`));
+    expect(listSessions).toHaveBeenCalledTimes(3);
+    expect(loadSession).not.toHaveBeenCalled();
+  });
+
+  test("reports unsupported listing, repeated cursors and malformed pages explicitly", async () => {
+    const listSessions = vi.fn().mockResolvedValue({ sessions: [], nextCursor: "same" });
+    const unsupported = makeClient({ listSessions, supportsList: false });
+    expect(await unsupported.listImportableSessionsPage({})).toMatchObject({
+      sessions: [],
+      nextCursor: null,
+      incompleteReason: expect.stringContaining("does not advertise"),
+    });
+    const client = makeClient({ listSessions });
+    const first = await client.listImportableSessionsPage({});
+    await expect(client.listImportableSessionsPage({ cursor: first.nextCursor })).rejects.toThrow(
+      "repeated session cursor",
+    );
+    listSessions.mockResolvedValueOnce({ error: "unavailable" });
+    await expect(client.listImportableSessionsPage({})).rejects.toThrow();
+  });
 
   test("forwards the requested cwd to session/list so the agent filters by directory", async () => {
     const listSessions = vi.fn().mockResolvedValue({

@@ -1,4 +1,5 @@
-import { expect, test } from "vitest";
+import { asInternals } from "../../../test-utils/class-mocks.js";
+import { expect, test, vi } from "vitest";
 import { openCodeMajorVersion } from "./runtime-client.js";
 
 test.each([
@@ -209,3 +210,35 @@ test.each([
   },
   10000,
 );
+
+test("forwards native v2 import pages and keeps v1 windows explicitly incomplete", async () => {
+  const { createTestLogger } = await import("../../../../test-utils/test-logger.js");
+  const { OpenCodeRuntimeClient } = await import("./runtime-client.js");
+  const { OpenCodeAgentClient } = await import("../opencode-agent.js");
+  const { OpenCodeV2AgentClient } = await import("./v2/agent.js");
+  const { V2Harness } = await import("./test-utils/v2-harness.js");
+  const v1 = new OpenCodeAgentClient(createTestLogger());
+  const runtime = new OpenCodeRuntimeClient(createTestLogger());
+  const harness = new V2Harness();
+  const v2 = new OpenCodeV2AgentClient({ logger: createTestLogger(), runtime: harness.runtime });
+  harness.api.session.list = async () => ({ data: [harness.info], cursor: { next: "more" } });
+  const internals = asInternals<{
+    selected: Promise<typeof v1 | typeof v2> | null;
+  }>(runtime);
+  internals.selected = Promise.resolve(v2);
+  expect(await runtime.listImportableSessionsPage({ cwd: "/tmp/project" })).toMatchObject({
+    sessions: [{ providerHandleId: "session" }],
+    nextCursor: expect.any(String),
+  });
+  const list = vi.spyOn(v1, "listImportableSessions").mockResolvedValue([]);
+  internals.selected = Promise.resolve(v1);
+  expect(await runtime.listImportableSessionsPage({ cwd: "/tmp/project" })).toMatchObject({
+    sessions: [],
+    nextCursor: null,
+    incompleteReason: expect.stringContaining("OpenCode v1"),
+  });
+  expect(list).toHaveBeenCalledWith({ cwd: "/tmp/project", limit: 500, scanLimit: 500 });
+  await expect(runtime.listImportableSessionsPage({ cursor: "old" })).rejects.toThrow(
+    "does not expose",
+  );
+});

@@ -1,5 +1,5 @@
 import type { FormInfo, ModelInfo, SessionMessageInfo } from "@opencode/client";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../../../agent-sdk-types.js";
@@ -1073,4 +1073,80 @@ describe("OpenCode v2 session lifecycle", () => {
       await session.close();
     }
   });
+});
+
+test("OpenCode v2 import pages continue past 500 and retain filtered empty pages", async () => {
+  const harness = new V2Harness();
+  const rows = Array.from({ length: 601 }, (_, index) => ({
+    ...harness.info,
+    id: `session-${index}`,
+    ...(index < 100 ? { parentID: "parent" } : {}),
+  }));
+  const list = vi.fn<V2Api["session"]["list"]>(async (input) => {
+    const offset = Number(input?.cursor ?? 0);
+    const end = Math.min(offset + (input?.limit ?? 100), rows.length);
+    return {
+      data: rows.slice(offset, end),
+      cursor: { next: end < rows.length ? String(end) : undefined },
+    };
+  });
+  harness.api.session.list = list;
+  const client = new OpenCodeV2AgentClient({
+    logger: createTestLogger(),
+    runtime: harness.runtime,
+  });
+  const first = await client.listImportableSessionsPage({
+    cwd: "/tmp/project",
+    query: "needle",
+    limit: 100,
+  });
+  expect(first.sessions).toEqual([]);
+  expect(first.nextCursor).not.toBeNull();
+  await expect(
+    client.listImportableSessionsPage({ cwd: "/other", query: "needle", cursor: first.nextCursor }),
+  ).rejects.toThrow("invalid or expired");
+  await expect(
+    client.listImportableSessionsPage({
+      cwd: "/tmp/project",
+      query: "other",
+      cursor: first.nextCursor,
+    }),
+  ).rejects.toThrow("invalid or expired");
+  const ids: string[] = [];
+  let cursor = first.nextCursor;
+  list.mockRejectedValueOnce(new Error("native unavailable"));
+  await expect(
+    client.listImportableSessionsPage({ cwd: "/tmp/project", query: "needle", cursor }),
+  ).rejects.toThrow("native unavailable");
+  do {
+    const page = await client.listImportableSessionsPage({
+      cwd: "/tmp/project",
+      query: "needle",
+      cursor,
+      limit: 100,
+    });
+    ids.push(...page.sessions.map((session) => session.providerHandleId));
+    cursor = page.nextCursor;
+  } while (cursor);
+  expect(ids).toEqual(rows.slice(100).map((entry) => entry.id));
+  expect(list).toHaveBeenNthCalledWith(1, {
+    directory: "/tmp/project",
+    search: "needle",
+    limit: 100,
+  });
+  expect(harness.creates).toEqual([]);
+  expect(harness.prompts).toEqual([]);
+});
+
+test("OpenCode v2 import pagination rejects repeated native cursors", async () => {
+  const harness = new V2Harness();
+  harness.api.session.list = async () => ({ data: [], cursor: { next: "same" } });
+  const client = new OpenCodeV2AgentClient({
+    logger: createTestLogger(),
+    runtime: harness.runtime,
+  });
+  const page = await client.listImportableSessionsPage({});
+  await expect(client.listImportableSessionsPage({ cursor: page.nextCursor })).rejects.toThrow(
+    "repeated session cursor",
+  );
 });

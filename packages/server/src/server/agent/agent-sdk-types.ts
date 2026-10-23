@@ -567,6 +567,8 @@ export interface ImportableSessionsPage {
   nextCursor: string | null;
   /** The provider applied its project/cwd scope, including equivalent worktrees. */
   cwdScoped?: boolean;
+  /** A missing native continuation capability must not be presented as exhaustion. */
+  incompleteReason?: string;
 }
 
 export interface ListImportableSessionsPageOptions extends ListImportableSessionsOptions {

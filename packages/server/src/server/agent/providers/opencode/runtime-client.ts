@@ -8,6 +8,8 @@ import type {
   FetchCatalogOptions,
   ProviderRefreshContext,
   ListImportableSessionsOptions,
+  ListImportableSessionsPageOptions,
+  ImportableSessionsPage,
   ImportProviderSessionInput,
   ImportProviderSessionContext,
 } from "../../agent-sdk-types.js";
@@ -138,6 +140,22 @@ export class OpenCodeRuntimeClient implements AgentClient {
   async listFeatures(config: AgentSessionConfig) {
     return (await this.client()).listFeatures(config);
   }
+  async listImportableSessionsPage(
+    options: ListImportableSessionsPageOptions,
+  ): Promise<ImportableSessionsPage> {
+    const client = await this.client();
+    if (client instanceof OpenCodeAgentClient) {
+      if (options.cursor) throw new Error("OpenCode v1 does not expose session pagination");
+      return {
+        sessions: await client.listImportableSessions({ ...options, limit: 500, scanLimit: 500 }),
+        nextCursor: null,
+        incompleteReason:
+          "OpenCode v1 only supplies a limited session window. Complete browsing requires a runtime with session pagination.",
+      };
+    }
+    return client.listImportableSessionsPage(options);
+  }
+
   async listImportableSessions(options?: ListImportableSessionsOptions) {
     return (await this.client()).listImportableSessions(options);
   }

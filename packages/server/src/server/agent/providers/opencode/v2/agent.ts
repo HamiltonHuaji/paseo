@@ -1,3 +1,9 @@
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import {
+  decodeImportSessionCursor,
+  encodeImportSessionCursor,
+} from "../../../import-session-cursor.js";
 import { OpenCodeV2Session } from "./session.js";
 import { V2_CAPABILITIES } from "./capabilities.js";
 import {
@@ -27,6 +33,8 @@ import type {
   ImportProviderSessionInput,
   ImportProviderSessionContext,
   ListImportableSessionsOptions,
+  ListImportableSessionsPageOptions,
+  ImportableSessionsPage,
   ProviderRefreshContext,
 } from "../../../agent-sdk-types.js";
 import {
@@ -54,6 +62,7 @@ export class OpenCodeV2AgentClient implements AgentClient {
   readonly provider = "opencode";
   readonly capabilities: AgentCapabilityFlags;
   private readonly runtime: Pick<V2Runtime, "acquire" | "shutdown">;
+  private readonly listingContext = randomUUID();
   private readonly connections = new Map<string, V2Connection>();
   constructor(private readonly options: V2AgentOptions) {
     this.capabilities = { ...V2_CAPABILITIES, supportsNativePaseoTools: Boolean(options.bridge) };
@@ -230,6 +239,49 @@ export class OpenCodeV2AgentClient implements AgentClient {
       await connection.release();
     }
   }
+  async listImportableSessionsPage(
+    options: ListImportableSessionsPageOptions,
+  ): Promise<ImportableSessionsPage> {
+    const context = JSON.stringify([
+      "opencode-v2",
+      this.listingContext,
+      options.cwd,
+      options.query,
+    ]);
+    const cursor =
+      options.cursor == null
+        ? undefined
+        : decodeImportSessionCursor(options.cursor, context, z.string().min(1));
+    const limit = Math.max(1, Math.min(options.limit ?? 100, 100));
+    const connection = await this.runtime.acquire();
+    try {
+      const page = await connection.client.session.list({
+        ...(cursor ? { cursor } : { directory: options.cwd, search: options.query }),
+        limit,
+      });
+      if (!Array.isArray(page.data) || page.data.length > limit || !page.cursor)
+        throw new Error("OpenCode returned an invalid session page");
+      const next = page.cursor.next;
+      if (next && next === cursor)
+        throw new Error("OpenCode returned a repeated session cursor. Refresh the session list.");
+      return {
+        sessions: page.data
+          .filter((info) => !info.parentID && !info.time.archived)
+          .map((info) => ({
+            providerHandleId: info.id,
+            cwd: info.location.directory,
+            title: info.title ?? null,
+            firstPromptPreview: null,
+            lastPromptPreview: null,
+            lastActivityAt: new Date(info.time.updated),
+          })),
+        nextCursor: next ? encodeImportSessionCursor(context, next) : null,
+      };
+    } finally {
+      await connection.release();
+    }
+  }
+
   async listImportableSessions(
     options: ListImportableSessionsOptions = {},
   ): Promise<ImportableProviderSession[]> {
