@@ -1,7 +1,7 @@
 import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolveCodexStorageEnvironment, findCodexRollout } from "./codex/storage-context.js";
-import { mkdir, readlink, symlink, unlink } from "node:fs/promises";
+import { mkdir, readlink, stat, symlink, unlink, utimes } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import { type Dirent, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
@@ -175,6 +175,13 @@ function createSession(
   session.connectionState = "connected";
   session.currentThreadId = "test-thread";
   session.activeForegroundTurnId = "test-turn";
+  // These parser/policy tests install an already-connected session. Model
+  // discovery is exercised through createFakeCodexAppServer in its own tests.
+  castInternals<{ refreshExecutionModelSettings(): Promise<void> }>(
+    session,
+  ).refreshExecutionModelSettings = async () => {};
+  castInternals<{ serviceTierSelection: string | null }>(session).serviceTierSelection ??=
+    "default";
   return session;
 }
 
@@ -663,6 +670,7 @@ function resultFor(method) {
   if (method === "collaborationMode/list") return { data: [] };
   if (method === "skills/list") return { data: [] };
   if (method === "model/list") return { data: [{ id: "profile-model", isDefault: true }] };
+  if (method === "config/read") return { config: {} };
   if (method === "thread/start") return { thread: { id: "thread-1" } };
   return {};
 }
@@ -779,7 +787,8 @@ let buffer = "";
 function resultFor(method, params) {
   if (method === "initialize") return {};
   if (method === "collaborationMode/list") return { data: [] };
-  if (method === "model/list") return { data: [] };
+  if (method === "model/list") return { data: [{id: "gpt-5.4", isDefault: true, defaultReasoningEffort: "medium"}] };
+  if (method === "config/read") return { config: {} };
   if (method === "skills/list") {
     const cwds = params && params.cwds;
     const projectCwd = ${JSON.stringify(projectCwd)};
@@ -864,6 +873,7 @@ describe("Codex app-server provider", () => {
     session.client = {
       request: vi.fn(async (method: string, params: unknown) => {
         requests.push({ method, params });
+        if (method === "config/read") return { config: {} };
         if (method === "thread/start") {
           return { thread: { id: "auto-review-thread" } };
         }
@@ -896,6 +906,7 @@ describe("Codex app-server provider", () => {
     session.client = {
       request: vi.fn(async (method: string, params: unknown) => {
         requests.push({ method, params });
+        if (method === "config/read") return { config: {} };
         if (method === "thread/start") {
           return { thread: { id: "default-mode-thread" } };
         }
@@ -953,6 +964,7 @@ describe("Codex app-server provider", () => {
     session.client = {
       request: vi.fn(async (method: string, params: unknown) => {
         requests.push({ method, params });
+        if (method === "config/read") return { config: {} };
         if (method === "thread/start") {
           return { thread: { id: "read-only-thread" } };
         }
@@ -1236,6 +1248,7 @@ describe("Codex app-server provider", () => {
     const fakeClient: CodexClientLike = {
       async request(method: string, params?: unknown) {
         requests.push({ method, params });
+        if (method === "config/read") return { config: {} };
         if (method === "thread/start") {
           return { thread: { id: "ephemeral-thread" } };
         }
@@ -1267,6 +1280,7 @@ describe("Codex app-server provider", () => {
     const fakeClient: CodexClientLike = {
       async request(method: string, params?: unknown) {
         requests.push({ method, params });
+        if (method === "config/read") return { config: {} };
         if (method === "thread/start") {
           return { thread: { id: "persistent-thread" } };
         }
@@ -2492,6 +2506,7 @@ describe("Codex app-server provider", () => {
 
     expect(threadRequests).toEqual([
       "model/list",
+      "config/read",
       "config/read",
       "thread/loaded/list",
       "thread/resume",
@@ -7435,6 +7450,9 @@ describe("fork baseline contracts", () => {
     ]);
     await expect(readCodexModels({ request: async () => ({ data: "invalid" }) })).rejects.toThrow();
     await expect(
+      readCodexModels({ request: async () => ({ error: "unavailable" }) }),
+    ).rejects.toThrow();
+    await expect(
       readCodexModels({ request: async () => ({ data: [], nextCursor: "repeat" }) }),
     ).rejects.toThrow("repeated model cursor");
   });
@@ -7533,6 +7551,26 @@ describe("fork baseline contracts", () => {
 });
 
 describe("project Codex storage", () => {
+  test("catalog keys track ancestor config content even when timestamps and size are unchanged", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "paseo-codex-catalog-"));
+    onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+    const home = path.join(root, "profile");
+    const cwd = path.join(root, "project", "nested");
+    const config = path.join(root, "project", ".codex", "config.toml");
+    mkdirSync(home);
+    mkdirSync(cwd, { recursive: true });
+    mkdirSync(path.dirname(config));
+    writeFileSync(config, 'model = "model-one"');
+    const original = await stat(config);
+    const provider = new CodexAppServerAgentClient(createTestLogger(), {
+      env: { CODEX_HOME: home },
+    });
+    const before = await provider.getCatalogCacheKey({ scope: "workspace", cwd });
+    writeFileSync(config, 'model = "model-two"');
+    await utimes(config, original.atime, original.mtime);
+    expect(await provider.getCatalogCacheKey({ scope: "workspace", cwd })).not.toBe(before);
+  });
+
   test("worktrees share durable native storage while separate projects stay isolated", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "paseo-codex-storage-"));
     onTestFinished(() => rmSync(root, { recursive: true, force: true }));

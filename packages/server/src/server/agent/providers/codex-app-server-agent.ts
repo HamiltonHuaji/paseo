@@ -52,7 +52,7 @@ import { runProviderRefreshActivity } from "../provider-refresh-deadline.js";
 import type { Logger } from "pino";
 
 import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -503,6 +503,7 @@ export function normalizeCodexOutputSchema(schema: unknown): Record<string, unkn
 interface CodexConfiguredDefaults {
   model?: string;
   thinkingOptionId?: string;
+  serviceTier?: string;
 }
 
 interface PersistedTimelineEntry {
@@ -519,16 +520,6 @@ interface PersistedSubAgentRoute {
 interface CodexThreadHistoryProjection {
   timeline: PersistedTimelineEntry[];
   subAgentRoutes: PersistedSubAgentRoute[];
-}
-
-function mergeCodexConfiguredDefaults(
-  primary: CodexConfiguredDefaults,
-  fallback: CodexConfiguredDefaults,
-): CodexConfiguredDefaults {
-  return {
-    model: primary.model ?? fallback.model,
-    thinkingOptionId: primary.thinkingOptionId ?? fallback.thinkingOptionId,
-  };
 }
 
 function codexMicrosoftStorePackageRoot(): string | null {
@@ -968,27 +959,25 @@ interface CodexModel {
 
 const CodexModelListResponseSchema = z.object({
   nextCursor: z.string().nullable().optional(),
-  data: z
-    .array(
-      z.object({
-        id: z.string(),
-        serviceTiers: z.array(CodexServiceTierSchema).optional(),
-        displayName: z.string().optional(),
-        description: z.string().optional(),
-        isDefault: z.boolean().optional(),
-        model: z.string().optional(),
-        defaultReasoningEffort: z.string().optional(),
-        supportedReasoningEfforts: z
-          .array(
-            z.object({
-              reasoningEffort: z.string().optional(),
-              description: z.string().optional(),
-            }),
-          )
-          .optional(),
-      }),
-    )
-    .optional(),
+  data: z.array(
+    z.object({
+      id: z.string(),
+      serviceTiers: z.array(CodexServiceTierSchema).optional(),
+      displayName: z.string().optional(),
+      description: z.string().optional(),
+      isDefault: z.boolean().optional(),
+      model: z.string().optional(),
+      defaultReasoningEffort: z.string().optional(),
+      supportedReasoningEfforts: z
+        .array(
+          z.object({
+            reasoningEffort: z.string().optional(),
+            description: z.string().optional(),
+          }),
+        )
+        .optional(),
+    }),
+  ),
 });
 
 export async function readCodexModels(
@@ -1001,7 +990,7 @@ export async function readCodexModels(
     const page = CodexModelListResponseSchema.parse(
       await client.request("model/list", cursor ? { cursor } : {}),
     );
-    for (const model of page.data ?? []) models.set(model.id, model);
+    for (const model of page.data) models.set(model.id, model);
     const next = page.nextCursor;
     if (!next) break;
     if (cursors.has(next)) throw new Error("Codex returned a repeated model cursor");
@@ -3280,43 +3269,26 @@ async function readCodexConfiguredDefaults(
   logger: Logger,
   cwd?: string,
 ): Promise<CodexConfiguredDefaults> {
-  let savedConfigDefaults: CodexConfiguredDefaults = {};
-  try {
-    const response = toObjectRecord(await client.request("getUserSavedConfig", {}));
-    const config = toObjectRecord(response?.config);
-    const modelValue = typeof config?.model === "string" ? config.model : undefined;
-    const thinkingOptionValue =
-      typeof config?.modelReasoningEffort === "string" ? config.modelReasoningEffort : null;
-    savedConfigDefaults = {
-      model: normalizeCodexModelId(modelValue),
-      thinkingOptionId: normalizeCodexThinkingOptionId(thinkingOptionValue),
-    };
-  } catch (error) {
-    logger.debug({ error }, "Failed to read Codex saved config defaults");
-  }
-
-  if (!cwd && savedConfigDefaults.model && savedConfigDefaults.thinkingOptionId) {
-    return savedConfigDefaults;
-  }
-
-  let configReadDefaults: CodexConfiguredDefaults = {};
+  let config: Record<string, unknown> | undefined;
   try {
     const response = toObjectRecord(await client.request("config/read", cwd ? { cwd } : {}));
-    const config = toObjectRecord(response?.config);
-    const modelValue = typeof config?.model === "string" ? config.model : undefined;
-    const thinkingOptionValue =
-      typeof config?.model_reasoning_effort === "string" ? config.model_reasoning_effort : null;
-    configReadDefaults = {
-      model: normalizeCodexModelId(modelValue),
-      thinkingOptionId: normalizeCodexThinkingOptionId(thinkingOptionValue),
-    };
+    config = toObjectRecord(response?.config);
   } catch (error) {
-    logger.debug({ error }, "Failed to read Codex config defaults");
+    if (!(error instanceof CodexAppServerRpcError) || error.code !== -32601) throw error;
+    // COMPAT(codexConfigRead): added in v0.13.0, remove after 2027-04-23 once supported Codex versions expose config/read.
+    logger.debug("Codex does not expose config/read; reading its saved defaults");
+    const response = toObjectRecord(await client.request("getUserSavedConfig", {}));
+    config = toObjectRecord(response?.config);
+    if (config) config.model_reasoning_effort = config.modelReasoningEffort;
   }
-
-  return cwd
-    ? mergeCodexConfiguredDefaults(configReadDefaults, savedConfigDefaults)
-    : mergeCodexConfiguredDefaults(savedConfigDefaults, configReadDefaults);
+  if (!config) throw new Error("Codex returned an invalid effective configuration");
+  return {
+    model: normalizeCodexModelId(typeof config.model === "string" ? config.model : undefined),
+    thinkingOptionId: normalizeCodexThinkingOptionId(
+      typeof config.model_reasoning_effort === "string" ? config.model_reasoning_effort : null,
+    ),
+    serviceTier: typeof config.service_tier === "string" ? config.service_tier : undefined,
+  };
 }
 
 interface CodexSkillPromptBlock {
@@ -3564,6 +3536,9 @@ export class CodexAppServerAgentSession implements AgentSession {
   private activeClientMessageId: string | null = null;
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private serviceTier: string | null = null;
+  private modelSelection: string | undefined;
+  private thinkingSelection: string | undefined;
+  private serviceTierSelection: string | null;
   private speedModels: CodexModel[] = [];
   private planModeEnabled = false;
   private historyPending = false;
@@ -3680,7 +3655,10 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.restoreBranchMetadata(resumeHandle?.metadata);
     this.codexHome = deps.codexHome ?? resolveCodexHomeDir(process.env);
     this.config.thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
+    this.modelSelection = this.config.model ?? undefined;
+    this.thinkingSelection = this.config.thinkingOptionId;
     this.serviceTier = readCodexServiceTier(this.config.featureValues);
+    this.serviceTierSelection = this.serviceTier;
     if (this.config.featureValues?.plan_mode) {
       this.planModeEnabled = true;
     }
@@ -3792,7 +3770,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       client.notify("initialized", {});
 
       this.speedModels = await readCodexModels(client);
-      this.reconcileServiceTier();
+      await this.applyDefaultModelAndThinking();
       await this.loadResolvedWorkspaceWrite();
       await this.loadCollaborationModes();
       await this.loadSkills();
@@ -3800,7 +3778,6 @@ export class CodexAppServerAgentSession implements AgentSession {
       if (this.currentThreadId) {
         await this.ensureThreadLoaded();
         await this.loadPersistedHistory(this.client);
-        await this.applyDefaultModelAndThinking();
       }
 
       if (this.closed) {
@@ -4015,8 +3992,14 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (this.serviceTier === "fast" && !tiers.some((tier) => tier.id === "fast")) {
       this.serviceTier = tiers.find((tier) => tier.name.toLowerCase() === "fast")?.id ?? null;
     }
-    if (this.serviceTier !== "default" && !tiers.some((tier) => tier.id === this.serviceTier)) {
-      this.serviceTier = null;
+    if (
+      this.serviceTier !== null &&
+      this.serviceTier !== "default" &&
+      !tiers.some((tier) => tier.id === this.serviceTier)
+    ) {
+      throw new Error(
+        `Codex speed '${this.serviceTier}' is not available for model '${this.config.model ?? "default"}'. Select Normal speed or a supported model.`,
+      );
     }
     const { fast_mode: _legacyFast, ...values } = this.config.featureValues ?? {};
     this.config.featureValues = { ...values, service_tier: this.serviceTier ?? "default" };
@@ -4525,6 +4508,8 @@ export class CodexAppServerAgentSession implements AgentSession {
         throw new Error("Codex client not initialized");
       }
 
+      await this.refreshExecutionModelSettings();
+
       const slashCommand = await this.resolveSlashCommandInvocation(prompt);
       const effectivePrompt = slashCommand
         ? await this.buildCommandPromptInput(slashCommand.commandName, slashCommand.args)
@@ -4774,14 +4759,27 @@ export class CodexAppServerAgentSession implements AgentSession {
   }
 
   async setModel(modelId: string | null): Promise<void> {
-    this.config.model = modelId ?? undefined;
-    this.reconcileServiceTier();
-    this.refreshResolvedCollaborationMode();
-    this.cachedRuntimeInfo = null;
+    const previousSelection = this.modelSelection;
+    const previous = {
+      model: this.config.model,
+      thinkingOptionId: this.config.thinkingOptionId,
+      featureValues: this.config.featureValues,
+    };
+    const previousTier = this.serviceTier;
+    this.modelSelection = modelId ?? undefined;
+    try {
+      await this.applyDefaultModelAndThinking();
+    } catch (error) {
+      this.modelSelection = previousSelection;
+      Object.assign(this.config, previous);
+      this.serviceTier = previousTier;
+      throw error;
+    }
   }
 
   async setThinkingOption(thinkingOptionId: string | null): Promise<void | AgentProviderNotice> {
-    this.config.thinkingOptionId = normalizeCodexThinkingOptionId(thinkingOptionId);
+    this.thinkingSelection = normalizeCodexThinkingOptionId(thinkingOptionId);
+    this.config.thinkingOptionId = this.thinkingSelection;
     this.refreshResolvedCollaborationMode();
     this.cachedRuntimeInfo = null;
     if (this.activeForegroundTurnId) {
@@ -4809,6 +4807,7 @@ export class CodexAppServerAgentSession implements AgentSession {
         );
       }
       this.serviceTier = value;
+      this.serviceTierSelection = value;
       this.reconcileServiceTier();
       this.cachedRuntimeInfo = null;
       return;
@@ -5071,7 +5070,8 @@ export class CodexAppServerAgentSession implements AgentSession {
     metadata: Record<string, unknown>;
   } | null {
     if (!this.currentThreadId) return null;
-    const thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId) ?? null;
+    const { service_tier: _effectiveTier, ...featureValues } = this.config.featureValues ?? {};
+    if (this.serviceTierSelection !== null) featureValues.service_tier = this.serviceTierSelection;
     return {
       provider: CODEX_PROVIDER,
       sessionId: this.currentThreadId,
@@ -5086,8 +5086,9 @@ export class CodexAppServerAgentSession implements AgentSession {
         title: this.config.title ?? null,
         threadId: this.currentThreadId,
         modeId: this.config.modeId,
-        model: this.config.model ?? null,
-        thinkingOptionId,
+        model: this.modelSelection ?? null,
+        thinkingOptionId: this.thinkingSelection ?? null,
+        featureValues,
         toolPolicy: this.config.toolPolicy,
         systemPrompt: this.config.systemPrompt,
         mcpServers: this.config.mcpServers,
@@ -5516,17 +5517,24 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
   }
 
+  private async refreshExecutionModelSettings(): Promise<void> {
+    if (!this.client) throw new Error("Codex client is not initialized");
+    this.speedModels = await readCodexModels(this.client);
+    await this.applyDefaultModelAndThinking();
+  }
+
   private async resolveModelAndThinking(): Promise<{
     model: string;
     thinkingOptionId: string | undefined;
+    serviceTier: string | null;
   }> {
     if (!this.client) {
       throw new Error("Codex client is not initialized");
     }
     let configuredDefaults: CodexConfiguredDefaults = {};
-    let model = this.config.model;
-    let thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
-    if (!model || !thinkingOptionId) {
+    let model = this.modelSelection;
+    let thinkingOptionId = this.thinkingSelection;
+    if (!model || !thinkingOptionId || this.serviceTierSelection === null) {
       configuredDefaults = await readCodexConfiguredDefaults(
         this.client,
         this.logger,
@@ -5541,7 +5549,9 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
 
     if (!model || !thinkingOptionId) {
-      const modelData = await readCodexModels(this.client);
+      const modelData = this.speedModels.length
+        ? this.speedModels
+        : await readCodexModels(this.client);
       const models = modelData
         .map((m) => {
           const record = toObjectRecord(m);
@@ -5572,16 +5582,23 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (!model) {
       throw new Error("Unable to resolve Codex model");
     }
-    return { model, thinkingOptionId };
+    return {
+      model,
+      thinkingOptionId,
+      serviceTier: this.serviceTierSelection ?? configuredDefaults.serviceTier ?? null,
+    };
   }
 
   // A session without a model or effort runs on Codex's configured defaults, whether its
   // thread is new or resumed after a restart.
   private async applyDefaultModelAndThinking(): Promise<string> {
-    const { model, thinkingOptionId } = await this.resolveModelAndThinking();
+    const { model, thinkingOptionId, serviceTier } = await this.resolveModelAndThinking();
     this.config.model = model;
+    this.serviceTier = serviceTier;
     this.reconcileServiceTier();
     this.config.thinkingOptionId = thinkingOptionId;
+    this.refreshResolvedCollaborationMode();
+    this.cachedRuntimeInfo = null;
     return model;
   }
 
@@ -7584,7 +7601,12 @@ export class CodexAppServerAgentClient implements AgentClient {
 
   private async spawnAppServer(
     launchEnv?: Record<string, string>,
-    options?: { goalsEnabled?: boolean; agentId?: string; environment?: Record<string, string> },
+    options?: {
+      goalsEnabled?: boolean;
+      agentId?: string;
+      environment?: Record<string, string>;
+      cwd?: string;
+    },
   ): Promise<ChildProcessWithoutNullStreams> {
     const launchPrefix = await resolveCodexLaunchPrefix(this.runtimeSettings);
     const args = [...launchPrefix.args, "app-server"];
@@ -7600,10 +7622,30 @@ export class CodexAppServerAgentClient implements AgentClient {
       },
       "provider.codex.spawn",
     );
+    const environment =
+      options?.environment ?? buildCodexAppServerEnv(this.runtimeSettings, launchEnv);
+    let processCwd = options?.cwd;
+    if (processCwd) {
+      const exists = await fs
+        .stat(processCwd)
+        .then((entry) => entry.isDirectory())
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT" || error.code === "ENOTDIR") return false;
+          throw error;
+        });
+      if (!exists) processCwd = undefined;
+    }
+    if (!processCwd) {
+      // History survives removal of its execution worktree. Only the helper
+      // process falls back; native execution requests retain the selected cwd.
+      processCwd = codexUserHome(environment);
+      await fs.mkdir(processCwd, { recursive: true, mode: 0o700 });
+    }
     const child = spawnProcess(launchPrefix.command, args, {
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
-      baseEnv: options?.environment ?? buildCodexAppServerEnv(this.runtimeSettings, launchEnv),
+      cwd: processCwd,
+      baseEnv: environment,
     });
     assertChildWithPipes(child);
     return child;
@@ -7637,6 +7679,7 @@ export class CodexAppServerAgentClient implements AgentClient {
           goalsEnabled,
           agentId: launchContext?.agentId,
           environment,
+          cwd: config.cwd,
         }),
       { ...this.sessionDeps(environment), environment },
       options?.persistSession === false,
@@ -7681,6 +7724,7 @@ export class CodexAppServerAgentClient implements AgentClient {
           goalsEnabled,
           agentId: launchContext?.agentId,
           environment,
+          cwd: merged.cwd,
         }),
       { ...this.sessionDeps(environment), environment },
       false,
@@ -7719,6 +7763,7 @@ export class CodexAppServerAgentClient implements AgentClient {
           goalsEnabled,
           agentId: launchContext?.agentId,
           environment,
+          cwd: input.targetConfig.cwd,
         }),
       { ...this.sessionDeps(environment), environment },
       false,
@@ -7765,6 +7810,7 @@ export class CodexAppServerAgentClient implements AgentClient {
     const home = homes[state.home]!;
     const child = await this.spawnAppServer(undefined, {
       environment: { ...environment, CODEX_HOME: home },
+      cwd: options.cwd,
     });
     const client =
       this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
@@ -7795,6 +7841,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       }
       const nextHome = nativeCursor ? state.home : state.home + 1;
       return {
+        cwdScoped: true,
         sessions: filterCodexThreadsByCwd(response.data, cwd).map((thread) => {
           if (typeof thread.id !== "string" || !thread.id) {
             throw new Error("Codex returned a session without an identity");
@@ -7853,7 +7900,7 @@ export class CodexAppServerAgentClient implements AgentClient {
   ): Promise<ImportableProviderSession[]> {
     const projectHome =
       environment.CODEX_HOME !== codexUserHome(buildCodexAppServerEnv(this.runtimeSettings));
-    const child = await this.spawnAppServer(undefined, { environment });
+    const child = await this.spawnAppServer(undefined, { environment, cwd: options?.cwd });
     const client =
       this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
       new CodexAppServerClient(child, this.logger);
@@ -7958,14 +8005,21 @@ export class CodexAppServerAgentClient implements AgentClient {
       buildCodexAppServerEnv(this.runtimeSettings),
       cwd,
     );
-    const files = [
-      path.join(environment.CODEX_HOME, "config.toml"),
-      ...(cwd ? [path.join(cwd, ".codex", "config.toml")] : []),
-    ];
+    const files = [path.join(environment.CODEX_HOME, "config.toml")];
+    // Native config layers can live above a nested workspace. Fingerprint their
+    // content, including symlink targets, rather than relying on coarse mtimes.
+    for (let directory = cwd ? path.resolve(cwd) : undefined; directory; ) {
+      files.push(path.join(directory, ".codex", "config.toml"));
+      const parent = path.dirname(directory);
+      directory = parent === directory ? undefined : parent;
+    }
     const versions = await Promise.all(
       files.map(async (file) => {
-        const stat = await fs.stat(file).catch(() => null);
-        return [file, stat?.mtimeMs, stat?.size];
+        const content = await fs.readFile(file).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+        return [file, content ? createHash("sha256").update(content).digest("hex") : null];
       }),
     );
     return JSON.stringify([cwd ?? "host", versions]);
@@ -8019,7 +8073,7 @@ export class CodexAppServerAgentClient implements AgentClient {
           buildCodexAppServerEnv(this.runtimeSettings),
           cwd,
         );
-        const child = await this.spawnAppServer(undefined, { environment });
+        const child = await this.spawnAppServer(undefined, { environment, cwd });
         client = new CodexAppServerClient(child, this.logger);
         if (context?.signal.aborted) await dispose();
       });

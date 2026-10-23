@@ -244,7 +244,7 @@ async function listImportableProviderSessionsPage(
     providerErrors = page.providerErrors;
     candidates = page.sessions
       .filter((session) => {
-        if (matchesCwd && !matchesCwd(session.cwd)) return false;
+        if (!page.cwdScoped && matchesCwd && !matchesCwd(session.cwd)) return false;
         if (sinceTimestamp !== null && session.lastActivityAt.getTime() < sinceTimestamp)
           return false;
         if (isMetadataGenerationSession(session)) return false;

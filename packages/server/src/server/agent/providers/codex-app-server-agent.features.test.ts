@@ -49,7 +49,7 @@ function speedFeature(value: string) {
     value,
     options: [
       { id: "default", label: "Normal", isDefault: true },
-      { id: "priority", label: "Fast" },
+      { id: "priority", label: "Fast", description: "Faster processing" },
     ],
   };
 }
@@ -100,7 +100,7 @@ function createConfig(overrides: Partial<AgentSessionConfig> = {}): AgentSession
 
 function createSessionHarness(
   configOverrides: Partial<AgentSessionConfig> = {},
-  options: { logger?: pino.Logger; models?: unknown[] } = {},
+  options: { logger?: pino.Logger; models?: unknown[]; config?: Record<string, unknown> } = {},
 ): {
   session: CodexFeaturesTestSession;
   appServer: FakeCodexAppServer;
@@ -109,6 +109,7 @@ function createSessionHarness(
   const appServer = createFakeCodexAppServer({
     "collaborationMode/list": () => ({ data: TEST_COLLABORATION_MODES }),
     "model/list": () => ({ data: options.models ?? TEST_SPEED_MODELS }),
+    "config/read": () => ({ config: options.config ?? {} }),
   });
   const session = new CodexAppServerAgentSession(
     { ...config, provider: CODEX_PROVIDER },
@@ -156,8 +157,8 @@ describe("Codex app-server provider features", () => {
           value: "default",
           options: [
             { id: "default", label: "Normal", isDefault: true },
-            { id: "priority", label: "Fast" },
-            { id: "ultrafast", label: "Ultrafast" },
+            { id: "priority", label: "Fast", description: "Faster processing" },
+            { id: "ultrafast", label: "Ultrafast", description: "Lowest latency" },
           ],
         }),
       );
@@ -191,7 +192,7 @@ describe("Codex app-server provider features", () => {
           id: "service_tier",
           options: [
             { id: "default", label: "Normal", isDefault: true },
-            { id: "future-tier", label: "Future speed" },
+            { id: "future-tier", label: "Future speed", description: "A newly advertised tier" },
           ],
         }),
       );
@@ -255,7 +256,7 @@ describe("Codex app-server provider features", () => {
     }
   });
 
-  test("switching to a model without the selected tier resets speed", async () => {
+  test("rejects a model switch that would silently discard an explicit tier", async () => {
     const { session, appServer } = await createConnectedSession(
       { model: "ultra-model", featureValues: { service_tier: "ultrafast" } },
       {
@@ -269,12 +270,70 @@ describe("Codex app-server provider features", () => {
       },
     );
     try {
-      await session.setModel("gpt-6.1-sol");
+      await expect(session.setModel("gpt-6.1-sol")).rejects.toThrow("ultrafast");
+      expect((await session.getRuntimeInfo()).model).toBe("ultra-model");
       expect(session.features).toContainEqual(
-        expect.objectContaining({ id: "service_tier", value: "default" }),
+        expect.objectContaining({ id: "service_tier", value: "ultrafast" }),
       );
+      await session.setFeature?.("service_tier", "default");
+      await session.setModel("gpt-6.1-sol");
       await session.startTurn("hello");
       await expect(appServer.waitForTurnStart()).resolves.toMatchObject({ serviceTier: "default" });
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("follows configured defaults without persisting them as explicit selections", async () => {
+    const config = {
+      model: "gpt-6-astra",
+      model_reasoning_effort: "xhigh",
+      service_tier: "priority",
+    };
+    const { session, appServer } = createSessionHarness(
+      { model: undefined, thinkingOptionId: undefined },
+      { config },
+    );
+    try {
+      await session.connect();
+      await session.startTurn("first configured turn");
+      await expect(appServer.waitForTurnStart()).resolves.toMatchObject({
+        model: "gpt-6-astra",
+        effort: "xhigh",
+        serviceTier: "priority",
+        collaborationMode: { settings: { model: "gpt-6-astra", reasoning_effort: "xhigh" } },
+      });
+      const metadata = session.describePersistence()?.metadata;
+      expect(metadata?.model).toBeNull();
+      expect(metadata?.thinkingOptionId).toBeNull();
+      expect(metadata?.featureValues).not.toHaveProperty("service_tier");
+      appServer.completeTurn();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      Object.assign(config, {
+        model: "gpt-6-sol",
+        model_reasoning_effort: "high",
+        service_tier: "default",
+      });
+      await session.startTurn("updated configured turn");
+      expect(
+        appServer.requests().findLast(({ method }) => method === "turn/start")?.params,
+      ).toMatchObject({
+        model: "gpt-6-sol",
+        effort: "high",
+        serviceTier: "default",
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("rejects a saved explicit tier removed from the model catalog", async () => {
+    const { session, appServer } = createSessionHarness({
+      featureValues: { service_tier: "retired-tier" },
+    });
+    try {
+      await expect(session.connect()).rejects.toThrow("retired-tier");
+      expect(appServer.requests().some(({ method }) => method === "thread/start")).toBe(false);
     } finally {
       await session.close();
     }
@@ -567,10 +626,12 @@ describe("Codex app-server provider features", () => {
     expect(JSON.stringify(entry)).not.toContain(prompt);
   });
 
-  test("setModel clears fast mode when switching to an unsupported model", async () => {
+  test("changing to an unsupported model requires clearing the selected speed first", async () => {
     const { session, appServer } = await createConnectedSession();
 
     await session.setFeature?.("service_tier", "priority");
+    await expect(session.setModel("gpt-3.5-turbo")).rejects.toThrow("priority");
+    await session.setFeature?.("service_tier", "default");
     await session.setModel("gpt-3.5-turbo");
 
     expect(session.features).toEqual([

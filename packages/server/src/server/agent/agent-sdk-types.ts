@@ -565,6 +565,8 @@ export interface ListImportableSessionsOptions {
 export interface ImportableSessionsPage {
   sessions: ImportableProviderSession[];
   nextCursor: string | null;
+  /** The provider applied its project/cwd scope, including equivalent worktrees. */
+  cwdScoped?: boolean;
 }
 
 export interface ListImportableSessionsPageOptions extends ListImportableSessionsOptions {

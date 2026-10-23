@@ -293,6 +293,7 @@ interface ManagedImportableSessionsPageOptions extends ListImportableSessionsPag
 export interface ManagedImportableSessionsPageResult extends ManagedImportableSessionsResult {
   nextCursor: string | null;
   incompleteReason?: string;
+  cwdScoped?: boolean;
 }
 
 export type AgentAttentionCallback = (params: {
@@ -1117,6 +1118,7 @@ export class AgentManager {
     return {
       sessions: page.sessions.map((session) => ({ ...session, provider: options.provider })),
       nextCursor: page.nextCursor,
+      cwdScoped: page.cwdScoped,
       providerErrors: [],
     };
   }

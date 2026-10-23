@@ -999,3 +999,41 @@ test("bounded import pages pass 200 visible rows and 500 raw rows, with sparse f
     "invalid or expired",
   );
 });
+
+test("import pages preserve provider-confirmed project scope and otherwise require matching cwd", async () => {
+  const sessions = [
+    makeImportableSession({
+      sessionId: "sibling-worktree",
+      cwd: "/tmp/project-worktree",
+      lastActivityAt: "2026-10-23T00:00:00.000Z",
+    }),
+  ];
+  const listImportableSessionsPage = vi.fn(async () => ({
+    sessions,
+    nextCursor: null,
+    providerErrors: [],
+    cwdScoped: true,
+  }));
+  const agentManager = {
+    listAgents: () => [],
+    listImportableSessions: vi.fn(),
+    listImportableSessionsPage,
+  };
+  const run = () =>
+    listImportableProviderSessions({
+      request: makeRequest({ providers: ["codex"], cwd: "/tmp/project", limit: 15, cursor: null }),
+      agentManager,
+      agentStorage: { list: async () => [] },
+      providerSnapshotManager: { getProviderLabel: () => "Codex" },
+    });
+  expect((await run()).entries.map((entry) => entry.providerHandleId)).toEqual([
+    "sibling-worktree",
+  ]);
+  listImportableSessionsPage.mockResolvedValueOnce({
+    sessions,
+    nextCursor: null,
+    providerErrors: [],
+    cwdScoped: false,
+  });
+  expect((await run()).entries).toEqual([]);
+});
