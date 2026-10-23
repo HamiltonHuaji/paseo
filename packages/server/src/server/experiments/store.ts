@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
   ProgressPlanSetSchema,
+  ProgressPlanSchema,
   ProgressSourceSchema,
   ViewerConfigSchema,
   type CreateAttemptInput,
@@ -57,7 +58,12 @@ export class ProjectExperimentStore {
     const sqlite = (await import(sqliteSpecifier)) as { DatabaseSync: DatabaseSyncConstructor };
     const db = new sqlite.DatabaseSync(path.join(paseoDir, "state.db"));
     const store = new ProjectExperimentStore(projectRoot, db);
-    store.initialize();
+    try {
+      store.initialize();
+    } catch (error) {
+      db.close();
+      throw error;
+    }
     return store;
   }
 
@@ -166,7 +172,8 @@ export class ProjectExperimentStore {
 
   async createAttempt(input: CreateAttemptInput): Promise<ExperimentAttempt> {
     const experiment = this.getExperiment(input.experiment).experiment;
-    this.validateProgressPlans(input.progressPlans ?? null);
+    const progressPlans = resolveProgressPlans(input) ?? null;
+    this.validateProgressPlans(progressPlans);
     const now = new Date().toISOString();
     const id = this.generateHandle("att", "attempts");
     const elapsed = Math.max(0, Date.parse(now) - Date.parse(experiment.createdAt));
@@ -192,7 +199,7 @@ export class ProjectExperimentStore {
         input.wandbId ?? null,
         input.jobId ?? null,
         input.outputDir ?? null,
-        serializeNullable(input.progressPlans ?? null),
+        serializeNullable(progressPlans),
         serializeNullable(input.progressSource ?? null),
         blobRelpath,
         input.resultSummary ? now : null,
@@ -205,7 +212,8 @@ export class ProjectExperimentStore {
 
   updateAttempt(input: UpdateAttemptInput): ExperimentAttempt {
     const existing = this.getAttempt(input.attempt);
-    if (hasOwn(input, "progressPlans")) this.validateProgressPlans(input.progressPlans ?? null);
+    const progressPlans = resolveProgressPlans(input);
+    if (progressPlans !== undefined) this.validateProgressPlans(progressPlans);
     const resultSummary = hasOwn(input, "resultSummary")
       ? input.resultSummary
       : existing.resultSummary;
@@ -223,8 +231,8 @@ export class ProjectExperimentStore {
         hasOwn(input, "wandbId") ? input.wandbId : existing.wandbId,
         hasOwn(input, "jobId") ? input.jobId : existing.jobId,
         hasOwn(input, "outputDir") ? input.outputDir : existing.outputDir,
-        hasOwn(input, "progressPlans")
-          ? serializeNullable(input.progressPlans ?? null)
+        progressPlans !== undefined
+          ? serializeNullable(progressPlans)
           : serializeNullable(existing.progressPlans ?? null),
         hasOwn(input, "progressSource")
           ? serializeNullable(input.progressSource ?? null)
@@ -466,6 +474,40 @@ export class ProjectExperimentStore {
         height_value INTEGER
       );
     `);
+    this.upgradeProgressPlans();
+  }
+
+  private upgradeProgressPlans(): void {
+    // COMPAT(experimentProgressStorage): added in v0.13.1, remove after 2027-02-28
+    // only once pre-multi-unit v1 databases are outside the supported upgrade range.
+    // Add and populate together: a failed conversion must remain retryable, and
+    // reopening must not resurrect a plan the user explicitly cleared.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const columns = this.db.prepare("PRAGMA table_info(attempts)").all() as Row[];
+      if (!columns.some((column) => column.name === "progress_plans_json")) {
+        this.db.exec("ALTER TABLE attempts ADD COLUMN progress_plans_json TEXT");
+        if (columns.some((column) => column.name === "progress_plan_json")) {
+          const rows = this.db
+            .prepare("SELECT id, progress_plan_json FROM attempts")
+            .all() as Row[];
+          const update = this.db.prepare(
+            "UPDATE attempts SET progress_plans_json = ? WHERE id = ?",
+          );
+          for (const row of rows) {
+            const plan = parseNullable(row.progress_plan_json, ProgressPlanSchema);
+            update.run(
+              serializeNullable(plan ? { sourceUnit: plan.unit, units: [plan] } : null),
+              row.id,
+            );
+          }
+        }
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   private findExperiment(experiment: string): ExperimentRecord | null {
@@ -498,6 +540,7 @@ export class ProjectExperimentStore {
 
   private mapAttempt(row: Row): ExperimentAttempt {
     const progress = this.getProgressCursor(String(row.id));
+    const plans = parseNullable(row.progress_plans_json, ProgressPlanSetSchema);
     return {
       id: String(row.id),
       experiment: String(row.experiment_id),
@@ -507,8 +550,8 @@ export class ProjectExperimentStore {
       wandbId: stringOrNull(row.wandb_id),
       jobId: stringOrNull(row.job_id),
       outputDir: stringOrNull(row.output_dir),
-      progressPlan: null,
-      progressPlans: parseNullable(row.progress_plans_json, ProgressPlanSetSchema),
+      progressPlan: plans?.units.find((plan) => plan.unit === plans.sourceUnit) ?? null,
+      progressPlans: plans,
       progressSource: parseNullable(row.progress_source_json, ProgressSourceSchema),
       viewer: parseNullable(row.viewer_config_json, ViewerConfigSchema),
       blobRelpath: String(row.blob_relpath),
@@ -692,6 +735,18 @@ function progressCursorColumns(
 
 function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function resolveProgressPlans(
+  input: Pick<CreateAttemptInput, "progressPlan" | "progressPlans">,
+): CreateAttemptInput["progressPlans"] {
+  if (hasOwn(input, "progressPlans")) return input.progressPlans ?? null;
+  // COMPAT(experimentProgressPlans): added in v0.13.1, remove after 2027-02-28.
+  if (hasOwn(input, "progressPlan")) {
+    const plan = input.progressPlan;
+    return plan ? { sourceUnit: plan.unit, units: [plan] } : null;
+  }
+  return undefined;
 }
 
 function numberOrNull(value: unknown): number | null {

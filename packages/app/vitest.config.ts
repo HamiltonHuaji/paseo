@@ -20,6 +20,34 @@ const resolvePackageEntry = (packageName: string) => {
 export default defineConfig({
   plugins: [
     {
+      name: "bundle-markdown-runtime",
+      enforce: "pre",
+      // The web engine ships a CommonJS WASM factory and lazily requires KaTeX.
+      // Bundle both real runtimes at those boundaries for Vite's ESM browser runner.
+      async transform(source, id) {
+        const filename = id.split("?")[0];
+        const wasm = filename.endsWith("/web/wasm/md4c.js");
+        if (!wasm && !filename.endsWith("/react-native-enriched-markdown/lib/module/web/katex.js"))
+          return;
+        const result = await build({
+          ...(wasm
+            ? {
+                stdin: {
+                  contents: source,
+                  sourcefile: "md4c.cjs",
+                  resolveDir: path.dirname(filename),
+                },
+              }
+            : { entryPoints: [filename] }),
+          bundle: true,
+          format: "esm",
+          platform: "browser",
+          write: false,
+        });
+        return { code: result.outputFiles[0].text, map: null };
+      },
+    },
+    {
       name: "compile-usage-components",
       enforce: "pre",
       transform(source, id) {
@@ -140,6 +168,7 @@ export default defineConfig({
       "expo-router",
       "expo-modules-core",
       "react-native-enriched-markdown",
+      "expo-clipboard",
     ],
   },
   // The globals a React Native bundler defines, which esbuild is no longer there to supply for

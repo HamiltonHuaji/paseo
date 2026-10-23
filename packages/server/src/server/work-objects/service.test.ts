@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import { createWorkTools } from "./tools.js";
 import { WorkObjectResultSchema, WorkListResultSchema } from "@getpaseo/protocol/work-objects";
 import { resolveViewerConfig, resolveViewerPath, resolveWorkSource } from "./viewers.js";
 import { parseViewerDeepLink } from "@getpaseo/protocol/viewer-deep-link";
+import { DatabaseSync } from "node:sqlite";
 
 const resources: Array<{ root: string; service: WorkService }> = [];
 afterEach(async () => {
@@ -77,6 +78,73 @@ it("returns a single MCP copy of complete content and keeps v1 separate", async 
   const legacy = await ProjectExperimentStore.open(root);
   try {
     expect(legacy.listExperiments({})).toEqual([]);
+  } finally {
+    legacy.close();
+  }
+});
+
+it("continues a pre-multi-unit v1 database without losing plans or resurrecting cleared plans", async () => {
+  const { root, service, projectId } = await setup();
+  const directory = path.join(root, ".paseo", "v1");
+  await mkdir(directory, { recursive: true });
+  const database = path.join(directory, "state.db");
+  const db = new DatabaseSync(database);
+  db.exec(`CREATE TABLE attempts (
+    id TEXT PRIMARY KEY, experiment_id TEXT NOT NULL, short_description TEXT NOT NULL,
+    purpose TEXT NOT NULL, result_summary TEXT, wandb_id TEXT, job_id TEXT, output_dir TEXT,
+    progress_plan_json TEXT, progress_source_json TEXT, viewer_config_json TEXT,
+    blob_relpath TEXT NOT NULL, started_at TEXT, ended_at TEXT,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  )`);
+  const plan = { unit: "step", total: 100, segments: [{ label: "Train", start: 0, end: 100 }] };
+  db.prepare(`INSERT INTO attempts (id, experiment_id, short_description, purpose,
+    progress_plan_json, blob_relpath, created_at, updated_at)
+    VALUES ('att_old', 'exp_old', 'Old attempt', 'Keep training', ?, 'blobs/old', '2025-01-01', '2025-01-01')`).run(
+    JSON.stringify(plan),
+  );
+  db.close();
+  let legacy = await ProjectExperimentStore.open(root);
+  try {
+    const expected = { sourceUnit: "step", units: [plan] };
+    expect(legacy.getAttempt("att_old")).toMatchObject({
+      progressPlan: plan,
+      progressPlans: expected,
+      blobRelpath: "blobs/old",
+      createdAt: "2025-01-01",
+    });
+    expect(legacy.updateAttempt({ attempt: "att_old", purpose: "Continue" }).progressPlans).toEqual(
+      expected,
+    );
+    const experiment = await legacy.createExperiment({
+      shortDescription: "New",
+      description: "After upgrade",
+    });
+    const created = await legacy.createAttempt({
+      experiment: experiment.id,
+      shortDescription: "New attempt",
+      purpose: "Run",
+      progressPlan: plan,
+    });
+    expect(created.progressPlans).toEqual(expected);
+    expect(
+      legacy.updateAttempt({ attempt: created.id, progressPlan: { unit: "epoch", total: 5 } })
+        .progressPlans,
+    ).toEqual({ sourceUnit: "epoch", units: [{ unit: "epoch", total: 5 }] });
+    legacy.updateAttempt({ attempt: "att_old", progressPlans: null });
+    legacy.close();
+    legacy = await ProjectExperimentStore.open(root);
+    expect(legacy.getAttempt("att_old")).toMatchObject({ progressPlans: null, progressPlan: null });
+    expect(legacy.getAttempt(created.id).progressPlans?.sourceUnit).toBe("epoch");
+    await service.createCard(projectId, { preset: "topic", title: "Works", body: "Coexists" });
+    expect(legacy.listExperiments({})).toHaveLength(1);
+    const inspect = new DatabaseSync(database, { readOnly: true });
+    try {
+      expect(
+        inspect.prepare("SELECT progress_plan_json FROM attempts WHERE id = 'att_old'").get(),
+      ).toEqual({ progress_plan_json: JSON.stringify(plan) });
+    } finally {
+      inspect.close();
+    }
   } finally {
     legacy.close();
   }

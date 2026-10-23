@@ -80,9 +80,12 @@ storage 或用户指定位置并登记；用户入口只列可查看的结果。
 
 v1 Experiment/Attempt 保留各自身份、关系、结果、时间与输出归属。
 同一项目的不同工作区可访问既有记录。Works v2 的发布不迁移、覆盖或双写 v1。
+旧单单位进度计划升级后仍可见，既有记录可修改，新 Attempt 可创建；
+显式清除的计划在重新打开项目后保持清除。
 
 验收：升级前的 v1 项目在升级后可通过原有 CLI、MCP 和客户端读取与继续使用；
-旧成果入口仍有效。未实现的 Goal 管理、doctor/repair 和 post-turn reporting
+旧成果入口仍有效；使用升级前创建的数据库验证读、写和重新打开。
+未实现的 Goal 管理、doctor/repair 和 post-turn reporting
 不记作已交付。
 
 ## EXP-02 — v1 进度与并行执行
