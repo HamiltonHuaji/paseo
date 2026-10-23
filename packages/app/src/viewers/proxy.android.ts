@@ -150,18 +150,23 @@ native.addListener("onReset", ({ id }) => {
   reset(id);
 });
 native.addListener("onStopped", ({ disabled, serviceId }) => {
-  for (const id of streams.keys()) reset(id);
-  const active = [...upstreams.values()];
-  upstreams.clear();
-  void Promise.allSettled(active.map((upstream) => upstream.close())).then(() =>
-    tasks.stop(serviceId),
-  );
-  if (disabled)
-    void mutate(async () => {
+  // Serialize with listener creation: a queued stop from an old service must not
+  // close the replacement's routes or persist its listeners as disabled.
+  void mutate(async () => {
+    const current = await native.getServiceId();
+    if (current !== null && current !== serviceId) return;
+    for (const id of streams.keys()) reset(id);
+    const active = [...upstreams.values()];
+    upstreams.clear();
+    await Promise.allSettled(active.map((upstream) => upstream.close()));
+    if (disabled) {
       const state = await stateReady;
       for (const assignment of Object.values(state)) assignment.enabled = false;
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }).catch(reportError);
+    }
+  })
+    .finally(() => tasks.stop(serviceId))
+    .catch(reportError);
 });
 
 export function runViewerProxyTask(serviceId: string): Promise<void> {
