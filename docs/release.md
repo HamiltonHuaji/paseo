@@ -125,3 +125,31 @@ is public and contains:
 Confirm the release title shows the expected fork version and official base. Report every
 workflow URL and asset URL to the user. Confirm the release tag resolves to `RELEASE_COMMIT`. Do
 not restart a running daemon while publishing.
+
+## Withdraw a release
+
+Fork distribution uses GitHub Release assets only. Keep the preceding release and its assets.
+Before publishing, record its tag and the old overlay commit alongside the candidate SHA.
+Withdrawing a release removes it from future update discovery once GitHub and client caches refresh;
+it does not undo installed software or reclaim downloaded installers. The source branch, Actions
+records and notifications remain. Restoring the source branch is a separate operation.
+
+1. Cancel every running release workflow for the withdrawn tag and wait for those runs to finish.
+   The workflows can create a missing Release; deletion while they run can be undone by a late job.
+2. Delete the Release and, if you also want to remove the source download tag, delete that tag.
+   GitHub's web Release deletion alone leaves the tag. The CLI can remove both:
+
+   ```bash
+   gh release delete v0.13.1 --repo HamiltonHuaji/paseo --cleanup-tag --yes
+   ```
+
+3. Check `gh api repos/HamiltonHuaji/paseo/releases/latest --jq .tag_name`. If the intended previous
+   release is not latest, restore that selection with
+   `gh release edit v0.9.20 --repo HamiltonHuaji/paseo --latest`. These tags are examples for the
+   0.13 baseline transition; use the recorded pair for later releases.
+4. Confirm that the selected release still has both desktop manifests/installers and
+   `paseo-fork.tgz`, and that fresh update checks/download redirects no longer select the withdrawn tag.
+
+Keep the withdrawn version reserved. A corrected publication gets a new fork revision even after
+its Release and tag have been deleted. Do not republish different bytes under a withdrawn URL.
+No npm unpublish, store rollback or Docker tag change belongs to this workflow.

@@ -24,8 +24,9 @@ otherwise increment it for each published fork revision.
 
 ## Publication barrier
 
-The desktop workflow creates a draft release before platform jobs upload packages. Each platform
-publishes its completed artifact immediately.
+The desktop workflow creates a public release before platform jobs upload packages. Each platform
+publishes its completed artifact immediately. Release withdrawal and its cache limits follow
+[the release workflow](release.md#withdraw-a-release).
 
 Use `fork-desktop-release.yml` with the exact overlay release commit as `checkout_ref`; the workflow
 creates the requested installer tag with that commit as its target. Keep `rollout_hours=0` for
