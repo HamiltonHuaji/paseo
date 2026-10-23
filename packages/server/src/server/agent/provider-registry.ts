@@ -484,6 +484,22 @@ export function wrapSessionProvider(provider: AgentProvider, inner: AgentSession
   return wrapped;
 }
 
+function wrapSessionListing(
+  inner: AgentClient,
+  providerOptions: ProviderOptions | undefined,
+): Pick<AgentClient, "listImportableSessions" | "listImportableSessionsPage"> {
+  const list = inner.listImportableSessions?.bind(inner);
+  const page = inner.listImportableSessionsPage?.bind(inner);
+  return {
+    listImportableSessions: list
+      ? async (options) => list({ ...options, providerOptions })
+      : undefined,
+    listImportableSessionsPage: page
+      ? async (options) => page({ ...options, providerOptions })
+      : undefined,
+  };
+}
+
 function wrapClientProvider(
   provider: AgentProvider,
   inner: AgentClient,
@@ -492,7 +508,6 @@ function wrapClientProvider(
   profileModelsAreAdditive: boolean,
   providerOptions: ProviderOptions | undefined,
 ): AgentClient {
-  const listImportableSessions = inner.listImportableSessions?.bind(inner);
   const importSession = inner.importSession?.bind(inner);
   const listFeatures = inner.listFeatures?.bind(inner);
   const archiveNativeSession = inner.archiveNativeSession?.bind(inner);
@@ -590,9 +605,7 @@ function wrapClientProvider(
           })
       : undefined,
     readSessionLineage: inner.readSessionLineage?.bind(inner),
-    listImportableSessions: listImportableSessions
-      ? async (options) => await listImportableSessions({ ...options, providerOptions })
-      : undefined,
+    ...wrapSessionListing(inner, providerOptions),
     importSession: importSession
       ? async (input, context) => {
           const imported = await importSession(input, {

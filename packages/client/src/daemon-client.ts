@@ -2976,6 +2976,7 @@ export class DaemonClient {
     const message = SessionInboundMessageSchema.parse({
       type: "fetch_recent_provider_sessions_request",
       requestId: resolvedRequestId,
+      ...(options?.cursor !== undefined ? { cursor: options.cursor } : {}),
       ...(options?.cwd ? { cwd: options.cwd } : {}),
       ...(options?.providers ? { providers: options.providers } : {}),
       ...(options?.since ? { since: options.since } : {}),

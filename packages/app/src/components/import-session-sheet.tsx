@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, type PressableStateCallbackType, Text, View } from "react-native";
-import { keepPreviousData, useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
   DaemonClient,
@@ -33,7 +33,6 @@ import {
   getSessionTitle,
   hasMoreSessions,
   resolveDirectoryLabel,
-  nextPageLimit,
   PER_PROVIDER_LIMIT,
   type ProviderErrorRow,
   resolveImportTarget,
@@ -74,6 +73,7 @@ type RecentSessionsResponse = Awaited<
 type SessionsQueryKey = ReadonlyArray<string | number | null>;
 
 function buildSessionsQueryKey(input: {
+  serverId: string | null;
   cwd: string | null;
   query: string;
   limit: number;
@@ -81,6 +81,7 @@ function buildSessionsQueryKey(input: {
 }): SessionsQueryKey {
   return [
     "recent-provider-sessions",
+    input.serverId,
     input.cwd,
     input.query,
     input.limit,
@@ -95,12 +96,12 @@ interface SessionsQueryConfig {
   // Query's default retry would keep the header spinner turning and pile up
   // in-flight daemon requests behind a dead provider (#2512).
   retry: false;
-  placeholderData: typeof keepPreviousData;
   queryFn: () => Promise<RecentSessionsResponse>;
 }
 
 function buildSessionsQueriesConfig(args: {
   providersToFetch: AgentProvider[] | null;
+  serverId: string | null;
   visible: boolean;
   client: RecentProviderSessionsClient | null;
   cwd: string | null;
@@ -108,24 +109,35 @@ function buildSessionsQueriesConfig(args: {
   limit: number;
   hostDisconnectedMessage?: string;
 }): SessionsQueryConfig[] {
-  const { providersToFetch, visible, client, cwd, query, limit, hostDisconnectedMessage } = args;
+  const {
+    providersToFetch,
+    serverId,
+    visible,
+    client,
+    cwd,
+    query,
+    limit,
+    hostDisconnectedMessage,
+  } = args;
   if (providersToFetch === null) return [];
   const enabled = visible && Boolean(client);
   return providersToFetch.map((provider) => ({
-    queryKey: buildSessionsQueryKey({ cwd, query, limit, provider }),
+    queryKey: buildSessionsQueryKey({ serverId, cwd, query, limit, provider }),
     enabled,
     retry: false as const,
-    placeholderData: keepPreviousData,
     queryFn: async () => {
       if (!client) {
         throw new Error(hostDisconnectedMessage ?? i18n.t("workspace.terminal.hostDisconnected"));
       }
-      return await client.fetchRecentProviderSessions({
+      const result = await client.fetchRecentProviderSessions({
+        cursor: null,
         ...(cwd ? { cwd } : {}),
         providers: [provider],
         limit,
         ...(query ? { query } : {}),
       });
+      if (!result.pageInfo) throw new Error("Host did not return session pagination information");
+      return result;
     },
   }));
 }
@@ -226,7 +238,10 @@ function ProviderErrorBannerRow({
   return (
     <View style={styles.errorRow}>
       <Text style={styles.errorText}>
-        {t("importSession.status.failedProvider", { provider: row.label })}
+        {row.incomplete
+          ? row.label
+          : t("importSession.status.failedProvider", { provider: row.label })}
+        {row.message ? ` ${row.message}` : ""}
       </Text>
       <Button
         variant="ghost"
@@ -447,7 +462,7 @@ export function ImportSessionSheet({
   // an imported agent lands.
   const [isShowingAllDirectories, setIsShowingAllDirectories] = useState(false);
   const [searchInput, setSearchInput] = useState("");
-  const [pageLimit, setPageLimit] = useState(PER_PROVIDER_LIMIT);
+  const pageLimit = PER_PROVIDER_LIMIT;
   const [selectedProvider, setSelectedProvider] = useState<string>(ALL_FILTER_VALUE);
 
   const scopeCwd = isShowingAllDirectories ? null : (cwd ?? null);
@@ -461,19 +476,15 @@ export function ImportSessionSheet({
     setSearchInput("");
   }, [visible]);
 
-  // A narrower or wider list starts at page one; keeping a grown limit would
-  // fetch 200 rows for a query that matches three.
-  useEffect(() => {
-    setPageLimit(PER_PROVIDER_LIMIT);
-  }, [query, scopeCwd]);
-
   const { entries: snapshotEntries, supportsSnapshot } = useProvidersSnapshot(serverId, {
     cwd: scopeCwd,
     enabled: visible,
   });
   const supportsWorkspaceTarget = useHostFeature(serverId, "importSessionWorkspaceTarget");
+  const supportsPagination = useHostFeature(serverId, "importSessionPagination");
   const requiresHostUpgrade = requiresImportSessionsHostUpgrade({
     supportsSnapshot,
+    supportsPagination,
     workspaceId,
     supportsWorkspaceTarget,
   });
@@ -488,12 +499,16 @@ export function ImportSessionSheet({
     [snapshotEntries],
   );
 
-  const sessionsQueryRoot = useMemo(() => ["recent-provider-sessions", scopeCwd], [scopeCwd]);
+  const sessionsQueryRoot = useMemo(
+    () => ["recent-provider-sessions", serverId, scopeCwd],
+    [serverId, scopeCwd],
+  );
 
   const queriesConfig = useMemo(
     () =>
       buildSessionsQueriesConfig({
         providersToFetch,
+        serverId,
         visible,
         client,
         cwd: scopeCwd,
@@ -501,7 +516,7 @@ export function ImportSessionSheet({
         limit: pageLimit,
         hostDisconnectedMessage: t("workspace.terminal.hostDisconnected"),
       }),
-    [providersToFetch, visible, client, scopeCwd, query, pageLimit, t],
+    [providersToFetch, serverId, visible, client, scopeCwd, query, pageLimit, t],
   );
 
   const queries = useQueries({ queries: queriesConfig });
@@ -686,20 +701,61 @@ export function ImportSessionSheet({
   const isRefreshing = queries.some((providerQuery) => providerQuery.isFetching);
 
   const handleRefresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: sessionsQueryRoot });
-  }, [queryClient, sessionsQueryRoot]);
+    // Observer refetch restores the initial-page query function after an explicit
+    // continuation fetch temporarily supplied its own function to the cache.
+    for (const providerQuery of queries) void providerQuery.refetch();
+  }, [queries]);
 
-  const handleRetryProvider = useCallback(
+  const loadProviderPage = useCallback(
     (provider: string) => {
-      void queryClient.refetchQueries({
-        queryKey: buildSessionsQueryKey({ cwd: scopeCwd, query, limit: pageLimit, provider }),
-      });
+      const index = queriesConfig.findIndex((entry) => entry.queryKey.at(-1) === provider);
+      const config = queriesConfig[index];
+      if (!config || !client) return;
+      const previous = queryClient.getQueryData<RecentSessionsResponse>(config.queryKey);
+      const cursor = previous?.pageInfo?.endCursor;
+      if (!previous || !cursor) {
+        void queries[index]?.refetch();
+        return;
+      }
+      void queryClient
+        .fetchQuery({
+          queryKey: config.queryKey,
+          retry: false,
+          staleTime: 0,
+          queryFn: async () => {
+            const next = await client.fetchRecentProviderSessions({
+              providers: [provider],
+              cursor,
+              limit: PER_PROVIDER_LIMIT,
+              ...(scopeCwd ? { cwd: scopeCwd } : {}),
+              ...(query ? { query } : {}),
+            });
+            if (!next.pageInfo)
+              throw new Error("Host did not return session pagination information");
+            return {
+              ...next,
+              entries: [...previous.entries, ...next.entries],
+              filteredAlreadyImportedCount:
+                (previous.filteredAlreadyImportedCount ?? 0) +
+                (next.filteredAlreadyImportedCount ?? 0),
+            };
+          },
+        })
+        .catch(() => undefined); // The query retains rows and exposes the failure and retry.
     },
-    [pageLimit, query, queryClient, scopeCwd],
+    [client, queriesConfig, queries, queryClient, scopeCwd, query],
   );
 
+  const handleRetryProvider = loadProviderPage;
   const handleShowAll = useCallback(() => setIsShowingAllDirectories(true), []);
-  const handleLoadMore = useCallback(() => setPageLimit(nextPageLimit), []);
+  const handleLoadMore = useCallback(() => {
+    for (const provider of providersToFetch ?? []) {
+      if (selectedProvider !== ALL_FILTER_VALUE && selectedProvider !== provider) continue;
+      const config = queriesConfig.find((entry) => entry.queryKey.at(-1) === provider);
+      const data = config && queryClient.getQueryData<RecentSessionsResponse>(config.queryKey);
+      if (data?.pageInfo?.hasMore) loadProviderPage(provider);
+    }
+  }, [loadProviderPage, providersToFetch, selectedProvider, queriesConfig, queryClient]);
 
   const hosts = useHosts();
   const hostLabel = useMemo(
@@ -760,7 +816,12 @@ export function ImportSessionSheet({
     providerLabelById,
   });
   const showFilter = filterProviders.length > 1;
-  const showLoadMore = hasMoreSessions(queries, pageLimit);
+  const showLoadMore = hasMoreSessions(
+    queries.filter(
+      (_entry, index) =>
+        selectedProvider === ALL_FILTER_VALUE || providersToFetch?.[index] === selectedProvider,
+    ),
+  );
 
   return (
     <AdaptiveModalSheet
@@ -841,7 +902,9 @@ export function ImportSessionSheet({
           </Button>
         </View>
       ) : null}
-      {showEmptyState ? <SheetEmptyState title={emptyStateTitle} /> : null}
+      {showEmptyState && !showLoadMore && providerErrorRows.length === 0 ? (
+        <SheetEmptyState title={emptyStateTitle} />
+      ) : null}
     </AdaptiveModalSheet>
   );
 }

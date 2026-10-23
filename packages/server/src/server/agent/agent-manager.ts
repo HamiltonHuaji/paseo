@@ -61,6 +61,7 @@ import {
   type ImportedTimelineEntry,
   type ImportableProviderSession,
   type ListImportableSessionsOptions,
+  type ListImportableSessionsPageOptions,
 } from "./agent-sdk-types.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import { toStoredAgentRecord } from "./agent-projections.js";
@@ -283,6 +284,15 @@ export interface ImportableSessionProviderError {
 export interface ManagedImportableSessionsResult {
   sessions: ManagedImportableProviderSession[];
   providerErrors: ImportableSessionProviderError[];
+}
+
+interface ManagedImportableSessionsPageOptions extends ListImportableSessionsPageOptions {
+  provider: AgentProvider;
+}
+
+export interface ManagedImportableSessionsPageResult extends ManagedImportableSessionsResult {
+  nextCursor: string | null;
+  incompleteReason?: string;
 }
 
 export type AgentAttentionCallback = (params: {
@@ -1070,6 +1080,45 @@ export class AgentManager {
       retired.push({ record: entry.record, lastMessage: entry.lastMessage });
     }
     return retired;
+  }
+
+  async listImportableSessionsPage(
+    options: ManagedImportableSessionsPageOptions,
+  ): Promise<ManagedImportableSessionsPageResult> {
+    const client = this.clients.get(options.provider);
+    if (
+      !client?.capabilities.supportsSessionListing ||
+      !this.isProviderImportable(options.provider, undefined)
+    ) {
+      throw new Error(`Provider '${options.provider}' cannot list sessions`);
+    }
+    if (!client.listImportableSessionsPage) {
+      if (options.cursor) throw new Error("This provider does not support session pagination");
+      const listing = await this.listImportableSessions({
+        ...options,
+        // Keep the legacy provider's existing searchable window. Its array
+        // cannot establish exhaustion, even when filtering leaves zero rows.
+        limit: 500,
+        scanLimit: 500,
+        providerFilter: new Set([options.provider]),
+      });
+      return {
+        ...listing,
+        nextCursor: null,
+        incompleteReason:
+          "This provider only supplies a limited session window. Complete browsing is not supported.",
+      };
+    }
+    const page = await withTimeout(
+      client.listImportableSessionsPage(options),
+      IMPORTABLE_SESSION_LIST_TIMEOUT_MS,
+      `Timed out listing importable sessions for provider '${options.provider}' after ${IMPORTABLE_SESSION_LIST_TIMEOUT_MS}ms`,
+    );
+    return {
+      sessions: page.sessions.map((session) => ({ ...session, provider: options.provider })),
+      nextCursor: page.nextCursor,
+      providerErrors: [],
+    };
   }
 
   async listImportableSessions(

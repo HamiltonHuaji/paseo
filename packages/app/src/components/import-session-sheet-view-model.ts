@@ -5,34 +5,29 @@ import { i18n } from "@/i18n/i18next";
 export const PER_PROVIDER_LIMIT = 15;
 export const ALL_FILTER_VALUE = "__all__";
 
-/**
- * Paging grows the per-provider limit instead of carrying an offset. The daemon
- * ranks the whole candidate set on every request, so an offset into a previous
- * ranking would drift as sessions move; refetching a larger page cannot. 200 is
- * the protocol ceiling on `limit`.
- */
-const PAGE_LIMITS: readonly number[] = [PER_PROVIDER_LIMIT, 45, 90, 200];
-
-export function nextPageLimit(limit: number): number {
-  return PAGE_LIMITS.find((candidate) => candidate > limit) ?? limit;
-}
-
 export function requiresImportSessionsHostUpgrade(input: {
   supportsSnapshot: boolean;
+  supportsPagination: boolean;
   workspaceId?: string | null;
   supportsWorkspaceTarget: boolean;
 }): boolean {
-  return !input.supportsSnapshot || (Boolean(input.workspaceId) && !input.supportsWorkspaceTarget);
+  return (
+    !input.supportsSnapshot ||
+    !input.supportsPagination ||
+    (Boolean(input.workspaceId) && !input.supportsWorkspaceTarget)
+  );
 }
 
 export interface SessionsQueryResult {
   data:
     | {
         entries: FetchRecentProviderSessionEntry[];
+        pageInfo?: { hasMore: boolean; endCursor: string | null; incompleteReason?: string };
         filteredAlreadyImportedCount?: number;
         providerErrors?: Array<{ provider: string; message: string }>;
       }
     | undefined;
+  error?: Error | null;
   isError: boolean;
   isLoading: boolean;
   isPending: boolean;
@@ -95,33 +90,28 @@ export function sumFilteredAlreadyImportedCount(
   return total;
 }
 
-/**
- * A provider that returned a full page may have more behind it. The daemon
- * slices to `limit` after dropping already-imported sessions, so a short page is
- * the end of that provider's list. Placeholder rows belong to the previous page,
- * so the button holds its place instead of blinking out while the next loads.
- */
-export function hasMoreSessions(
-  queries: ReadonlyArray<SessionsQueryResult>,
-  limit: number,
-): boolean {
-  if (nextPageLimit(limit) === limit) return false;
-  return queries.some((entryQuery) => {
-    const count = entryQuery.data?.entries.length ?? 0;
-    return entryQuery.isPlaceholderData ? count > 0 : count >= limit;
-  });
+/** Only a source continuation proves there is another page to fetch. */
+export function hasMoreSessions(queries: ReadonlyArray<SessionsQueryResult>): boolean {
+  return queries.some((query) => query.data?.pageInfo?.hasMore === true);
 }
 
 export interface ProviderErrorRow {
   provider: string;
   label: string;
+  message?: string;
+  incomplete?: boolean;
 }
 
-/**
- * One row per provider that could not be listed, whether the request itself
- * failed or the daemon reported the provider as failed in an otherwise good
- * response. Both mean the same thing to the user, and both retry the same way.
- */
+function providerListingIssue(
+  query: SessionsQueryResult,
+): Pick<ProviderErrorRow, "message" | "incomplete"> | null {
+  const failure = query.error?.message ?? query.data?.providerErrors?.[0]?.message;
+  if (query.isError || failure) return failure ? { message: failure } : {};
+  const incomplete = query.data?.pageInfo?.incompleteReason;
+  return incomplete ? { message: incomplete, incomplete: true } : null;
+}
+
+/** One row for each failed or incomplete provider listing. */
 export function collectProviderErrorRows(
   providersToFetch: AgentProvider[] | null,
   queries: ReadonlyArray<SessionsQueryResult>,
@@ -133,9 +123,9 @@ export function collectProviderErrorRows(
     const query = queries[index];
     const provider = providersToFetch[index];
     if (!query || provider === undefined) continue;
-    const failed = query.isError || (query.data?.providerErrors?.length ?? 0) > 0;
-    if (!failed) continue;
-    rows.push({ provider, label: providerLabelById.get(provider) ?? provider });
+    const issue = providerListingIssue(query);
+    if (!issue) continue;
+    rows.push({ provider, label: providerLabelById.get(provider) ?? provider, ...issue });
   }
   return rows;
 }

@@ -5382,6 +5382,7 @@ test("fetches scoped recent provider sessions", async () => {
     since: "2026-04-30T00:00:00.000Z",
     limit: 25,
     query: "invoice",
+    cursor: "source-cursor",
   });
 
   expect(mock.sent).toHaveLength(1);
@@ -5404,6 +5405,7 @@ test("fetches scoped recent provider sessions", async () => {
     since: "2026-04-30T00:00:00.000Z",
     limit: 25,
     query: "invoice",
+    cursor: "source-cursor",
   });
 
   mock.triggerMessage(
@@ -5413,6 +5415,7 @@ test("fetches scoped recent provider sessions", async () => {
         type: "fetch_recent_provider_sessions_response",
         payload: {
           requestId: request.message.requestId,
+          pageInfo: { hasMore: true, endCursor: "next-cursor" },
           entries: [
             {
               providerId: "codex",
@@ -5432,6 +5435,7 @@ test("fetches scoped recent provider sessions", async () => {
 
   await expect(promise).resolves.toEqual({
     requestId: request.message.requestId,
+    pageInfo: { hasMore: true, endCursor: "next-cursor" },
     entries: [
       {
         providerId: "codex",

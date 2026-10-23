@@ -911,3 +911,91 @@ test("importProviderSession requires cwd from the selected provider row", async 
     "Import requires cwd from the selected provider session",
   );
 });
+
+test("bounded import pages pass 200 visible rows and 500 raw rows, with sparse filtering and retry", async () => {
+  const sessions = Array.from({ length: 835 }, (_, index) =>
+    makeImportableSession({
+      sessionId: `native-${index}`,
+      lastActivityAt: new Date(Date.UTC(2026, 9, 20) - index * 1000).toISOString(),
+      firstPrompt:
+        index < 300
+          ? "Generate metadata for a coding agent based on the user prompt."
+          : `Work ${index}`,
+      lastPrompt: index === 801 ? "a sparse needle beyond 500" : undefined,
+    }),
+  );
+  const imported = Array.from({ length: 300 }, (_, index) =>
+    makeManagedAgent({
+      id: `imported-${index}`,
+      sessionId: `native-${index + 300}`,
+      cwd: "/tmp/project",
+    }),
+  );
+  let failNext = false;
+  const listImportableSessionsPage = vi.fn(
+    async (options: { cursor?: string | null; limit?: number }) => {
+      if (failNext) {
+        failNext = false;
+        throw new Error("Provider temporarily unavailable");
+      }
+      const offset = Number(options.cursor ?? 0);
+      const end = Math.min(offset + (options.limit ?? 100), sessions.length);
+      return {
+        sessions: sessions.slice(offset, end),
+        nextCursor: end < sessions.length ? String(end) : null,
+        providerErrors: [],
+      };
+    },
+  );
+  const agentManager = {
+    listAgents: () => imported,
+    listImportableSessions: vi.fn(),
+    listImportableSessionsPage,
+  };
+  const run = (cursor: string | null, query?: string) =>
+    listImportableProviderSessions({
+      request: makeRequest({ providers: ["codex"], cwd: "/tmp/project", limit: 15, cursor, query }),
+      agentManager,
+      agentStorage: { list: async () => [] },
+      providerSnapshotManager: { getProviderLabel: () => "Codex" },
+    });
+  let cursor: string | null = null;
+  const ids: string[] = [];
+  let importedCount = 0;
+  let emptyPages = 0;
+  do {
+    const page = await run(cursor);
+    if (page.entries.length === 0) {
+      emptyPages += 1;
+      expect(page.pageInfo?.hasMore).toBe(true);
+    }
+    ids.push(...page.entries.map((entry) => entry.providerHandleId));
+    importedCount += page.filteredAlreadyImportedCount;
+    expect(page.entries.length).toBeLessThanOrEqual(15);
+    cursor = page.pageInfo!.endCursor;
+  } while (cursor);
+  expect(emptyPages).toBe(6);
+  expect(importedCount).toBe(300);
+  expect(ids).toEqual(sessions.slice(600).map((entry) => entry.providerHandleId));
+  expect(listImportableSessionsPage.mock.calls.every(([options]) => options.limit === 100)).toBe(
+    true,
+  );
+
+  await expect(run("", "needle")).rejects.toThrow("invalid or expired");
+  const first = await run(null, "needle");
+  expect(first.entries).toEqual([]);
+  expect(first.pageInfo?.hasMore).toBe(true);
+  cursor = first.pageInfo!.endCursor;
+  failNext = true;
+  await expect(run(cursor, "needle")).rejects.toThrow("Provider temporarily unavailable");
+  const matches: string[] = [];
+  do {
+    const page = await run(cursor, "needle");
+    matches.push(...page.entries.map((entry) => entry.providerHandleId));
+    cursor = page.pageInfo!.endCursor;
+  } while (cursor);
+  expect(matches).toEqual(["native-801"]);
+  await expect(run(first.pageInfo!.endCursor, "different query")).rejects.toThrow(
+    "invalid or expired",
+  );
+});

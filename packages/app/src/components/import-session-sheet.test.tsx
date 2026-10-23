@@ -192,10 +192,11 @@ vi.mock("@/hooks/use-providers-snapshot", () => ({
 }));
 
 const mockHostFeatures = vi.hoisted(() => ({
-  current: { importSessionSearch: true, importSessionWorkspaceTarget: true } as Record<
-    string,
-    boolean
-  >,
+  current: {
+    importSessionSearch: true,
+    importSessionWorkspaceTarget: true,
+    importSessionPagination: true,
+  } as Record<string, boolean>,
 }));
 
 vi.mock("@/runtime/host-features", () => ({
@@ -238,6 +239,7 @@ function applyHostMocks(options?: RenderOptions) {
   mockHostFeatures.current = {
     importSessionSearch: options?.supportsSearch ?? true,
     importSessionWorkspaceTarget: true,
+    importSessionPagination: true,
   };
   mockHostProjects.current = options?.projects ?? [];
 }
@@ -397,6 +399,7 @@ describe("ImportSessionSheet", () => {
   it("shows an empty state when there are no recent provider sessions to import", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [],
     }));
     const importAgent = vi.fn();
@@ -417,6 +420,7 @@ describe("ImportSessionSheet", () => {
   it("shows the all-already-imported empty state when filteredAlreadyImportedCount is positive", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [],
       filteredAlreadyImportedCount: 3,
     }));
@@ -452,7 +456,7 @@ describe("ImportSessionSheet", () => {
       },
     );
 
-    await screen.findByText("Could not load Claude Code sessions");
+    await screen.findByText(/Could not load Claude Code sessions/);
     screen.getByTestId("import-session-retry-claude");
   });
 
@@ -460,6 +464,7 @@ describe("ImportSessionSheet", () => {
     vi.setSystemTime(new Date("2026-04-30T12:00:00.000Z"));
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",
@@ -484,6 +489,7 @@ describe("ImportSessionSheet", () => {
 
     await waitFor(() => {
       expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+        cursor: null,
         cwd: "/repo/paseo",
         providers: ["claude"],
         limit: 15,
@@ -498,6 +504,7 @@ describe("ImportSessionSheet", () => {
   it("keeps cached rows visible and revalidates when reopened", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",
@@ -546,6 +553,7 @@ describe("ImportSessionSheet", () => {
     await screen.findByText("Cached importable session");
     await waitFor(() => {
       expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+        cursor: null,
         cwd: "/repo/paseo",
         providers: ["claude"],
         limit: 15,
@@ -564,6 +572,7 @@ describe("ImportSessionSheet", () => {
       }
       return {
         requestId: "recent-provider-sessions",
+        pageInfo: { hasMore: false, endCursor: null },
         entries: [
           createProviderSessionEntry({
             providerId: "claude",
@@ -621,6 +630,7 @@ describe("ImportSessionSheet", () => {
   it("shows an import error state without closing when selected session import fails", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [createProviderSessionEntry({ providerId: "claude", providerLabel: "Claude Code" })],
     }));
     const importAgent = vi.fn(async () => {
@@ -643,7 +653,7 @@ describe("ImportSessionSheet", () => {
 
     fireEvent.click(await screen.findByTestId("import-session-session-claude-provider-thread-1"));
 
-    await screen.findByText("Could not import selected session.");
+    await screen.findByText(/Could not import selected session\.[\s\S]*import unavailable/);
     expect(importAgent).toHaveBeenCalledWith({
       providerId: "claude",
       providerHandleId: "provider-thread-1",
@@ -657,6 +667,7 @@ describe("ImportSessionSheet", () => {
     const fetchRecentProviderSessions = vi.fn(
       async (options: { providers?: string[] } | undefined) => ({
         requestId: `recent-${options?.providers?.[0] ?? "all"}`,
+        pageInfo: { hasMore: false, endCursor: null },
         entries: [
           createProviderSessionEntry({
             providerId: options?.providers?.[0] ?? "custom-provider",
@@ -690,12 +701,14 @@ describe("ImportSessionSheet", () => {
 
     await waitFor(() => {
       expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+        cursor: null,
         cwd: "/repo/paseo",
         providers: ["claude"],
         limit: 15,
       });
     });
     expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+      cursor: null,
       cwd: "/repo/paseo",
       providers: ["codex"],
       limit: 15,
@@ -704,6 +717,7 @@ describe("ImportSessionSheet", () => {
       expect.objectContaining({ providers: ["opencode"] }),
     );
     expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+      cursor: null,
       cwd: "/repo/paseo",
       providers: ["z-ai"],
       limit: 15,
@@ -723,6 +737,7 @@ describe("ImportSessionSheet", () => {
         }
         return {
           requestId: `recent-${provider ?? "all"}`,
+          pageInfo: { hasMore: false, endCursor: null },
           entries: [
             createProviderSessionEntry({
               providerId: provider ?? "custom-provider",
@@ -750,7 +765,7 @@ describe("ImportSessionSheet", () => {
     );
 
     await screen.findByText("Session codex");
-    await screen.findByText("Could not load Claude Code sessions");
+    await screen.findByText(/Could not load Claude Code sessions/);
   });
 
   it("filters the merged list when a provider badge is selected and restores it on All", async () => {
@@ -759,6 +774,7 @@ describe("ImportSessionSheet", () => {
         const provider = options?.providers?.[0] ?? "claude";
         return {
           requestId: `recent-${provider}`,
+          pageInfo: { hasMore: false, endCursor: null },
           entries: [
             createProviderSessionEntry({
               providerId: provider,
@@ -806,6 +822,7 @@ describe("ImportSessionSheet", () => {
   it("does not render filter badges when only one importable provider is enabled", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-codex",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [createProviderSessionEntry({ providerId: "codex", providerLabel: "Codex" })],
     }));
     const importAgent = vi.fn();
@@ -862,6 +879,7 @@ describe("ImportSessionSheet", () => {
   it("omits cwd from fetch and names each row's folder when cwd is unset", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",
@@ -886,6 +904,7 @@ describe("ImportSessionSheet", () => {
 
     await waitFor(() => {
       expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+        cursor: null,
         providers: ["claude"],
         limit: 15,
       });
@@ -902,6 +921,7 @@ describe("ImportSessionSheet", () => {
   it("uses the session's cwd when importing in cwd-less mode and fires onImported", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",
@@ -947,6 +967,7 @@ describe("ImportSessionSheet", () => {
   it("names the scope after the host when unscoped and after the workspace when scoped", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [],
     }));
     const importAgent = vi.fn();
@@ -971,6 +992,7 @@ describe("ImportSessionSheet", () => {
   it("lists unscoped rows newest first and names each row's folder", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",
@@ -1035,6 +1057,7 @@ describe("ImportSessionSheet", () => {
   it("leaves the folder off every row when the sheet is scoped to one workspace", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",
@@ -1065,6 +1088,7 @@ describe("ImportSessionSheet", () => {
   it("sends the debounced search query to every provider", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [],
     }));
     const importAgent = vi.fn();
@@ -1090,6 +1114,7 @@ describe("ImportSessionSheet", () => {
 
     await waitFor(() => {
       expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+        cursor: null,
         providers: ["claude"],
         limit: 15,
         query: "invoice",
@@ -1100,6 +1125,7 @@ describe("ImportSessionSheet", () => {
   it("hides the search field when the host cannot search sessions", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [],
     }));
     const importAgent = vi.fn();
@@ -1122,35 +1148,58 @@ describe("ImportSessionSheet", () => {
     expect(screen.queryByTestId("import-session-search")).toBeNull();
   });
 
-  it("asks for a larger page when Load more is pressed, and stops offering it on a short page", async () => {
-    const fetchRecentProviderSessions = vi.fn(async (options: { limit?: number } | undefined) => ({
-      requestId: "recent-provider-sessions",
-      entries: createPageOfEntries(options?.limit === 15 ? 15 : 20),
-    }));
-    const importAgent = vi.fn();
-
+  it("browses beyond 200 rows, keeps empty continuation pages loadable and retries the failed page", async () => {
+    let failOnce = true;
+    const all = createPageOfEntries(235);
+    const fetchRecentProviderSessions = vi.fn(
+      async (options: { cursor?: string | null; limit?: number } | undefined) => {
+        const cursor = options?.cursor;
+        if (!cursor)
+          return { requestId: "first", entries: [], pageInfo: { hasMore: true, endCursor: "0" } };
+        const start = Number(cursor);
+        if (start === 15 && failOnce) {
+          failOnce = false;
+          throw new Error("Listing temporarily unavailable");
+        }
+        const end = Math.min(start + (options?.limit ?? 15), all.length);
+        return {
+          requestId: `page-${start}`,
+          entries: all.slice(start, end),
+          pageInfo: { hasMore: end < all.length, endCursor: end < all.length ? String(end) : null },
+        };
+      },
+    );
     renderSheet(
-      { fetchRecentProviderSessions, importAgent } as Pick<
-        DaemonClient,
-        "fetchRecentProviderSessions" | "importAgent"
-      >,
+      { fetchRecentProviderSessions, importAgent: vi.fn() },
       {
         cwd: null,
         snapshot: { supportsSnapshot: true, entries: [createSnapshotEntry("claude")] },
       },
     );
-
     fireEvent.click(await screen.findByTestId("import-session-load-more"));
-
-    await waitFor(() => {
-      expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
-        providers: ["claude"],
-        limit: 45,
-      });
-    });
-    await waitFor(() => {
-      expect(screen.queryByTestId("import-session-load-more")).toBeNull();
-    });
+    await screen.findByText("Session 14");
+    fireEvent.click(screen.getByTestId("import-session-load-more"));
+    await screen.findByText(/Listing temporarily unavailable/);
+    expect(screen.getByText("Session 14")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("import-session-retry-claude"));
+    await screen.findByText("Session 29");
+    for (let end = 45; end <= 240; end += 15) {
+      fireEvent.click(screen.getByTestId("import-session-load-more"));
+      await screen.findByText(`Session ${Math.min(end, 235) - 1}`);
+    }
+    expect(screen.getByText("Session 0")).toBeTruthy();
+    expect(screen.getByText("Session 234")).toBeTruthy();
+    expect(screen.queryByTestId("import-session-load-more")).toBeNull();
+    expect(fetchRecentProviderSessions.mock.calls.every(([options]) => options?.limit === 15)).toBe(
+      true,
+    );
+    expect(
+      fetchRecentProviderSessions.mock.calls.filter(([options]) => options?.cursor === "15"),
+    ).toHaveLength(2);
+    fireEvent.click(screen.getByTestId("import-session-refresh"));
+    await waitFor(() => expect(fetchRecentProviderSessions.mock.lastCall?.[0]?.cursor).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Session 234")).toBeNull());
+    expect(screen.getByTestId("import-session-load-more")).toBeTruthy();
   });
 
   it("stops the refresh spinner and retries only the failed provider", async () => {
@@ -1162,6 +1211,7 @@ describe("ImportSessionSheet", () => {
         }
         return {
           requestId: `recent-${provider}`,
+          pageInfo: { hasMore: false, endCursor: null },
           entries: [
             createProviderSessionEntry({
               providerId: provider ?? "codex",
@@ -1188,7 +1238,7 @@ describe("ImportSessionSheet", () => {
     );
 
     await screen.findByText("Session codex");
-    await screen.findByText("Could not load Claude Code sessions");
+    await screen.findByText(/Could not load Claude Code sessions/);
     await waitFor(() => {
       expect(screen.queryByTestId("import-session-loading-spinner")).toBeNull();
     });
@@ -1198,6 +1248,7 @@ describe("ImportSessionSheet", () => {
 
     await waitFor(() => {
       expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+        cursor: null,
         cwd: "/repo/paseo",
         providers: ["claude"],
         limit: 15,
@@ -1209,6 +1260,7 @@ describe("ImportSessionSheet", () => {
   it("shows an error row for a provider the daemon reported as failed", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [createProviderSessionEntry({ providerId: "codex", providerLabel: "Codex" })],
       providerErrors: [{ provider: "codex", message: "timed out" }],
     }));
@@ -1224,12 +1276,13 @@ describe("ImportSessionSheet", () => {
       },
     );
 
-    await screen.findByText("Could not load Codex sessions");
+    await screen.findByText(/Could not load Codex sessions/);
   });
 
   it("imports a foreign-directory row without the current workspace once Show all is on", async () => {
     const fetchRecentProviderSessions = vi.fn(async (options: { cwd?: string } | undefined) => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",
@@ -1261,6 +1314,7 @@ describe("ImportSessionSheet", () => {
 
     await screen.findByText("Foreign session");
     expect(fetchRecentProviderSessions).toHaveBeenCalledWith({
+      cursor: null,
       providers: ["claude"],
       limit: 15,
     });
@@ -1281,6 +1335,7 @@ describe("ImportSessionSheet", () => {
   it("refetches sessions when the refresh button is clicked", async () => {
     const fetchRecentProviderSessions = vi.fn(async () => ({
       requestId: "recent-provider-sessions",
+      pageInfo: { hasMore: false, endCursor: null },
       entries: [
         createProviderSessionEntry({
           providerId: "claude",

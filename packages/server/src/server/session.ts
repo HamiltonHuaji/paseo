@@ -6891,6 +6891,7 @@ export class Session {
         payload: {
           requestId: request.requestId,
           entries: result.entries,
+          ...(result.pageInfo ? { pageInfo: result.pageInfo } : {}),
           ...(result.filteredAlreadyImportedCount > 0
             ? { filteredAlreadyImportedCount: result.filteredAlreadyImportedCount }
             : {}),

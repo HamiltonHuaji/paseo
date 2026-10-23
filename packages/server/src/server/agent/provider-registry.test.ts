@@ -9,6 +9,7 @@ import type {
   AgentMode,
   AgentSessionConfig,
   ProviderCatalog,
+  ListImportableSessionsPageOptions,
 } from "./agent-sdk-types.js";
 
 const CLAUDE_CUSTOM_THINKING_FIELDS = {
@@ -56,6 +57,7 @@ const mockState = vi.hoisted(() => {
     isCommandAvailable: vi.fn(async (_command: string) => false),
     runtimeModels: new Map<string, AgentModelDefinition[]>(),
     cursorListFeaturesConfigs: [] as AgentSessionConfig[],
+    codexPaginationCalls: [] as ListImportableSessionsPageOptions[],
     codexNativeArchiveCalls: [] as Array<{ state: "archive" | "restore"; handle: unknown }>,
     reset() {
       this.constructorArgs.claude = [];
@@ -71,6 +73,7 @@ const mockState = vi.hoisted(() => {
       this.runtimeModels.clear();
       this.cursorListFeaturesConfigs = [];
       this.codexNativeArchiveCalls = [];
+      this.codexPaginationCalls = [];
     },
   };
 });
@@ -167,6 +170,11 @@ vi.mock("./providers/codex-app-server-agent.js", () => ({
         models: mockState.runtimeModels.get(this.provider) ?? [],
         modes: [],
       };
+    }
+
+    async listImportableSessionsPage(options: ListImportableSessionsPageOptions) {
+      mockState.codexPaginationCalls.push(options);
+      return { sessions: [], nextCursor: `${this.provider}-next` };
     }
 
     async archiveNativeSession(handle: unknown): Promise<void> {
@@ -624,6 +632,22 @@ test("new provider extending claude appears in registry", () => {
   expect(registry.zai.label).toBe("ZAI");
   expect(registry.zai.description).toBe("Claude with ZAI defaults");
   expect(registry.zai.createClient(logger).provider).toBe("zai");
+});
+
+test("built-in and custom Codex clients preserve paginated session listing", async () => {
+  const registry = buildProviderRegistry(logger, {
+    providerOverrides: { "my-codex": { extends: "codex", label: "My Codex" } },
+  });
+  for (const provider of ["codex", "my-codex"]) {
+    const client = registry[provider]!.createClient(logger);
+    expect(
+      await client.listImportableSessionsPage!({ cursor: "page-two", cwd: "/repo", limit: 100 }),
+    ).toEqual({ sessions: [], nextCursor: "codex-next" });
+  }
+  expect(mockState.codexPaginationCalls).toEqual([
+    { cursor: "page-two", cwd: "/repo", limit: 100, providerOptions: undefined },
+    { cursor: "page-two", cwd: "/repo", limit: 100, providerOptions: undefined },
+  ]);
 });
 
 test("new provider extending codex archives and unarchives its native sessions", async () => {

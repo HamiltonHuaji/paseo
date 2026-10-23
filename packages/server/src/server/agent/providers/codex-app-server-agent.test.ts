@@ -6920,6 +6920,81 @@ describe("Codex importable sessions", () => {
     }));
   }
 
+  test("continues bounded native pages past 500 without reading or resuming history", async () => {
+    const threads = threadsUsedInReverseCreationOrder(635);
+    const ids: string[] = [];
+    const sizes: number[] = [];
+    let cursor: string | null = null;
+    do {
+      const appServer = createFakeCodexAppServer({
+        "thread/list": cappedThreadListHandler(threads),
+      });
+      const provider = createProviderWithFakeAppServer(appServer);
+      const page = await provider.listImportableSessionsPage({
+        limit: 100,
+        cwd: "/workspace/project-a",
+        cursor,
+      });
+      sizes.push(page.sessions.length);
+      ids.push(...page.sessions.map((session) => session.providerHandleId));
+      cursor = page.nextCursor;
+      expect(appServer.requests().map((request) => request.method)).toEqual([
+        "initialize",
+        "initialized",
+        "thread/list",
+      ]);
+      appServer.assertNoErrors();
+    } while (cursor);
+    expect(sizes).toEqual([100, 100, 100, 100, 100, 100, 35]);
+    expect(ids).toEqual(threads.map((thread) => thread.id));
+  });
+
+  test("rejects a native pagination cursor from another project", async () => {
+    const appServer = createFakeCodexAppServer({
+      "thread/list": cappedThreadListHandler(threadsUsedInReverseCreationOrder(110)),
+    });
+    const provider = createProviderWithFakeAppServer(appServer);
+    const page = await provider.listImportableSessionsPage({
+      limit: 100,
+      cwd: "/workspace/project-a",
+    });
+    await expect(
+      provider.listImportableSessionsPage({
+        cursor: page.nextCursor,
+        cwd: "/workspace/project-b",
+      }),
+    ).rejects.toThrow("invalid or expired");
+    appServer.assertNoErrors();
+  });
+
+  test("reports invalid responses and repeated cursors as errors rather than exhaustion", async () => {
+    const pageServer = createFakeCodexAppServer({
+      "thread/list": () => ({ data: [], nextCursor: "stuck" }),
+    });
+    const page = await createProviderWithFakeAppServer(pageServer).listImportableSessionsPage({
+      limit: 100,
+    });
+    expect(page.sessions).toEqual([]);
+    expect(page.nextCursor).toEqual(expect.any(String));
+    const stuckServer = createFakeCodexAppServer({
+      "thread/list": () => ({ data: [], nextCursor: "stuck" }),
+    });
+    await expect(
+      createProviderWithFakeAppServer(stuckServer).listImportableSessionsPage({
+        cursor: page.nextCursor,
+      }),
+    ).rejects.toThrow("repeated session cursor");
+    const invalidServer = createFakeCodexAppServer({
+      "thread/list": () => ({ error: "unavailable" }),
+    });
+    await expect(
+      createProviderWithFakeAppServer(invalidServer).listImportableSessionsPage({ limit: 100 }),
+    ).rejects.toThrow();
+    pageServer.assertNoErrors();
+    stuckServer.assertNoErrors();
+    invalidServer.assertNoErrors();
+  });
+
   test("fills the requested window across the pages Codex caps at 100 rows", async () => {
     const threads = threadsUsedInReverseCreationOrder(250);
     const appServer = createFakeCodexAppServer({
@@ -7120,7 +7195,7 @@ describe("Codex importable sessions", () => {
       "thread-a2",
     ]);
     expect(sessions.every((session) => session.cwd === "/workspace/project-a")).toBe(true);
-    expect(sessions[0]).toEqual(
+    expect(sessions.find((session) => session.providerHandleId === "thread-a1")).toEqual(
       expect.objectContaining({
         providerHandleId: "thread-a1",
         title: "Named first A session",

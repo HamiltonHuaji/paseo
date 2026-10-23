@@ -364,6 +364,26 @@ describe("workspace message schemas", () => {
     });
   });
 
+  test("preserves optional import continuation on an empty page", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "fetch_recent_provider_sessions_request",
+      requestId: "page",
+      providers: ["codex"],
+      cursor: null,
+      limit: 15,
+    });
+    expect(request.cursor).toBeNull();
+    const response = SessionOutboundMessageSchema.parse({
+      type: "fetch_recent_provider_sessions_response",
+      payload: { requestId: "page", entries: [], pageInfo: { hasMore: true, endCursor: "next" } },
+    });
+    expect(response.payload).toEqual({
+      requestId: "page",
+      entries: [],
+      pageInfo: { hasMore: true, endCursor: "next" },
+    });
+  });
+
   test("parses session import search requests and per-provider errors", () => {
     const request = SessionInboundMessageSchema.parse({
       type: "fetch_recent_provider_sessions_request",

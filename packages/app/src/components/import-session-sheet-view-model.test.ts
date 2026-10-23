@@ -10,8 +10,6 @@ import {
   getPromptPreview,
   getSessionTitle,
   hasMoreSessions,
-  nextPageLimit,
-  PER_PROVIDER_LIMIT,
   resolveDirectoryLabel,
   resolveImportTarget,
   resolveProvidersToFetch,
@@ -78,10 +76,21 @@ describe("resolveProvidersToFetch", () => {
 });
 
 describe("requiresImportSessionsHostUpgrade", () => {
+  it("requires the paginated listing capability even when snapshots are available", () => {
+    expect(
+      requiresImportSessionsHostUpgrade({
+        supportsSnapshot: true,
+        supportsPagination: false,
+        supportsWorkspaceTarget: true,
+      }),
+    ).toBe(true);
+  });
+
   it("allows home imports on hosts without workspace targeting", () => {
     expect(
       requiresImportSessionsHostUpgrade({
         supportsSnapshot: true,
+        supportsPagination: true,
         workspaceId: null,
         supportsWorkspaceTarget: false,
       }),
@@ -92,6 +101,7 @@ describe("requiresImportSessionsHostUpgrade", () => {
     expect(
       requiresImportSessionsHostUpgrade({
         supportsSnapshot: true,
+        supportsPagination: true,
         workspaceId: "ws-current",
         supportsWorkspaceTarget: false,
       }),
@@ -99,6 +109,7 @@ describe("requiresImportSessionsHostUpgrade", () => {
     expect(
       requiresImportSessionsHostUpgrade({
         supportsSnapshot: true,
+        supportsPagination: true,
         workspaceId: "ws-current",
         supportsWorkspaceTarget: true,
       }),
@@ -174,6 +185,27 @@ describe("sumFilteredAlreadyImportedCount", () => {
 });
 
 describe("collectProviderErrorRows", () => {
+  it("distinguishes a provider's limited window from exhaustion or a failed request", () => {
+    expect(
+      collectProviderErrorRows(
+        ["claude"],
+        [
+          settled({
+            entries: [entry()],
+            pageInfo: {
+              hasMore: false,
+              endCursor: null,
+              incompleteReason: "Limited provider window",
+            },
+          }),
+        ],
+        new Map(),
+      ),
+    ).toEqual([
+      { provider: "claude", label: "claude", message: "Limited provider window", incomplete: true },
+    ]);
+  });
+
   it("returns no rows when no providers are being fetched", () => {
     expect(collectProviderErrorRows(null, [], new Map())).toEqual([]);
   });
@@ -198,7 +230,7 @@ describe("collectProviderErrorRows", () => {
       ],
       new Map([["codex", "Codex"]]),
     );
-    expect(rows).toEqual([{ provider: "codex", label: "Codex" }]);
+    expect(rows).toEqual([{ provider: "codex", label: "Codex", message: "timed out" }]);
   });
 
   it("uses provider id when the label map has no entry", () => {
@@ -211,35 +243,21 @@ describe("collectProviderErrorRows", () => {
   });
 });
 
-describe("nextPageLimit", () => {
-  it("grows the per-provider limit one step at a time", () => {
-    expect(nextPageLimit(PER_PROVIDER_LIMIT)).toBe(45);
-    expect(nextPageLimit(45)).toBe(90);
-    expect(nextPageLimit(90)).toBe(200);
-  });
-
-  it("stops at the protocol ceiling", () => {
-    expect(nextPageLimit(200)).toBe(200);
-  });
-});
-
 describe("hasMoreSessions", () => {
-  it("reports more when a provider filled the requested page", () => {
-    expect(hasMoreSessions([settled({ entries: [entry(), entry()] })], 2)).toBe(true);
-  });
-
-  it("reports no more once every provider returned a short page", () => {
-    expect(hasMoreSessions([settled({ entries: [entry()] })], 2)).toBe(false);
-  });
-
-  it("reports no more at the last page size, however full the page is", () => {
-    expect(hasMoreSessions([settled({ entries: [entry(), entry()] })], 200)).toBe(false);
-  });
-
-  it("keeps reporting more while the next page replaces placeholder rows", () => {
+  it("keeps an empty filtered page loadable when the source continues", () => {
     expect(
-      hasMoreSessions([settled({ entries: [entry()] }, { isPlaceholderData: true })], 45),
+      hasMoreSessions([settled({ entries: [], pageInfo: { hasMore: true, endCursor: "next" } })]),
     ).toBe(true);
+  });
+  it("does not infer source continuation from the number of rows", () => {
+    expect(
+      hasMoreSessions([
+        settled({
+          entries: Array.from({ length: 220 }, () => entry()),
+          pageInfo: { hasMore: false, endCursor: null },
+        }),
+      ]),
+    ).toBe(false);
   });
 });
 

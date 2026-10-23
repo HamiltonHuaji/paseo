@@ -1495,6 +1495,8 @@ export const FetchAgentHistoryRequestMessageSchema = z.object({
 export const FetchRecentProviderSessionsRequestMessageSchema = z.object({
   type: z.literal("fetch_recent_provider_sessions_request"),
   requestId: z.string(),
+  /** null starts bounded pagination; a string continues the same provider/filter query. */
+  cursor: z.string().nullable().optional(),
   cwd: z.string().optional(),
   providers: z.array(z.string()).optional(),
   since: z.string().optional(),
@@ -3974,6 +3976,8 @@ export const ServerInfoStatusPayloadSchema = z
         importSessionFork: z.boolean().optional(),
         // COMPAT(importSessionSearch): added in v0.8.0, remove gate after 2027-03-02.
         importSessionSearch: z.boolean().optional(),
+        // COMPAT(importSessionPagination): added in v0.13.0, remove gate after 2027-04-23.
+        importSessionPagination: z.boolean().optional(),
         // COMPAT(forgeProviders): added in v0.2.0-beta.1. Drop the gate after
         // 2027-01-17 once the supported daemon floor is >= v0.2.0.
         // Daemon advertises pluggable non-GitHub forge support (the forge registry);
@@ -4472,6 +4476,15 @@ export const FetchRecentProviderSessionsResponseMessageSchema = z.object({
   payload: z.object({
     requestId: z.string(),
     entries: z.array(RecentProviderSessionDescriptorPayloadSchema),
+    // COMPAT(importSessionPagination): added in v0.13.0, remove optional after 2027-04-23.
+    pageInfo: z
+      .object({
+        hasMore: z.boolean(),
+        endCursor: z.string().nullable(),
+        // Without this reason, hasMore=false means the source was exhausted.
+        incompleteReason: z.string().optional(),
+      })
+      .optional(),
     filteredAlreadyImportedCount: z.number().int().nonnegative().optional(),
     providerErrors: z
       .array(

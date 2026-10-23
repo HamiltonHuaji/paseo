@@ -1,4 +1,7 @@
-import type { z } from "zod";
+import { z } from "zod";
+import { basename } from "node:path";
+import { decodeImportSessionCursor, encodeImportSessionCursor } from "./import-session-cursor.js";
+import { RecentProviderSessionDescriptorPayloadSchema } from "@getpaseo/protocol/messages";
 import type { Logger } from "pino";
 import type { ProviderSnapshotManager } from "./provider-snapshot-manager.js";
 import type {
@@ -64,12 +67,14 @@ export class ImportSessionsRequestError extends Error {
 
 export interface ListImportableProviderSessionsInput {
   request: FetchRecentProviderSessionsRequestMessage;
-  agentManager: Pick<AgentManager, "listAgents" | "listImportableSessions">;
+  agentManager: Pick<AgentManager, "listAgents" | "listImportableSessions"> &
+    Partial<Pick<AgentManager, "listImportableSessionsPage">>;
   agentStorage: Pick<AgentStorage, "list">;
   providerSnapshotManager: Pick<ProviderSnapshotManager, "getProviderLabel">;
 }
 
 export interface ListImportableProviderSessionsResult {
+  pageInfo?: { hasMore: boolean; endCursor: string | null; incompleteReason?: string };
   entries: RecentProviderSessionDescriptorPayload[];
   filteredAlreadyImportedCount: number;
   providerErrors: Array<{ provider: string; message: string }>;
@@ -132,6 +137,11 @@ export async function listImportableProviderSessions(
   );
   const importedHandles = importedSessions.handles;
   const query = normalizeImportSessionQuery(request.query);
+  if (request.cursor !== undefined) {
+    return listImportableProviderSessionsPage(input, importedHandles, sinceTimestamp, query);
+  }
+  // COMPAT(importSessionPagination): old clients omit cursor. Remove this bounded
+  // legacy window after the supported client floor reaches v0.13.0 (2027-04-23).
   const listingLimit = query ? IMPORT_SESSION_SEARCH_SCAN_LIMIT : limit + importedSessions.count;
 
   const listing = await agentManager.listImportableSessions({
@@ -176,6 +186,108 @@ export async function listImportableProviderSessions(
     entries,
     filteredAlreadyImportedCount,
     providerErrors: listing.providerErrors,
+  };
+}
+
+const importPageCursorSchema = z.object({
+  sourceCursor: z.string().nullable(),
+  pending: z.array(RecentProviderSessionDescriptorPayloadSchema).max(500),
+  incompleteReason: z.string().optional(),
+});
+
+async function listImportableProviderSessionsPage(
+  input: ListImportableProviderSessionsInput,
+  importedHandles: Set<string>,
+  sinceTimestamp: number | null,
+  query: string | null,
+): Promise<ListImportableProviderSessionsResult> {
+  const { request, agentManager, providerSnapshotManager } = input;
+  if (request.providers?.length !== 1) {
+    throw new ImportSessionsRequestError(
+      "invalid_provider_filter",
+      "Paginated session browsing requires exactly one provider",
+    );
+  }
+  const provider = request.providers[0]!;
+  const limit = request.limit ?? 20;
+  const context = JSON.stringify([
+    "import-sessions",
+    provider,
+    request.cwd,
+    query,
+    sinceTimestamp,
+    limit,
+  ]);
+  const state =
+    request.cursor != null
+      ? decodeImportSessionCursor(request.cursor, context, importPageCursorSchema)
+      : null;
+  const matchesCwd = request.cwd ? createRealpathAwarePathMatcher(request.cwd) : null;
+  let filteredAlreadyImportedCount = 0;
+  let sourceCursor = state?.sourceCursor ?? null;
+  let incompleteReason = state?.incompleteReason;
+  let providerErrors: ListImportableProviderSessionsResult["providerErrors"] = [];
+  let candidates = state?.pending ?? [];
+
+  if (candidates.length === 0) {
+    if (!agentManager.listImportableSessionsPage)
+      throw new Error("Session pagination is unavailable");
+    const page = await agentManager.listImportableSessionsPage({
+      provider,
+      cwd: request.cwd,
+      query: query ?? undefined,
+      limit: 100,
+      cursor: sourceCursor,
+    });
+    sourceCursor = page.nextCursor;
+    incompleteReason = page.incompleteReason;
+    providerErrors = page.providerErrors;
+    candidates = page.sessions
+      .filter((session) => {
+        if (matchesCwd && !matchesCwd(session.cwd)) return false;
+        if (sinceTimestamp !== null && session.lastActivityAt.getTime() < sinceTimestamp)
+          return false;
+        if (isMetadataGenerationSession(session)) return false;
+        if (
+          query &&
+          ![
+            session.title,
+            session.firstPromptPreview,
+            session.lastPromptPreview,
+            basename(session.cwd.replaceAll("\\", "/")),
+          ].some((value) => value?.toLowerCase().includes(query))
+        )
+          return false;
+        return true;
+      })
+      .map((session) =>
+        toRecentProviderSessionDescriptorPayload(session, {
+          providerLabel: providerSnapshotManager.getProviderLabel(provider),
+        }),
+      );
+  }
+  // Recheck buffered rows: an import in another window may have completed since
+  // the previous page. Consuming it must not discard the source continuation.
+  candidates = candidates.filter((entry) => {
+    if (!importedHandles.has(toProviderSessionHandleKey(provider, entry.providerHandleId)))
+      return true;
+    filteredAlreadyImportedCount += 1;
+    return false;
+  });
+  const entries = candidates.slice(0, limit);
+  const pending = candidates.slice(limit);
+  const hasMore = pending.length > 0 || sourceCursor !== null;
+  return {
+    entries,
+    filteredAlreadyImportedCount,
+    providerErrors,
+    pageInfo: {
+      hasMore,
+      endCursor: hasMore
+        ? encodeImportSessionCursor(context, { sourceCursor, pending, incompleteReason })
+        : null,
+      ...(incompleteReason ? { incompleteReason } : {}),
+    },
   };
 }
 

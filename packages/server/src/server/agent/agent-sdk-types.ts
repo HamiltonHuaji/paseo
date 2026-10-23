@@ -561,6 +561,16 @@ export interface ListImportableSessionsOptions {
   cwd?: string;
 }
 
+/** One bounded source read. An empty page can still have a continuation. */
+export interface ImportableSessionsPage {
+  sessions: ImportableProviderSession[];
+  nextCursor: string | null;
+}
+
+export interface ListImportableSessionsPageOptions extends ListImportableSessionsOptions {
+  cursor?: string | null;
+}
+
 export interface ImportableProviderSession {
   providerHandleId: string;
   cwd: string;
@@ -805,6 +815,9 @@ export interface AgentClient {
   listImportableSessions?(
     options?: ListImportableSessionsOptions,
   ): Promise<ImportableProviderSession[]>;
+  listImportableSessionsPage?(
+    options: ListImportableSessionsPageOptions,
+  ): Promise<ImportableSessionsPage>;
   importSession?(
     input: ImportProviderSessionInput,
     context: ImportProviderSessionContext,

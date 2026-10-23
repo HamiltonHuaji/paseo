@@ -37,6 +37,8 @@ import {
   type ImportProviderSessionContext,
   type ImportProviderSessionInput,
   type ListImportableSessionsOptions,
+  type ListImportableSessionsPageOptions,
+  type ImportableSessionsPage,
   type ProviderCatalog,
   type ProviderRefreshContext,
   type ResolveAgentDefaultModeInput,
@@ -45,6 +47,7 @@ import {
   collectImportedHistory,
   importSessionFromPersistence,
 } from "../provider-session-import.js";
+import { decodeImportSessionCursor, encodeImportSessionCursor } from "../import-session-cursor.js";
 import { runProviderRefreshActivity } from "../provider-refresh-deadline.js";
 import type { Logger } from "pino";
 
@@ -7729,6 +7732,92 @@ export class CodexAppServerAgentClient implements AgentClient {
     } catch (error) {
       await session.close();
       throw error;
+    }
+  }
+
+  async listImportableSessionsPage(
+    options: ListImportableSessionsPageOptions,
+  ): Promise<ImportableSessionsPage> {
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings),
+      options.cwd,
+    );
+    const legacyHome = codexUserHome(buildCodexAppServerEnv(this.runtimeSettings));
+    const homes = [...new Set([environment.CODEX_HOME, legacyHome])];
+    const customProviderConfig = this.customProviderConfig();
+    const modelProviders = customProviderConfig ? [customProviderConfig.model_provider] : undefined;
+    const context = JSON.stringify(["codex-session-list", homes, options.cwd, modelProviders]);
+    const state =
+      options.cursor != null
+        ? decodeImportSessionCursor(
+            options.cursor,
+            context,
+            z.object({
+              home: z
+                .number()
+                .int()
+                .nonnegative()
+                .max(homes.length - 1),
+              nativeCursor: z.string().nullable(),
+            }),
+          )
+        : { home: 0, nativeCursor: null };
+    const home = homes[state.home]!;
+    const child = await this.spawnAppServer(undefined, {
+      environment: { ...environment, CODEX_HOME: home },
+    });
+    const client =
+      this.deps._createCodexClient?.(child, this.logger, () => ({})) ??
+      new CodexAppServerClient(child, this.logger);
+    try {
+      await client.request("initialize", buildCodexAppServerInitializeParams());
+      client.notify("initialized", {});
+      const cwd = home === legacyHome ? options.cwd : undefined;
+      const response = z
+        .object({
+          data: z.array(z.record(z.string(), z.unknown())).max(100),
+          nextCursor: z.string().min(1).nullable().optional(),
+        })
+        .parse(
+          await client.request("thread/list", {
+            limit: Math.min(options.limit ?? 100, 100),
+            sortKey: "updated_at",
+            ...(cwd ? { cwd } : {}),
+            ...(modelProviders ? { modelProviders } : {}),
+            ...(state.nativeCursor ? { cursor: state.nativeCursor } : {}),
+          }),
+        );
+      const nativeCursor = response.nextCursor ?? null;
+      if (nativeCursor && nativeCursor === state.nativeCursor) {
+        throw new Error("Codex returned a repeated session cursor. Refresh the session list.");
+      }
+      const nextHome = nativeCursor ? state.home : state.home + 1;
+      return {
+        sessions: filterCodexThreadsByCwd(response.data, cwd).map((thread) => {
+          if (typeof thread.id !== "string" || !thread.id) {
+            throw new Error("Codex returned a session without an identity");
+          }
+          const preview = typeof thread.preview === "string" ? thread.preview : null;
+          return {
+            providerHandleId: thread.id,
+            cwd: typeof thread.cwd === "string" ? thread.cwd : process.cwd(),
+            title: typeof thread.name === "string" && thread.name.trim() ? thread.name : preview,
+            firstPromptPreview: preview,
+            lastPromptPreview: preview,
+            lastActivityAt: new Date(
+              ((typeof thread.updatedAt === "number" ? thread.updatedAt : undefined) ??
+                (typeof thread.createdAt === "number" ? thread.createdAt : undefined) ??
+                0) * 1000,
+            ),
+          };
+        }),
+        nextCursor:
+          nextHome < homes.length
+            ? encodeImportSessionCursor(context, { home: nextHome, nativeCursor })
+            : null,
+      };
+    } finally {
+      await client.dispose();
     }
   }
 
