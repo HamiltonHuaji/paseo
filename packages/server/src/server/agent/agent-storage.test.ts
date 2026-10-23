@@ -514,6 +514,68 @@ describe("AgentStorage", () => {
     expect(dirs[0]).toBe("D-Users-dev-MyProject");
   });
 
+  test.each(["project".repeat(8), "中文项目".repeat(8)])(
+    "persists distinct long project paths across reload, update and delete: %s",
+    async (segment) => {
+      const commonParent = path.join(tmpDir, segment, segment, segment, segment, segment);
+      const projects = [path.join(commonParent, "项目甲"), path.join(commonParent, "项目乙")];
+      for (const [index, cwd] of projects.entries()) {
+        await fs.mkdir(cwd, { recursive: true });
+        await storage.applySnapshot(
+          createManagedAgent({
+            id: `long-project-${index}`,
+            workspaceId: `workspace-${index}`,
+            cwd,
+            provider: "codex",
+            persistence: { provider: "codex", sessionId: `native-${index}` },
+          }),
+        );
+      }
+      const directories = await fs.readdir(storagePath);
+      expect(directories).toHaveLength(2);
+      expect(directories.every((directory) => Buffer.byteLength(directory, "utf8") <= 255)).toBe(
+        true,
+      );
+
+      const reloaded = new AgentStorage(storagePath, logger);
+      for (const [index, cwd] of projects.entries()) {
+        await expect(reloaded.listByWorkspace(`workspace-${index}`)).resolves.toMatchObject([
+          { id: `long-project-${index}`, cwd, persistence: { sessionId: `native-${index}` } },
+        ]);
+      }
+      await reloaded.setTitle("long-project-0", "更新甲");
+      const updated = new AgentStorage(storagePath, logger);
+      await expect(updated.get("long-project-0")).resolves.toMatchObject({
+        cwd: projects[0],
+        title: "更新甲",
+      });
+      await expect(updated.get("long-project-1")).resolves.toMatchObject({ cwd: projects[1] });
+      expect((await updated.get("long-project-1"))?.title).not.toBe("更新甲");
+      await updated.remove("long-project-0");
+      const afterDelete = new AgentStorage(storagePath, logger);
+      await expect(afterDelete.list()).resolves.toMatchObject([
+        { id: "long-project-1", cwd: projects[1] },
+      ]);
+      await afterDelete.setTitle("long-project-1", "更新乙");
+      await afterDelete.remove("long-project-1");
+      await expect(new AgentStorage(storagePath, logger).list()).resolves.toEqual([]);
+    },
+  );
+
+  test("keeps existing legal non-ASCII project paths readable and writable", async () => {
+    await storage.applySnapshot(
+      createManagedAgent({ id: "legacy-path", cwd: "/tmp/原有项目", provider: "codex" }),
+    );
+    const existingPath = path.join(storagePath, "tmp-原有项目", "legacy-path.json");
+    await expect(fs.readFile(existingPath, "utf8")).resolves.toContain("原有项目");
+    const reloaded = new AgentStorage(storagePath, logger);
+    await reloaded.setTitle("legacy-path", "仍可更新");
+    expect(JSON.parse(await fs.readFile(existingPath, "utf8")).title).toBe("仍可更新");
+    await reloaded.remove("legacy-path");
+    await expect(fs.access(existingPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(new AgentStorage(storagePath, logger).list()).resolves.toEqual([]);
+  });
+
   test("remove deletes all duplicate record files across project directories", async () => {
     const agentId = "agent-duplicate";
 

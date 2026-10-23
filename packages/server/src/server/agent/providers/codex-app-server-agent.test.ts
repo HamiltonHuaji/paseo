@@ -1,7 +1,7 @@
 import { describe, expect, onTestFinished, test, vi } from "vitest";
 import { execFileSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolveCodexStorageEnvironment, findCodexRollout } from "./codex/storage-context.js";
-import { readlink, unlink } from "node:fs/promises";
+import { mkdir, readlink, symlink, unlink } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import { type Dirent, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
@@ -6966,6 +6966,47 @@ describe("Codex importable sessions", () => {
     ).rejects.toThrow("invalid or expired");
     appServer.assertNoErrors();
   });
+
+  test.each(["real", "symlink"])(
+    "finds symlink-equivalent sessions after 600 unrelated rows through the %s path",
+    async (accessPath) => {
+      const root = await mkdtemp(path.join(tmpdir(), "codex-import-symlink-"));
+      onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+      const real = path.join(root, "项目");
+      const alias = path.join(root, "项目别名");
+      await mkdir(real);
+      await symlink(real, alias, "junction");
+      const threads = threadsUsedInReverseCreationOrder(635);
+      for (const [index, thread] of threads.entries()) {
+        const projectPath = index % 2 ? real : alias;
+        thread.cwd = index < 600 ? path.join(root, "other-project") : projectPath;
+      }
+      const sizes: number[] = [];
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const appServer = createFakeCodexAppServer({
+          "thread/list": cappedThreadListHandler(threads),
+        });
+        const page = await createProviderWithFakeAppServer(appServer).listImportableSessionsPage({
+          cwd: accessPath === "real" ? real : alias,
+          limit: 100,
+          cursor,
+        });
+        sizes.push(page.sessions.length);
+        ids.push(...page.sessions.map((session) => session.providerHandleId));
+        cursor = page.nextCursor;
+        expect(appServer.requests().map((request) => request.method)).toEqual([
+          "initialize",
+          "initialized",
+          "thread/list",
+        ]);
+        appServer.assertNoErrors();
+      } while (cursor);
+      expect(sizes).toEqual([0, 0, 0, 0, 0, 0, 35]);
+      expect(ids).toEqual(threads.slice(600).map((thread) => thread.id));
+    },
+  );
 
   test("reports invalid responses and repeated cursors as errors rather than exhaustion", async () => {
     const pageServer = createFakeCodexAppServer({

@@ -85,7 +85,7 @@ import {
   findExecutable,
   probeExecutable,
 } from "../../../executable-resolution/executable-resolution.js";
-import { createPathEquivalenceMatcher } from "../../../utils/path.js";
+import { createRealpathAwarePathMatcher } from "../../../utils/path.js";
 import { spawnProcess } from "../../../utils/spawn.js";
 import { extractCodexTerminalSessionId, nonEmptyString } from "./tool-call-mapper-utils.js";
 import {
@@ -1077,7 +1077,7 @@ function filterCodexThreadsByCwd(
   // falls back to process.cwd() if the field is missing, so we only match
   // here when the row genuinely carries a cwd string — otherwise threads
   // with no cwd would falsely match the daemon's own cwd.
-  const belongsToWorkspace = createPathEquivalenceMatcher(cwd);
+  const belongsToWorkspace = createRealpathAwarePathMatcher(cwd);
   return threads.filter(
     (thread) => typeof thread.cwd === "string" && belongsToWorkspace(thread.cwd),
   );
@@ -7772,6 +7772,9 @@ export class CodexAppServerAgentClient implements AgentClient {
     try {
       await client.request("initialize", buildCodexAppServerInitializeParams());
       client.notify("initialized", {});
+      // Native cwd filtering is lexical and omits symlink-equivalent paths.
+      // Filter this bounded raw page locally and retain its continuation even
+      // when every row belongs to another workspace.
       const cwd = home === legacyHome ? options.cwd : undefined;
       const response = z
         .object({
@@ -7782,7 +7785,6 @@ export class CodexAppServerAgentClient implements AgentClient {
           await client.request("thread/list", {
             limit: Math.min(options.limit ?? 100, 100),
             sortKey: "updated_at",
-            ...(cwd ? { cwd } : {}),
             ...(modelProviders ? { modelProviders } : {}),
             ...(state.nativeCursor ? { cursor: state.nativeCursor } : {}),
           }),

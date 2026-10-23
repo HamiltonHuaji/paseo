@@ -1,4 +1,5 @@
 import { promises as fs, type Dirent } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { z } from "zod";
 import type { Logger } from "pino";
@@ -474,8 +475,13 @@ function projectDirNameFromCwd(cwd: string): string {
   // Sanitize root: strip colons and separators, keep letters (e.g. "C:\" → "C", "\\server\share\" → "server-share")
   const sanitizedRoot = root.replace(/[:\\/]+/g, "-").replace(/^-+|-+$/g, "");
   const prefix = sanitizedRoot ? sanitizedRoot + "-" : "";
-  if (!withoutRoot) {
-    return sanitizedRoot || "root";
-  }
-  return prefix + withoutRoot.replace(/[\\/]+/g, "-");
+  const legacyName = withoutRoot
+    ? prefix + withoutRoot.replace(/[\\/]+/g, "-")
+    : sanitizedRoot || "root";
+  // Flattening a valid multi-component cwd can exceed a filesystem's 255-byte
+  // component limit. Keep existing names that fit; hash the entire cwd for
+  // oversized names so projects sharing a long prefix remain separate.
+  return Buffer.byteLength(legacyName, "utf8") <= 255
+    ? legacyName
+    : `project-${createHash("sha256").update(cwd).digest("hex")}`;
 }
