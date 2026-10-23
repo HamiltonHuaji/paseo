@@ -65,6 +65,12 @@ import {
 } from "./agent-sdk-types.js";
 import { buildArchivedAgentRecord, type ArchivedStoredAgentRecord } from "./agent-archive.js";
 import { toStoredAgentRecord } from "./agent-projections.js";
+import {
+  buildConfigOverrides,
+  extractAttention,
+  extractTimestamps,
+  toAgentPersistenceHandle,
+} from "../persistence-hooks.js";
 import type { StoredAgentRecord, AgentStorage } from "./agent-storage.js";
 import type { AgentOwner } from "./agent-owner.js";
 import {
@@ -100,7 +106,6 @@ import {
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
-import { extractAttention } from "../persistence-hooks.js";
 import { resolveConversationForkBoundary } from "./conversation-fork-boundary.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
@@ -1311,12 +1316,12 @@ export class AgentManager {
   }
 
   getTimeline(id: string): AgentTimelineItem[] {
-    this.requireAgent(id);
+    this.requireLoadedTimeline(id);
     return this.timelineStore.getItems(id);
   }
 
   async getTimelineRows(id: string): Promise<AgentTimelineRow[]> {
-    this.requireAgent(id);
+    this.requireLoadedTimeline(id);
     if (this.durableTimelineStore) {
       return projectTimelineRows({
         rows: await this.durableTimelineStore.getCommittedRows(id),
@@ -1327,7 +1332,7 @@ export class AgentManager {
   }
 
   fetchTimeline(id: string, options?: AgentTimelineFetchOptions): AgentTimelineFetchResult {
-    this.requireAgent(id);
+    this.requireLoadedTimeline(id);
     return this.timelineStore.fetch(id, options);
   }
 
@@ -1379,7 +1384,25 @@ export class AgentManager {
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
     return this.trackAgentRegistrationOperation(
-      this.forkAgentFromConversationInternal(source, config, agentId, options),
+      this.runLifecycleMutation(source.agentId, async () => {
+        const live = this.agents.get(source.agentId);
+        if (live)
+          return this.forkAgentFromConversationInternal(source, config, agentId, options, live);
+        const record = await this.registry?.get(source.agentId);
+        const handle =
+          record && toAgentPersistenceHandle(this.getRegisteredProviderIds(), record.persistence);
+        if (!record || !handle)
+          throw new Error(`No persisted provider history for agent '${source.agentId}'`);
+        return this.resumeAgentFromPersistenceInternal(
+          handle,
+          buildConfigOverrides(record),
+          source.agentId,
+          { ...extractTimestamps(record), attention: extractAttention(record) },
+          { purpose: "history" },
+          (reader) =>
+            this.forkAgentFromConversationInternal(source, config, agentId, options, reader),
+        );
+      }),
     );
   }
 
@@ -1388,9 +1411,9 @@ export class AgentManager {
     config: AgentSessionConfig,
     agentId: string | undefined,
     options: CreateAgentOptions,
+    sourceAgent: ActiveManagedAgent,
   ): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
-    const sourceAgent = this.requireSessionAgent(source.agentId);
     if (sourceAgent.lifecycle === "initializing") {
       throw new Error("Wait for the current turn to finish before forking this conversation");
     }
@@ -1616,6 +1639,7 @@ export class AgentManager {
       workspaceId?: string;
       owner?: AgentOwner;
       attention?: AttentionState;
+      historyBroadcast?: boolean | (() => boolean);
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
@@ -1652,8 +1676,10 @@ export class AgentManager {
       workspaceId?: string;
       owner?: AgentOwner;
       attention?: AttentionState;
+      historyBroadcast?: boolean | (() => boolean);
     },
     resumeOptions?: AgentResumeSessionOptions,
+    historyAction?: (reader: ActiveManagedAgent) => Promise<ManagedAgent>,
   ): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(
@@ -1679,6 +1705,8 @@ export class AgentManager {
         }
       : resumeOptions;
     const purpose = currentResumeOptions?.purpose ?? "interactive";
+    const existing = this.agents.get(resolvedAgentId);
+    if (existing) return { ...existing };
 
     const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
       mergedConfig,
@@ -1692,7 +1720,7 @@ export class AgentManager {
         `Provider '${handle.provider}' is not available. Please ensure the CLI is installed.`,
       );
     }
-    this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
+    if (purpose !== "history") this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
     const launchContext = await this.buildLaunchContext(
       resolvedAgentId,
       client,
@@ -1713,11 +1741,67 @@ export class AgentManager {
       currentResumeOptions,
     );
     await this.requireExternalMcpSupport(session, storedConfig);
+    if (purpose === "history") {
+      return this.withHistorySession(
+        session,
+        storedConfig,
+        resolvedAgentId,
+        handle,
+        record,
+        options,
+        historyAction,
+      );
+    }
     return this.registerSession(session, storedConfig, resolvedAgentId, {
       ...options,
       persistence: handle,
       restoring: true,
     });
+  }
+
+  private async withHistorySession(
+    session: AgentSession,
+    config: AgentSessionConfig,
+    agentId: string,
+    handle: AgentPersistenceHandle,
+    record: StoredAgentRecord | null,
+    options: Parameters<AgentManager["resumeAgentFromPersistence"]>[3],
+    action?: (reader: ActiveManagedAgent) => Promise<ManagedAgent>,
+  ): Promise<ManagedAgent> {
+    // A reader is scoped to this operation. Registering it would publish idle,
+    // count it as a live agent and expose it to heartbeat scheduling.
+    try {
+      const now = new Date();
+      const historyOptions = { ...options, persistence: handle };
+      const { durableTimelineHasRows } = await this.initializeAgentTimelineForRegister({
+        agentId,
+        now,
+        options: historyOptions,
+      });
+      const reader = this.buildManagedAgentForRegister({
+        resolvedAgentId: agentId,
+        session,
+        config,
+        now,
+        durableTimelineHasRows,
+        options: historyOptions,
+      });
+      await this.hydrateTimelineFromLegacyProviderHistory(reader, {
+        broadcast: options?.historyBroadcast,
+      });
+      reader.pendingPermissions = new Map(
+        session.getPendingPermissions().map((request) => [request.id, request]),
+      );
+      reader.currentModeId = record?.lastModeId ?? config.modeId ?? null;
+      reader.features = record?.features;
+      reader.runtimeInfo = record?.runtimeInfo ?? undefined;
+      reader.lastError = record?.lastError ?? undefined;
+      reader.lifecycle = "idle";
+      if (action) return await action(reader);
+      return { ...reader, lifecycle: "closed", session: null, activeForegroundTurnId: null };
+    } finally {
+      await this.closeUnregisteredSession(session);
+    }
   }
 
   importProviderSession(input: {
@@ -2597,12 +2681,30 @@ export class AgentManager {
   }
 
   async clearAgentAttention(agentId: string): Promise<void> {
-    const agent = this.requireAgent(agentId);
-    if (agent.attention.requiresAttention) {
-      agent.attention = { requiresAttention: false };
-      await this.persistSnapshot(agent);
-      this.emitState(agent, { persist: false });
-    }
+    await this.runLifecycleMutation(agentId, async () => {
+      const agent = this.agents.get(agentId);
+      if (agent) {
+        if (agent.attention.requiresAttention) {
+          agent.attention = { requiresAttention: false };
+          await this.persistSnapshot(agent);
+          this.emitState(agent, { persist: false });
+        }
+        return;
+      }
+      const registry = this.requireRegistry();
+      const record = await registry.get(agentId);
+      if (!record) throw new Error(`Unknown agent '${agentId}'`);
+      if (!record.requiresAttention) return;
+      const nextRecord: StoredAgentRecord = {
+        ...record,
+        updatedAt: this.nextStoredUpdatedAt(record),
+        requiresAttention: false,
+        attentionReason: null,
+        attentionTimestamp: null,
+      };
+      await registry.upsert(nextRecord);
+      this.dispatchStoredAgentState(nextRecord);
+    });
   }
 
   async markAgentUnread(agentId: string): Promise<void> {
@@ -4176,7 +4278,9 @@ export class AgentManager {
       await this.deleteCommittedTimeline(agentId);
       this.timelineStore.delete(agentId);
     }
-    const timelineAlreadyPrimed = this.timelineStore.has(agentId);
+    // An empty store left by a failed first replay is not evidence of loaded history.
+    const timelineAlreadyPrimed =
+      this.timelineStore.has(agentId) && this.timelineStore.getRows(agentId).length > 0;
     const explicitTimelineSeed = buildExplicitTimelineSeedForRegister(now, options);
     const shouldSeedFromDurable =
       !explicitTimelineSeed && !this.timelineStore.has(agentId) && this.durableTimelineStore;
@@ -4276,6 +4380,7 @@ export class AgentManager {
       return { timestamp: now.toISOString() };
     }
     return {
+      rows: await this.durableTimelineStore.getCommittedRows(agentId),
       nextSeq: (await this.durableTimelineStore.getLatestCommittedSeq(agentId)) + 1,
       timestamp: now.toISOString(),
     };
@@ -4578,6 +4683,7 @@ export class AgentManager {
     options?: HydrateTimelineOptions,
   ): Promise<void> {
     if (agent.historyPrimed && !options?.force) {
+      await this.hydrateProviderSubagentsFromHistory(agent, options?.broadcast);
       return;
     }
 
@@ -4594,6 +4700,25 @@ export class AgentManager {
     }
 
     await this.primeTimelineFromLegacyProviderHistory(agent, broadcast);
+  }
+
+  private async hydrateProviderSubagentsFromHistory(
+    agent: ActiveManagedAgent,
+    broadcastOption?: boolean | (() => boolean),
+  ): Promise<void> {
+    if (this.providerSubagents.hasLoadedHistory(agent.id)) return;
+    // Committed root rows do not contain provider-child descriptors or their
+    // separate timelines. Replay those without duplicating the root rows.
+    const children: Extract<AgentStreamEvent, { type: "provider_subagent" }>[] = [];
+    for await (const event of agent.session.streamHistory()) {
+      if (event.type === "provider_subagent") children.push(event);
+    }
+    const broadcast = typeof broadcastOption === "function" ? broadcastOption() : broadcastOption;
+    const updates = this.providerSubagents.deleteParent(agent.id);
+    for (const event of children)
+      updates.push(this.providerSubagents.apply(agent.id, event.provider, event.event));
+    this.providerSubagents.markHistoryLoaded(agent.id, agent.internal === true);
+    if (broadcast) for (const event of updates) this.dispatch({ type: "provider_subagent", event });
   }
 
   private async forceHydrateTimelineFromLegacyProviderHistory(
@@ -4645,6 +4770,7 @@ export class AgentManager {
         });
       }
     }
+    this.providerSubagents.markHistoryLoaded(agent.id, agent.internal === true);
     // A rewind must not clear its durable intent before its replacement history
     // is committed. Surface write failures to the operation's rollback path.
     await this.durableTimelineStore?.bulkInsert(agent.id, this.timelineStore.getRows(agent.id));
@@ -4719,6 +4845,7 @@ export class AgentManager {
       }
     }
     agent.historyPrimed = true;
+    this.providerSubagents.markHistoryLoaded(agent.id, agent.internal === true);
 
     if (typeof broadcast !== "function" || !broadcast()) {
       return;
@@ -5979,12 +6106,19 @@ export class AgentManager {
     return agent;
   }
 
-  private requirePublicAgent(id: string): LiveManagedAgent {
-    const agent = this.requireAgent(id);
-    if (agent.internal) {
-      throw new Error(`Unknown agent '${agent.id}'`);
+  private requireLoadedTimeline(id: string): void {
+    const normalizedId = validateAgentId(id, "requireLoadedTimeline");
+    if (!this.agents.has(normalizedId) && !this.timelineStore.has(normalizedId)) {
+      throw new Error(`Unknown agent '${normalizedId}'`);
     }
-    return agent;
+  }
+
+  private requirePublicAgent(id: string): void {
+    this.requireLoadedTimeline(id);
+    const agent = this.agents.get(id);
+    if (agent ? agent.internal : !this.providerSubagents.hasLoadedPublicHistory(id)) {
+      throw new Error(`Unknown agent '${id}'`);
+    }
   }
 }
 

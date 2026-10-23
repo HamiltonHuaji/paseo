@@ -42,7 +42,11 @@ import {
 } from "../agent-projections.js";
 import { summarizeAgentActivity } from "../activity-curator.js";
 import type { AgentStorage } from "../agent-storage.js";
-import { AgentNotFoundError, ensureAgentLoaded } from "../agent-loading.js";
+import {
+  AgentNotFoundError,
+  ensureAgentLoaded,
+  ensureUnarchivedAgentLoaded,
+} from "../agent-loading.js";
 import { isStoredAgentProviderAvailable } from "../../persistence-hooks.js";
 import {
   archiveByScope,
@@ -3327,13 +3331,13 @@ function createToolCatalog(
       },
     },
     async ({ agentId, limit }) => {
-      await ensureAgentLoaded(agentId, {
+      const snapshot = await ensureAgentLoaded(agentId, {
         agentManager,
         agentStorage,
+        purpose: "history",
         logger: childLogger,
       });
       const timeline = agentManager.getTimeline(agentId);
-      const snapshot = agentManager.getAgent(agentId);
 
       return {
         content: [],
@@ -3420,6 +3424,11 @@ function createToolCatalog(
       },
     },
     async ({ agentId, requestId, response }) => {
+      await ensureUnarchivedAgentLoaded(agentId, {
+        agentManager,
+        agentStorage,
+        logger: childLogger,
+      });
       await respondToAgentPermission({
         agentManager,
         agentId,

@@ -80,6 +80,19 @@ function stickyField<T>(next: T | undefined, previous: T | null | undefined): T 
 export class ProviderSubagentStore {
   private readonly descriptors = new Map<string, ProviderSubagentDescriptor>();
   private readonly timelines = new InMemoryAgentTimelineStore();
+  private readonly historyLoadedParents = new Map<string, { internal: boolean }>();
+
+  hasLoadedHistory(parentAgentId: string): boolean {
+    return this.historyLoadedParents.has(parentAgentId);
+  }
+
+  hasLoadedPublicHistory(parentAgentId: string): boolean {
+    return this.historyLoadedParents.get(parentAgentId)?.internal === false;
+  }
+
+  markHistoryLoaded(parentAgentId: string, internal: boolean): void {
+    this.historyLoadedParents.set(parentAgentId, { internal });
+  }
 
   apply(
     parentAgentId: string,
@@ -160,6 +173,7 @@ export class ProviderSubagentStore {
   }
 
   deleteParent(parentAgentId: string): ProviderSubagentStoreEvent[] {
+    this.historyLoadedParents.delete(parentAgentId);
     const events: ProviderSubagentStoreEvent[] = [];
     for (const subagent of this.list(parentAgentId)) {
       const key = storeKey(parentAgentId, subagent.id);

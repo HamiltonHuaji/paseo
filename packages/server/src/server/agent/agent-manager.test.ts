@@ -8050,6 +8050,13 @@ test("subscribe hides provider subagents of internal parents from global subscri
     `Unknown agent '${internalAgentId}'`,
   );
   expect(manager.listProviderSubagentActivity()).toEqual([]);
+  await manager.closeAgent(internalAgentId);
+  expect(() => manager.listProviderSubagents(internalAgentId)).toThrow(
+    `Unknown agent '${internalAgentId}'`,
+  );
+  expect(() => manager.getProviderSubagent(internalAgentId, "hidden-child")).toThrow(
+    `Unknown agent '${internalAgentId}'`,
+  );
 });
 
 test("subscribe emits state events for internal agents when subscribed by agentId", async () => {
@@ -12569,3 +12576,311 @@ test("session lineage reads native fixtures without a writer and retains missing
     rmSync(workdir, { recursive: true, force: true });
   }
 });
+
+test("history readers stay outside runtime metrics, retain metadata and retry a failed replay", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-reader-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let fail = true;
+  let closedReaders = 0;
+  const client = new (class extends TestAgentClient {
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ) {
+      return new (class extends TestAgentSession {
+        override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+          yield {
+            type: "timeline",
+            provider: "codex",
+            item: { type: "user_message", text: "Original prompt", messageId: "prompt-1" },
+          };
+          if (fail) throw new Error("temporary history read failure");
+          yield {
+            type: "timeline",
+            provider: "codex",
+            item: { type: "assistant_message", text: "Recovered answer", messageId: "reply-1" },
+          };
+        }
+        override async close() {
+          closedReaders++;
+        }
+      })({ provider: "codex", cwd: config?.cwd ?? workdir });
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    await manager.closeAgent(agent.id);
+    await manager.deleteAgentState(agent.id);
+    const stored = (await storage.get(agent.id))!;
+    await storage.upsert({
+      ...stored,
+      lastModeId: "plan",
+      lastError: "Previous failure",
+      features: [createFeature({ id: "fast", label: "Fast", value: true })],
+    });
+    const before = await storage.get(agent.id);
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event), { replayState: false });
+    const deps = {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+      purpose: "history" as const,
+    };
+    await expect(ensureAgentLoaded(agent.id, deps)).rejects.toThrow(
+      "temporary history read failure",
+    );
+    expect(closedReaders).toBe(1);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(manager.getMetricsSnapshot()).toMatchObject({
+      total: 0,
+      byLifecycle: {},
+      withActiveForegroundTurn: 0,
+    });
+    expect(await storage.get(agent.id)).toEqual(before);
+    fail = false;
+    const reader = await ensureAgentLoaded(agent.id, deps);
+    expect(reader).toMatchObject({
+      lifecycle: "closed",
+      session: null,
+      currentModeId: "plan",
+      lastError: "Previous failure",
+      features: before!.features,
+    });
+    expect(manager.fetchTimeline(agent.id, { limit: 0 }).rows).toHaveLength(2);
+    expect(await manager.getTimelineRows(agent.id)).toHaveLength(2);
+    expect(manager.getTimeline(agent.id)).toHaveLength(2);
+    expect(closedReaders).toBe(2);
+    expect(manager.listAgents()).toEqual([]);
+    expect(await storage.get(agent.id)).toEqual(before);
+    expect(events).toEqual([]);
+    await manager.markAgentUnread(agent.id);
+    await manager.clearAgentAttention(agent.id);
+    expect((await storage.get(agent.id))?.lastStatus).toBe("closed");
+    expect((await storage.get(agent.id))?.requiresAttention).toBe(false);
+    expect(manager.listAgents()).toEqual([]);
+  } finally {
+    await manager.flush();
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("interactive loading after a concurrent history reader opens one writer after reader cleanup", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-reader-upgrade-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const started = deferred<void>();
+  const allowed = deferred<void>();
+  const phases: string[] = [];
+  let resumes = 0;
+  const client = new (class extends TestAgentClient {
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ) {
+      resumes++;
+      if (resumes > 1) {
+        phases.push("interactive-open");
+        return super.resumeSession(_handle, config);
+      }
+      return new (class extends TestAgentSession {
+        override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+          started.resolve();
+          await allowed.promise;
+          yield {
+            type: "timeline",
+            provider: "codex",
+            item: { type: "assistant_message", text: "Reader history" },
+          };
+        }
+        override async close() {
+          phases.push("reader-close");
+        }
+      })({ provider: "codex", cwd: workdir });
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  let agentId: string | undefined;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    await manager.closeAgent(agent.id);
+    await manager.deleteAgentState(agent.id);
+    const deps = { agentManager: manager, agentStorage: storage, logger };
+    const history = ensureAgentLoaded(agent.id, { ...deps, purpose: "history" });
+    await started.promise;
+    const interaction = ensureAgentLoaded(agent.id, deps);
+    expect(manager.listAgents()).toEqual([]);
+    allowed.resolve();
+    expect((await history).lifecycle).toBe("closed");
+    expect((await interaction).lifecycle).toBe("idle");
+    expect(phases).toEqual(["reader-close", "interactive-open"]);
+    expect(manager.listAgents()).toHaveLength(1);
+    expect(resumes).toBe(2);
+  } finally {
+    allowed.resolve();
+    if (agentId) await manager.closeAgent(agentId);
+    await manager.flush();
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test.each([false, true])(
+  "a conversation fork from a closed source uses a scoped reader (durable=%s)",
+  async (durable) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-reader-fork-"));
+    const storage = new AgentStorage(join(workdir, "agents"), logger);
+    const readers: Array<{ closed: boolean }> = [];
+    class ForkSession extends TestAgentSession {
+      override readonly capabilities = {
+        ...TEST_CAPABILITIES,
+        supportsNativeConversationFork: true,
+      };
+      closed = false;
+      override async close() {
+        this.closed = true;
+      }
+      override async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+        yield {
+          type: "provider_subagent",
+          provider: "codex",
+          event: {
+            type: "upsert",
+            id: "history-child",
+            title: "Historical child",
+            status: "completed",
+          },
+        };
+        yield {
+          type: "provider_subagent",
+          provider: "codex",
+          event: {
+            type: "timeline",
+            id: "history-child",
+            item: { type: "user_message", text: "Child first prompt" },
+          },
+        };
+        yield {
+          type: "provider_subagent",
+          provider: "codex",
+          event: {
+            type: "timeline",
+            id: "history-child",
+            item: { type: "assistant_message", text: "Child second reply" },
+          },
+        };
+        yield {
+          type: "timeline",
+          provider: "codex",
+          item: { type: "user_message", text: "Original prompt", messageId: "prompt-1" },
+        };
+        yield {
+          type: "timeline",
+          provider: "codex",
+          item: { type: "assistant_message", text: "Completed reply", messageId: "reply-1" },
+        };
+      }
+    }
+    const client = new (class extends TestAgentClient {
+      override readonly capabilities = {
+        ...TEST_CAPABILITIES,
+        supportsNativeConversationFork: true,
+      };
+      override async createSession(config: AgentSessionConfig) {
+        return new ForkSession(config);
+      }
+      override async resumeSession(
+        _handle: AgentPersistenceHandle,
+        config?: Partial<AgentSessionConfig>,
+      ) {
+        const reader = new ForkSession({ provider: "codex", cwd: config?.cwd ?? workdir });
+        readers.push(reader);
+        return reader;
+      }
+      async forkSession(
+        source: AgentSession,
+        input: import("./agent-sdk-types.js").AgentConversationForkInput,
+      ) {
+        expect((source as ForkSession).closed).toBe(false);
+        expect(input.boundaryMessageId).toBe("reply-1");
+        return new ForkSession(input.targetConfig);
+      }
+    })();
+    const durableTimeline = durable ? new RecordingTimelineStore() : undefined;
+    const manager = new AgentManager({
+      durableTimelineStore: durableTimeline,
+      clients: { codex: client },
+      registry: storage,
+      logger,
+      serverId: "reader-host",
+    });
+    try {
+      const source = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+        workspaceId: undefined,
+      });
+      await manager.closeAgent(source.id);
+      await manager.deleteAgentState(source.id);
+      if (durableTimeline) {
+        await durableTimeline.bulkInsert(source.id, [
+          {
+            seq: 1,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            item: { type: "user_message", text: "Durable prompt", messageId: "prompt-1" },
+          },
+          {
+            seq: 2,
+            timestamp: "2026-01-01T00:00:01.000Z",
+            item: { type: "assistant_message", text: "Durable reply", messageId: "reply-1" },
+          },
+        ]);
+      }
+      const before = await storage.get(source.id);
+      const fork = await manager.forkAgentFromConversation(
+        { agentId: source.id, boundaryMessageId: "reply-1" },
+        { provider: "codex", cwd: workdir },
+        undefined,
+        { workspaceId: undefined },
+      );
+      expect(readers).toHaveLength(1);
+      expect(readers[0]!.closed).toBe(true);
+      expect(manager.getAgent(source.id)).toBeNull();
+      expect(await storage.get(source.id)).toEqual(before);
+      expect(manager.listAgents().map((agent) => agent.id)).toEqual([fork.id]);
+      expect(fork.forkedFrom?.agentId).toBe(source.id);
+      expect(manager.getTimeline(source.id)).toHaveLength(2);
+      expect(manager.listProviderSubagents(source.id)).toHaveLength(1);
+      const childPage = manager.fetchProviderSubagentTimeline(source.id, "history-child", {
+        direction: "tail",
+        limit: 1,
+      });
+      await ensureAgentLoaded(source.id, {
+        agentManager: manager,
+        agentStorage: storage,
+        logger,
+        purpose: "history",
+      });
+      const olderChildPage = manager.fetchProviderSubagentTimeline(source.id, "history-child", {
+        direction: "before",
+        cursor: { epoch: childPage.epoch, seq: childPage.startSeq! },
+        limit: 1,
+      });
+      expect(olderChildPage.epoch).toBe(childPage.epoch);
+      expect(olderChildPage.staleCursor).toBe(false);
+      expect(olderChildPage.rows).toHaveLength(1);
+      expect(manager.listProviderSubagentActivity()).not.toContainEqual(
+        expect.objectContaining({ parentAgentId: source.id }),
+      );
+      await manager.closeAgent(fork.id);
+    } finally {
+      await manager.flush();
+      await storage.flush();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  },
+);

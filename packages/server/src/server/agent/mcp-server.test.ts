@@ -6600,11 +6600,9 @@ describe("agent snapshot MCP serialization", () => {
     const snapshot = {
       id: "archived-activity-agent",
       currentModeId: "default",
+      lifecycle: "closed",
     } as ManagedAgent;
-    spies.agentManager.getAgent
-      .mockReturnValueOnce(null)
-      .mockReturnValue(snapshot)
-      .mockReturnValue(snapshot);
+    spies.agentManager.getAgent.mockReturnValue(null);
     spies.agentStorage.get.mockResolvedValue(record);
     spies.agentManager.resumeAgentFromPersistence.mockResolvedValue(snapshot);
     spies.agentManager.getTimeline.mockReturnValue([
@@ -6631,11 +6629,51 @@ describe("agent snapshot MCP serialization", () => {
         currentModeId: "default",
       }),
     );
-    expect(spies.agentManager.resumeAgentFromPersistence).toHaveBeenCalled();
-    expect(spies.agentManager.hydrateTimelineFromProvider).toHaveBeenCalledWith(
+    expect(spies.agentManager.resumeAgentFromPersistence).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
       "archived-activity-agent",
-      { broadcast: expect.any(Function) },
+      expect.anything(),
+      { purpose: "history" },
     );
+    expect(spies.agentManager.hydrateTimelineFromProvider).not.toHaveBeenCalled();
+  });
+
+  it("respond_to_permission promotes a closed question and rejects archived interaction", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const record = createStoredRecord({ id: "closed-question-agent", archivedAt: null });
+    const snapshot = createManagedAgent({ id: record.id });
+    spies.agentManager.getAgent.mockReturnValue(null);
+    spies.agentStorage.get.mockResolvedValue(record);
+    spies.agentManager.resumeAgentFromPersistence.mockResolvedValue(snapshot);
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      logger,
+      providerSnapshotManager: createClaudeOnlyManager(),
+    });
+    const tool = registeredTool(server, "respond_to_permission");
+    const input = {
+      agentId: record.id,
+      requestId: "pending-question",
+      response: { behavior: "allow" as const },
+    };
+    await tool.handler(input);
+    expect(spies.agentManager.resumeAgentFromPersistence).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      record.id,
+      expect.anything(),
+      { purpose: "interactive" },
+    );
+    expect(spies.agentManager.respondToPermission).toHaveBeenCalledWith(
+      record.id,
+      input.requestId,
+      input.response,
+    );
+    spies.agentStorage.get.mockResolvedValue({ ...record, archivedAt: "2026-10-23T00:00:00.000Z" });
+    await expect(tool.handler(input)).rejects.toThrow("Agent is archived");
+    expect(spies.agentManager.respondToPermission).toHaveBeenCalledTimes(1);
   });
 
   it("get_agent_activity limit counts projected messages, not raw deltas", async () => {

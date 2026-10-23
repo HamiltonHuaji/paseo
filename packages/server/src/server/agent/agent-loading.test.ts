@@ -68,24 +68,59 @@ test("loads archived records for history and active records with the interactive
     });
     await manager.closeAgent(active.id);
 
-    await ensureAgentLoaded(archived.id, { agentManager: manager, agentStorage: storage, logger });
+    const archivedBefore = await storage.get(archived.id);
+    const loadedArchive = await ensureAgentLoaded(archived.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(loadedArchive.lifecycle).toBe("closed");
+    expect(manager.getAgent(archived.id)).toBeNull();
+    expect(manager.listAgents()).toEqual([]);
+    expect(await storage.get(archived.id)).toEqual(archivedBefore);
+    await storage.upsert({ ...archivedBefore!, persistence: null });
+    await expect(
+      ensureAgentLoaded(archived.id, { agentManager: manager, agentStorage: storage, logger }),
+    ).rejects.toThrow("No persisted provider history");
+    expect(manager.listAgents()).toEqual([]);
+    await storage.upsert(archivedBefore!);
     await ensureAgentLoaded(active.id, { agentManager: manager, agentStorage: storage, logger });
 
     const closed = await manager.createAgent({ provider: "codex", cwd: root }, closedId, {
       workspaceId: "workspace-active",
     });
     await manager.closeAgent(closed.id);
-    await ensureAgentLoaded(closed.id, {
+    const closedBefore = await storage.get(closed.id);
+    const events: unknown[] = [];
+    const unsubscribe = manager.subscribe((event) => events.push(event), {
+      agentId: closed.id,
+      replayState: false,
+    });
+    const loadedClosed = await ensureAgentLoaded(closed.id, {
       agentManager: manager,
       agentStorage: storage,
       logger,
       purpose: "history",
     });
+    unsubscribe();
+    expect(loadedClosed.lifecycle).toBe("closed");
+    expect(manager.getAgent(closed.id)).toBeNull();
+    expect(manager.listAgents().map((agent) => agent.id)).toEqual([active.id]);
+    expect(await storage.get(closed.id)).toEqual(closedBefore);
+    expect(events).toEqual([]);
     expect(resumeOptions).toEqual([
       { purpose: "history" },
       { purpose: "interactive" },
       { purpose: "history" },
     ]);
+    const promoted = await ensureAgentLoaded(closed.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(promoted.lifecycle).toBe("idle");
+    expect(manager.getAgent(closed.id)?.lifecycle).toBe("idle");
+    expect(resumeOptions.at(-1)).toEqual({ purpose: "interactive" });
   } finally {
     await Promise.all([
       manager.closeAgent(archivedId).catch(() => undefined),

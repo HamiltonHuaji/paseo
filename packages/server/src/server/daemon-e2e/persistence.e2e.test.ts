@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 import type { SessionOutboundMessage } from "../messages.js";
+import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
+import type { AgentClient, AgentPermissionRequest } from "../agent/agent-sdk-types.js";
 
 function tmpCwd(): string {
   return mkdtempSync(path.join(tmpdir(), "daemon-e2e-"));
@@ -72,6 +74,122 @@ describe("daemon E2E - persistence", () => {
       expect(assistantText.toLowerCase()).toContain("state saved");
 
       await ctx.client.deleteAgent(resumed.id);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("closed history queries and attention clearing keep the agent closed until explicit interaction", async () => {
+    const cwd = tmpCwd();
+    const manager = ctx.daemon.daemon.agentManager;
+    const storage = ctx.daemon.daemon.agentStorage;
+    try {
+      const agent = await ctx.client.createAgent({
+        provider: "codex",
+        cwd,
+        model: "gpt-5.4",
+        modeId: "full-access",
+      });
+      await ctx.client.sendMessage(agent.id, "Say 'closed history proof' and nothing else");
+      await ctx.client.waitForFinish(agent.id, 5_000);
+      await manager.closeAgent(agent.id);
+      const before = (await storage.get(agent.id))!;
+      expect(before.requiresAttention).toBe(true);
+      messages.length = 0;
+      const timeline = await ctx.client.fetchAgentTimeline(agent.id, { limit: 0 });
+      expect(timeline.agent?.status).toBe("closed");
+      expect(timeline.entries.some((entry) => entry.item.type === "assistant_message")).toBe(true);
+      const search = await ctx.client.searchAgentTimeline({
+        agentId: agent.id,
+        query: "closed history proof",
+      });
+      expect(search.locations.length).toBeGreaterThan(0);
+      expect((await ctx.client.listAgentTimelinePrompts(agent.id)).prompts).toHaveLength(1);
+      expect((await ctx.client.buildAgentForkContext(agent.id)).itemCount).toBeGreaterThan(0);
+      expect((await ctx.client.listProviderSubagents(agent.id)).subagents).toEqual([]);
+      await ctx.client.listCommands(agent.id);
+      await ctx.client.clearAgentAttention(agent.id);
+      expect(manager.getAgent(agent.id)).toBeNull();
+      expect(manager.getMetricsSnapshot().total).toBe(0);
+      const after = (await storage.get(agent.id))!;
+      expect(after.lastStatus).toBe("closed");
+      expect(after.persistence).toEqual(before.persistence);
+      expect(after.requiresAttention).toBe(false);
+      expect(
+        messages
+          .filter(
+            (message) =>
+              message.type === "agent_update" &&
+              message.payload.kind === "upsert" &&
+              message.payload.agent.id === agent.id,
+          )
+          .every(
+            (message) =>
+              message.type === "agent_update" &&
+              message.payload.kind === "upsert" &&
+              message.payload.agent.status === "closed",
+          ),
+      ).toBe(true);
+      await ctx.client.sendMessage(agent.id, "Say 'explicit continuation' and nothing else");
+      expect((await ctx.client.waitForFinish(agent.id, 5_000)).status).toBe("idle");
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+      await manager.closeAgent(agent.id);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  test("answering a question displayed in closed history explicitly resumes its writer", async () => {
+    const cwd = tmpCwd();
+    const base = createTestAgentClients().codex!;
+    const pending: AgentPermissionRequest = {
+      id: "recoverable-question",
+      provider: "codex",
+      name: "request_user_input",
+      kind: "question",
+      title: "Choose",
+      input: { questions: [{ title: "Which?", options: ["Blue", "Green"] }] },
+    };
+    let answered = false;
+    const purposes: unknown[] = [];
+    const provider: AgentClient = {
+      provider: base.provider,
+      capabilities: base.capabilities,
+      isAvailable: () => base.isAvailable(),
+      fetchCatalog: (options) => base.fetchCatalog(options),
+      createSession: (config, context) => base.createSession(config, context),
+      resumeSession: async (handle, config, context, options) => {
+        purposes.push(options?.purpose);
+        const session = await base.resumeSession(handle, config, context, options);
+        session.getPendingPermissions = () => (answered ? [] : [pending]);
+        session.respondToPermission = async (requestId, response) => {
+          expect(requestId).toBe(pending.id);
+          expect(response).toMatchObject({
+            behavior: "allow",
+            updatedInput: { answers: { "Question 1": "Green" } },
+          });
+          answered = true;
+        };
+        return session;
+      },
+    };
+    await ctx.cleanup();
+    ctx = await createDaemonTestContext({ agentClients: { codex: provider } });
+    try {
+      const agent = await ctx.client.createAgent({ provider: "codex", cwd, model: "gpt-5.4" });
+      await ctx.daemon.daemon.agentManager.closeAgent(agent.id);
+      const history = await ctx.client.fetchAgentTimeline(agent.id);
+      expect(history.agent?.status).toBe("closed");
+      expect(history.agent?.pendingPermissions.map((request) => request.id)).toEqual([pending.id]);
+      expect(ctx.daemon.daemon.agentManager.getAgent(agent.id)).toBeNull();
+      await ctx.client.respondToPermission(agent.id, pending.id, {
+        behavior: "allow",
+        updatedInput: { answers: { "Question 1": "Green" } },
+      });
+      await expect.poll(() => answered).toBe(true);
+      expect(purposes).toEqual(["history", "interactive"]);
+      expect(ctx.daemon.daemon.agentManager.getAgent(agent.id)?.lifecycle).toBe("idle");
+      await ctx.daemon.daemon.agentManager.closeAgent(agent.id);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

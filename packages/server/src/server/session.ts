@@ -5042,6 +5042,7 @@ export class Session {
     await ensureAgentLoaded(forkFrom.agentId, {
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
+      purpose: "history",
       logger: this.sessionLogger,
     });
   }
@@ -5501,24 +5502,10 @@ export class Session {
     const agentIds = Array.isArray(agentId) ? agentId : [agentId];
 
     try {
-      await Promise.all(
-        agentIds.map((id) =>
-          ensureAgentLoaded(id, {
-            agentManager: this.agentManager,
-            agentStorage: this.agentStorage,
-            logger: this.sessionLogger,
-          }),
-        ),
-      );
       await Promise.all(agentIds.map((id) => this.agentManager.clearAgentAttention(id)));
       if (requestId) {
         const agents = (
-          await Promise.all(
-            agentIds.map(async (id) => {
-              const agent = this.agentManager.getAgent(id);
-              return agent ? this.buildAgentPayload(agent) : null;
-            }),
-          )
+          await Promise.all(agentIds.map((id) => this.getAgentPayloadById(id)))
         ).filter((payload): payload is NonNullable<typeof payload> => payload !== null);
         this.emit({
           type: "clear_agent_attention_response",
@@ -5601,16 +5588,8 @@ export class Session {
     );
 
     try {
-      const existing = this.agentManager.getAgent(agentId);
-      const stored = existing ? null : await this.agentStorage.get(agentId);
-      const agent =
-        existing || (stored && !stored.archivedAt)
-          ? await ensureAgentLoaded(agentId, {
-              agentManager: this.agentManager,
-              agentStorage: this.agentStorage,
-              logger: this.sessionLogger,
-            })
-          : null;
+      const agent = this.agentManager.getAgent(agentId);
+      const stored = agent ? null : await this.agentStorage.get(agentId);
 
       if (agent?.session?.listCommands) {
         const commands = await agent.session.listCommands();
@@ -5626,14 +5605,19 @@ export class Session {
         return;
       }
 
-      if (!agent && draftConfig) {
+      if (!agent && (draftConfig || (stored && !stored.archivedAt))) {
+        const commandConfig =
+          stored && !stored.archivedAt
+            ? { ...buildConfigOverrides(stored), provider: stored.provider, cwd: stored.cwd }
+            : draftConfig!;
         const sessionConfig: AgentSessionConfig = {
-          provider: draftConfig.provider,
-          cwd: expandTilde(draftConfig.cwd),
-          ...(draftConfig.modeId ? { modeId: draftConfig.modeId } : {}),
-          ...(draftConfig.model ? { model: draftConfig.model } : {}),
-          ...(draftConfig.thinkingOptionId
-            ? { thinkingOptionId: draftConfig.thinkingOptionId }
+          ...commandConfig,
+          provider: commandConfig.provider,
+          cwd: expandTilde(commandConfig.cwd),
+          ...(commandConfig.modeId ? { modeId: commandConfig.modeId } : {}),
+          ...(commandConfig.model ? { model: commandConfig.model } : {}),
+          ...(commandConfig.thinkingOptionId
+            ? { thinkingOptionId: commandConfig.thinkingOptionId }
             : {}),
         };
 
@@ -5682,6 +5666,11 @@ export class Session {
     response: AgentPermissionResponse,
   ): Promise<void> {
     try {
+      await ensureUnarchivedAgentLoaded(agentId, {
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
+      });
       await respondToAgentPermission({
         agentManager: this.agentManager,
         agentId,
@@ -8576,6 +8565,7 @@ export class Session {
       await ensureUnarchivedAgentLoaded(msg.parentAgentId, {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
+        purpose: "history",
         logger: this.sessionLogger,
       });
       this.emit({
@@ -8609,6 +8599,7 @@ export class Session {
       await ensureUnarchivedAgentLoaded(msg.parentAgentId, {
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
+        purpose: "history",
         logger: this.sessionLogger,
       });
       const descriptor = this.agentManager.getProviderSubagent(msg.parentAgentId, msg.subagentId);

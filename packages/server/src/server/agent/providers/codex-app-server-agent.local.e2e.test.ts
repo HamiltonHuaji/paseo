@@ -451,17 +451,41 @@ throw new Error("Expected the interruption boundary to terminate the worker");
           logger,
           serverId: "rewind-crash-host",
         });
-        await ensureAgentLoaded(receipt.id, {
+        const historySnapshot = await ensureAgentLoaded(receipt.id, {
           agentManager: manager,
           agentStorage: storage,
           logger,
           purpose: "history",
         });
-        await manager.hydrateTimelineFromProvider(receipt.id);
-        expect(manager.getAgent(receipt.id)?.persistence?.sessionId).toBe(receipt.before.sessionId);
+        expect(historySnapshot.lifecycle).toBe("closed");
+        expect(historySnapshot.persistence?.sessionId).toBe(receipt.before.sessionId);
+        expect(manager.getAgent(receipt.id)).toBeNull();
         expect(
           manager.getTimeline(receipt.id).filter((item) => item.type === "user_message"),
         ).toHaveLength(2);
+        const completedBoundary = manager
+          .getTimeline(receipt.id)
+          .find((item) => item.type === "assistant_message");
+        if (completedBoundary?.type !== "assistant_message")
+          throw new Error("Expected a completed reply");
+        const historicalFork = await manager.forkAgentFromConversation(
+          { agentId: receipt.id, boundaryMessageId: completedBoundary.messageId },
+          { provider: "codex", cwd, model: "mock-model", modeId: "full-access" },
+          undefined,
+          { workspaceId: "crash-workspace" },
+        );
+        expect(manager.getAgent(receipt.id)).toBeNull();
+        expect(historicalFork.persistence!.sessionId).not.toBe(receipt.before.sessionId);
+        expect(await storage.get(receipt.id)).toMatchObject({
+          persistence: { metadata: { rewindPending: expect.anything() } },
+        });
+        await manager.closeAgent(historicalFork.id);
+        // The retry is an explicit interaction after the closed history read.
+        await ensureAgentLoaded(receipt.id, {
+          agentManager: manager,
+          agentStorage: storage,
+          logger,
+        });
         await manager.rewind(receipt.id, receipt.boundary, "conversation");
         const first = manager.getAgent(receipt.id)!;
         expect(first.id).toBe(receipt.id);

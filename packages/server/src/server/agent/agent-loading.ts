@@ -21,7 +21,7 @@ export class AgentNotFoundError extends Error {
 
 interface PendingAgentInitialization {
   promise: Promise<ManagedAgent>;
-  options: { broadcastTimeline: boolean };
+  options: { broadcastTimeline: boolean; purpose: "history" | "interactive" };
 }
 
 const pendingAgentInitializations = new Map<string, PendingAgentInitialization>();
@@ -77,7 +77,15 @@ export async function ensureAgentLoaded(
   const inflight = pendingAgentInitializations.get(agentId);
   if (inflight) {
     inflight.options.broadcastTimeline ||= deps.broadcastTimeline === true;
-    return inflight.promise;
+    const snapshot = await inflight.promise;
+    if (
+      deps.purpose !== "history" &&
+      inflight.options.purpose === "history" &&
+      !(await deps.agentStorage.get(agentId))?.archivedAt
+    ) {
+      return ensureAgentLoaded(agentId, deps);
+    }
+    return snapshot;
   }
 
   const existing = deps.agentManager.getAgent(agentId);
@@ -93,11 +101,20 @@ export async function ensureAgentLoaded(
   const laterInflight = pendingAgentInitializations.get(agentId);
   if (laterInflight) {
     laterInflight.options.broadcastTimeline ||= deps.broadcastTimeline === true;
-    return laterInflight.promise;
+    const snapshot = await laterInflight.promise;
+    if (
+      deps.purpose !== "history" &&
+      laterInflight.options.purpose === "history" &&
+      !(await deps.agentStorage.get(agentId))?.archivedAt
+    ) {
+      return ensureAgentLoaded(agentId, deps);
+    }
+    return snapshot;
   }
 
-  const pendingOptions = {
+  const pendingOptions: PendingAgentInitialization["options"] = {
     broadcastTimeline: deps.broadcastTimeline === true,
+    purpose: deps.purpose ?? "interactive",
   };
   const initPromise = (async () => {
     const record = await deps.agentStorage.get(agentId);
@@ -112,18 +129,23 @@ export async function ensureAgentLoaded(
 
     const handle = toAgentPersistenceHandle(validProviders, record.persistence);
 
+    pendingOptions.purpose = record.archivedAt ? "history" : (deps.purpose ?? "interactive");
     let snapshot: ManagedAgent;
     if (handle) {
       snapshot = await deps.agentManager.resumeAgentFromPersistence(
         handle,
         buildConfigOverrides(record),
         agentId,
-        { ...extractTimestamps(record), attention: extractAttention(record) },
-        record.archivedAt ? { purpose: "history" } : { purpose: deps.purpose ?? "interactive" },
+        {
+          ...extractTimestamps(record),
+          attention: extractAttention(record),
+          historyBroadcast: () => pendingOptions.broadcastTimeline,
+        },
+        { purpose: pendingOptions.purpose },
       );
       deps.logger.info({ agentId, provider: record.provider }, "Agent resumed from persistence");
     } else {
-      if (deps.purpose === "history")
+      if (pendingOptions.purpose === "history")
         throw new Error("No persisted provider history is available for this agent");
       // No provider handle to resume: this starts the agent's first session rather than
       // bringing one back, so it stamps activity and carries no stored attention. Records
@@ -142,21 +164,21 @@ export async function ensureAgentLoaded(
       deps.logger.info({ agentId, provider: record.provider }, "Agent created from stored config");
     }
 
-    await deps.agentManager.hydrateTimelineFromProvider(agentId, {
-      broadcast: () => pendingOptions.broadcastTimeline,
-    });
+    if (snapshot.lifecycle !== "closed") {
+      await deps.agentManager.hydrateTimelineFromProvider(agentId, {
+        broadcast: () => pendingOptions.broadcastTimeline,
+      });
+    }
     return deps.agentManager.getAgent(agentId) ?? snapshot;
   })();
 
-  const pending: PendingAgentInitialization = { promise: initPromise, options: pendingOptions };
+  const pending: PendingAgentInitialization = {
+    promise: initPromise.finally(() => {
+      if (pendingAgentInitializations.get(agentId) === pending)
+        pendingAgentInitializations.delete(agentId);
+    }),
+    options: pendingOptions,
+  };
   pendingAgentInitializations.set(agentId, pending);
-
-  try {
-    return await initPromise;
-  } finally {
-    const current = pendingAgentInitializations.get(agentId);
-    if (current === pending) {
-      pendingAgentInitializations.delete(agentId);
-    }
-  }
+  return pending.promise;
 }
