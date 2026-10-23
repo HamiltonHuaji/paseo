@@ -43,6 +43,8 @@ export interface StartAgentRunOptions {
   runOptions?: AgentRunOptions;
   /** Ask the provider to deny permissions blocking this steer. */
   clearPendingPermissions?: boolean;
+  /** Wait for AgentManager's accepted-turn boundary instead of only creating its iterator. */
+  waitForStart?: boolean;
 }
 
 export type PromptDispatchDisposition = "out_of_band" | "steered" | "turn_started";
@@ -165,6 +167,13 @@ async function startAgentRunInner(
     "agent.session.start_stream.iterator_returned",
   );
   options?.onDispatch?.("turn_started");
+  if (options?.waitForStart) {
+    const first = await iterator.next();
+    if (first.done || first.value.type !== "turn_started") {
+      await iterator.return(undefined);
+      throw new Error("The follow-up turn was not accepted");
+    }
+  }
   void (async () => {
     try {
       try {

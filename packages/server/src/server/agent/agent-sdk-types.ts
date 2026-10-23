@@ -675,6 +675,8 @@ export interface AgentResumeSessionOptions {
  */
 export interface AgentPermissionResult {
   followUpPrompt?: AgentPromptInput;
+  /** Commit an async answer only after its follow-up turn is accepted; false permits retry. */
+  completeFollowUp?: (accepted: boolean) => void | Promise<void>;
 }
 
 export interface AgentUsageSession {

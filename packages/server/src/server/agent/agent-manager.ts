@@ -3472,9 +3472,12 @@ export class AgentManager {
       throw new Error("A response to this permission request is already being submitted");
     }
     agent.inFlightPermissionResponses.add(requestId);
-
-    try {
-      const result = await agent.session.respondToPermission(requestId, response);
+    let deferred = false;
+    const release = () => {
+      agent.inFlightPermissionResponses.delete(requestId);
+      agent.bufferedPermissionResolutions.delete(requestId);
+    };
+    const commit = async () => {
       agent.pendingPermissions.delete(requestId);
 
       try {
@@ -3492,11 +3495,31 @@ export class AgentManager {
         agent.bufferedPermissionResolutions.delete(requestId);
         this.dispatchStream(agent.id, bufferedResolution, { timestamp: new Date().toISOString() });
       }
-
+    };
+    try {
+      const result = await agent.session.respondToPermission(requestId, response);
+      if (result?.completeFollowUp) {
+        const complete = result.completeFollowUp;
+        deferred = true;
+        let settled = false;
+        return {
+          ...result,
+          completeFollowUp: async (accepted) => {
+            if (settled) return;
+            settled = true;
+            try {
+              await complete(accepted);
+              if (accepted) await commit();
+            } finally {
+              release();
+            }
+          },
+        };
+      }
+      await commit();
       return result;
     } finally {
-      agent.inFlightPermissionResponses.delete(requestId);
-      agent.bufferedPermissionResolutions.delete(requestId);
+      if (!deferred) release();
     }
   }
 

@@ -520,6 +520,7 @@ interface PersistedSubAgentRoute {
 interface CodexThreadHistoryProjection {
   timeline: PersistedTimelineEntry[];
   subAgentRoutes: PersistedSubAgentRoute[];
+  terminalStatus: "completed" | "failed" | "canceled" | null;
 }
 
 function codexMicrosoftStorePackageRoot(): string | null {
@@ -2177,6 +2178,27 @@ export async function resolveCodexForkBeforeTurnId(input: {
   throw new Error("The selected response is no longer followed by a persisted Codex turn");
 }
 
+function settleHistoricalSubAgentItem(
+  item: AgentTimelineItem,
+  activity: CodexSubAgentActivity | null,
+): AgentTimelineItem {
+  if (item.type !== "tool_call") return item;
+  if (activity) return settleHistoricalSubAgentActivity(item, activity.kind);
+  if (item.detail.type === "sub_agent" && item.status === "running") {
+    return settleHistoricalSubAgentActivity(item, "started");
+  }
+  return item;
+}
+
+function historicalTurnTerminalStatus(
+  status: unknown,
+): CodexThreadHistoryProjection["terminalStatus"] {
+  if (status === "completed") return "completed";
+  if (status === "failed" || status === "errored") return "failed";
+  if (status === "interrupted") return "canceled";
+  return null;
+}
+
 async function loadCodexThreadHistoryTimeline(params: {
   threadId: string;
   cwd: string | null;
@@ -2209,10 +2231,10 @@ async function loadCodexThreadHistoryTimeline(params: {
       for (const timelineItem of threadItemToTimelineEntries(item, { cwd: params.cwd })) {
         const timestamp =
           readCodexHistoryTimestamp(item) ?? readCodexTurnHistoryTimestamp(turn, timelineItem);
-        const settledTimelineItem =
-          historicalSubAgentActivity && timelineItem.type === "tool_call"
-            ? settleHistoricalSubAgentActivity(timelineItem, historicalSubAgentActivity.kind)
-            : timelineItem;
+        const settledTimelineItem = settleHistoricalSubAgentItem(
+          timelineItem,
+          historicalSubAgentActivity,
+        );
         timeline.push({
           item: settledTimelineItem,
           timestamp: timestamp ?? undefined,
@@ -2234,7 +2256,8 @@ async function loadCodexThreadHistoryTimeline(params: {
         : [];
     },
   );
-  return { timeline, subAgentRoutes };
+  const terminalStatus = historicalTurnTerminalStatus(response.thread.turns.at(-1)?.status);
+  return { timeline, subAgentRoutes, terminalStatus };
 }
 
 function readCodexThread(client: CodexAppServerClientLike, threadId: string): Promise<unknown> {
@@ -2627,6 +2650,13 @@ const CodexEventThreadRolledBackNotificationSchema = z
 
 type ParsedCodexNotification =
   | { kind: "thread_started"; threadId: string }
+  | {
+      kind: "mcp_startup_status";
+      threadId: string | null;
+      name: string;
+      status: string;
+      error: string | null;
+    }
   | { kind: "turn_started"; turnId: string; threadId: string | null }
   | {
       kind: "turn_completed";
@@ -2748,6 +2778,32 @@ function isCodexDeltaNotification(
 }
 
 const CodexNotificationSchema = z.union([
+  z
+    .object({
+      method: z.literal("mcpServer/startupStatus/updated"),
+      params: z.object({
+        threadId: z.string().nullish(),
+        name: z.string(),
+        status: z.string(),
+        error: z.string().nullish(),
+      }),
+    })
+    .transform(
+      ({ params }): ParsedCodexNotification => ({
+        kind: "mcp_startup_status",
+        threadId: params.threadId ?? null,
+        name: params.name,
+        status: params.status,
+        error: params.error ?? null,
+      }),
+    ),
+  z.object({ method: z.literal("mcpServer/startupStatus/updated"), params: z.unknown() }).transform(
+    ({ method, params }): ParsedCodexNotification => ({
+      kind: "invalid_payload",
+      method,
+      params,
+    }),
+  ),
   z
     .object({ method: z.literal("thread/started"), params: ThreadStartedNotificationSchema })
     .transform(
@@ -4136,6 +4192,9 @@ export class CodexAppServerAgentSession implements AgentSession {
     }
     this.resetCodexUserMessageTurns();
     for (const entry of timeline) {
+      if (entry.item.type === "tool_call" && entry.item.detail.type === "sub_agent") {
+        entry.item = this.subAgentCallsByCallId.get(entry.item.callId)?.toolCall ?? entry.item;
+      }
       if (entry.item.type === "tool_call" && entry.item.name === "request_user_input_async") {
         entry.item = this.asyncQuestions.timeline(entry.item.callId) ?? entry.item;
       }
@@ -4175,6 +4234,12 @@ export class CodexAppServerAgentSession implements AgentSession {
           cwd: this.config.cwd ?? null,
           requestThread: (childThreadId) => readCodexThread(client, childThreadId),
         });
+        if (
+          next.route.toolCall.metadata?.executionStatus === "unknown" &&
+          childHistory.terminalStatus
+        ) {
+          this.emitSubAgentActivityUpdate(next.route.toolCall.callId, childHistory.terminalStatus);
+        }
         for (const entry of childHistory.timeline) {
           this.emitProviderSubagentTimeline(next.route.childThreadId, entry.item, entry.timestamp);
         }
@@ -4940,14 +5005,24 @@ export class CodexAppServerAgentSession implements AgentSession {
       }
       followUpPrompt = undefined;
     }
-    this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: prepared.complete() });
-    this.emitEvent({
-      type: "permission_resolved",
-      provider: CODEX_PROVIDER,
-      requestId,
-      resolution: response,
-    });
-    return followUpPrompt ? { followUpPrompt } : undefined;
+    const complete = () => {
+      this.emitEvent({ type: "timeline", provider: CODEX_PROVIDER, item: prepared.complete() });
+      this.emitEvent({
+        type: "permission_resolved",
+        provider: CODEX_PROVIDER,
+        requestId,
+        resolution: response,
+      });
+    };
+    if (followUpPrompt) {
+      return {
+        followUpPrompt,
+        completeFollowUp: (accepted) => {
+          if (accepted) complete();
+        },
+      };
+    }
+    complete();
   }
 
   private handlePlanPermissionResponse(params: {
@@ -5691,7 +5766,8 @@ export class CodexAppServerAgentSession implements AgentSession {
       !this.loadingPersistedHistory &&
       event.type === "timeline" &&
       event.item.type === "tool_call" &&
-      event.item.detail.type !== "sub_agent"
+      event.item.detail.type !== "sub_agent" &&
+      event.item.name !== "plan_approval"
     ) {
       if (event.item.status === "running") this.pendingRootTools.set(event.item.callId, event.item);
       else this.pendingRootTools.delete(event.item.callId);
@@ -5834,6 +5910,9 @@ export class CodexAppServerAgentSession implements AgentSession {
       return;
     }
     switch (parsed.kind) {
+      case "mcp_startup_status":
+        this.handleMcpStartupStatus(parsed);
+        return;
       case "thread_started":
         this.handleThreadStartedNotification(parsed);
         return;
@@ -5884,6 +5963,21 @@ export class CodexAppServerAgentSession implements AgentSession {
       default:
         return;
     }
+  }
+
+  private handleMcpStartupStatus(
+    parsed: Extract<ParsedCodexNotification, { kind: "mcp_startup_status" }>,
+  ): void {
+    if (parsed.status !== "failed" && parsed.status !== "cancelled") return;
+    this.emitEvent({
+      type: "timeline",
+      provider: CODEX_PROVIDER,
+      item: {
+        type: "notification",
+        level: "warning",
+        message: `MCP server ${parsed.name}: ${parsed.error ?? `startup ${parsed.status}`}. Reload the session to retry tool discovery.`,
+      },
+    });
   }
 
   private resolveCodexThreadRoute(threadId: string | null): CodexThreadRoute {

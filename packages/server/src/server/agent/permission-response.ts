@@ -33,8 +33,16 @@ export async function respondToAgentPermission(
 
   if (result?.followUpPrompt) {
     logger.debug({ agentId }, "Permission response requires follow-up turn, starting agent stream");
-    await startAgentRun(agentManager, agentId, result.followUpPrompt, logger, {
-      replaceRunning: true,
-    });
+    try {
+      await startAgentRun(agentManager, agentId, result.followUpPrompt, logger, {
+        // An async answer must not interrupt a turn that began after the question was answered.
+        replaceRunning: !result.completeFollowUp,
+        waitForStart: Boolean(result.completeFollowUp),
+      });
+    } catch (error) {
+      await result.completeFollowUp?.(false);
+      throw error;
+    }
+    await result.completeFollowUp?.(true);
   }
 }

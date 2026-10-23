@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { CodexAppServerAgentSession } from "./codex-app-server-agent.js";
 import {
   createFakeCodexAppServer,
@@ -9,6 +9,7 @@ import {
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import type { AgentStreamEvent } from "../agent-sdk-types.js";
 import { AgentManager } from "../agent-manager.js";
+import { respondToAgentPermission } from "../permission-response.js";
 
 const questionItem = {
   type: "agentMessage",
@@ -40,12 +41,12 @@ async function setup(metadata?: Record<string, unknown>, rejectSteer = false) {
   const started = waitForNextEvent(session, "turn_started");
   appServer.startsTurn({ threadId: "thread-1", turnId: "native-turn" });
   await started;
-  async function ask() {
-    const shown = waitForTimelineToolCall(session, questionItem.id);
+  async function ask(item = questionItem) {
+    const shown = waitForTimelineToolCall(session, item.id);
     appServer.child.stdout.write(
       JSON.stringify({
         method: "item/completed",
-        params: { threadId: "thread-1", turnId: "native-turn", item: questionItem },
+        params: { threadId: "thread-1", turnId: "native-turn", item },
       }) + "\n",
     );
     await shown;
@@ -357,6 +358,204 @@ test("keeps a failed answer pending for retry", async () => {
   }
 });
 
+test("answering an async question preserves an unrelated blocking approval", async () => {
+  const { session, appServer, ask } = await setup();
+  try {
+    await ask();
+    const permission = waitForNextEvent(session, "permission_requested");
+    appServer.requestCommandApproval({
+      itemId: "unrelated-command",
+      threadId: "thread-1",
+      turnId: "native-turn",
+      command: "echo approval",
+      cwd: tmpdir(),
+      reason: "Separate command approval",
+    });
+    const blocking = await permission;
+    await session.respondToPermission("permission-async-question-1", answer);
+    expect(session.getPendingPermissions().map((request) => request.id)).toEqual([
+      blocking.request.id,
+    ]);
+    const decision = appServer.waitForCommandApprovalDecision("unrelated-command");
+    await session.respondToPermission(blocking.request.id, {
+      behavior: "deny",
+      message: "Not now",
+    });
+    await expect(decision).resolves.toMatchObject({ decision: "decline" });
+    expect(session.getPendingPermissions()).toEqual([]);
+  } finally {
+    await session.close();
+  }
+});
+
+test("keeps separate multi-question answers across failure and restart", async () => {
+  const first = await setup(undefined, true);
+  const secondItem = {
+    ...questionItem,
+    id: "async-question-2",
+    text: "Which shape? What should the label say?",
+    questions: [
+      { title: "Which shape?", options: ["Round", "Square"] },
+      { title: "What should the label say?", options: [] },
+    ],
+  };
+  let metadata: Record<string, unknown> | undefined;
+  try {
+    await first.ask();
+    await first.ask(secondItem);
+    const ids = first.session.getPendingPermissions().map((request) => request.id);
+    const secondAnswer = {
+      behavior: "allow" as const,
+      updatedInput: {
+        answers: {
+          "Question 1": "Round",
+          "Question 2": "自由文本 label\nwith a second line",
+        },
+      },
+    };
+    await expect(first.session.respondToPermission(ids[1]!, secondAnswer)).rejects.toThrow(
+      "Delivery failed",
+    );
+    expect(first.session.getPendingPermissions().map((request) => request.id)).toEqual(ids);
+    first.allowAnswers();
+    await first.session.respondToPermission(ids[1]!, secondAnswer);
+    expect(first.session.getPendingPermissions().map((request) => request.id)).toEqual([ids[0]]);
+    const requests = first.appServer
+      .requests()
+      .filter((request) => request.method === "turn/steer");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toMatchObject({
+      params: {
+        input: [
+          {
+            type: "text",
+            text: expect.stringContaining(
+              "Which shape?\nRound\n\nWhat should the label say?\n自由文本 label\nwith a second line",
+            ),
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(requests[1])).not.toContain("Which color?");
+    metadata = first.session.describePersistence()!.metadata;
+  } finally {
+    await first.session.close();
+  }
+  const resumed = await setup(metadata);
+  try {
+    expect(resumed.session.getPendingPermissions().map((request) => request.id)).toEqual([
+      "permission-async-question-1",
+    ]);
+    await resumed.ask(secondItem);
+    expect(resumed.session.getPendingPermissions().map((request) => request.id)).toEqual([
+      "permission-async-question-1",
+    ]);
+    await resumed.session.respondToPermission("permission-async-question-1", answer);
+    expect(resumed.session.getPendingPermissions()).toEqual([]);
+    expect(resumed.session.describePersistence()!.metadata?.asyncQuestions).toEqual([
+      expect.objectContaining({
+        item: expect.objectContaining({ id: questionItem.id }),
+        resolution: ["Green"],
+      }),
+      expect.objectContaining({
+        item: expect.objectContaining({ id: secondItem.id }),
+        resolution: ["Round", "自由文本 label\nwith a second line"],
+      }),
+    ]);
+  } finally {
+    await resumed.session.close();
+  }
+});
+
+test("retains a late async answer when the follow-up turn cannot start", async () => {
+  const { session, ask, finish } = await setup();
+  const { manager, agent } = await manage(session);
+  try {
+    await ask();
+    const [permission] = session.getPendingPermissions();
+    await finish();
+    const start = vi
+      .spyOn(session, "startTurn")
+      .mockRejectedValue(new Error("Follow-up unavailable"));
+    await expect(
+      respondToAgentPermission({
+        agentManager: manager,
+        agentId: agent.id,
+        requestId: permission.id,
+        response: answer,
+        logger: createTestLogger(),
+      }),
+    ).rejects.toThrow("Follow-up unavailable");
+    expect(session.getPendingPermissions().map((request) => request.id)).toEqual([permission.id]);
+    expect(manager.getAgent(agent.id)?.persistence?.metadata?.asyncQuestions).toEqual([
+      expect.not.objectContaining({ resolution: expect.anything() }),
+    ]);
+    start.mockRestore();
+    await respondToAgentPermission({
+      agentManager: manager,
+      agentId: agent.id,
+      requestId: permission.id,
+      response: answer,
+      logger: createTestLogger(),
+    });
+    expect(session.getPendingPermissions()).toEqual([]);
+    expect(manager.getAgent(agent.id)?.persistence?.metadata?.asyncQuestions).toEqual([
+      expect.objectContaining({ resolution: ["Green"] }),
+    ]);
+  } finally {
+    await manager.closeAgent(agent.id);
+  }
+});
+
+test("does not interrupt a new turn when a late answer races its start", async () => {
+  const { session, ask, finish, appServer } = await setup();
+  const { manager, agent } = await manage(session);
+  let unrelatedRun: AsyncGenerator<AgentStreamEvent> | undefined;
+  try {
+    await ask();
+    const [permission] = session.getPendingPermissions();
+    await finish();
+    const respond = manager.respondToPermission.bind(manager);
+    const response = vi
+      .spyOn(manager, "respondToPermission")
+      .mockImplementation(async (...args) => {
+        const result = await respond(...args);
+        unrelatedRun = manager.streamAgent(agent.id, "Unrelated new turn");
+        await unrelatedRun.next();
+        const started = waitForNextEvent(session, "turn_started");
+        appServer.startsTurn({ threadId: "thread-1", turnId: "native-turn" });
+        await started;
+        return result;
+      });
+    await expect(
+      respondToAgentPermission({
+        agentManager: manager,
+        agentId: agent.id,
+        requestId: permission.id,
+        response: answer,
+        logger: createTestLogger(),
+      }),
+    ).rejects.toThrow("already has an active run");
+    expect(session.getPendingPermissions().map((request) => request.id)).toEqual([permission.id]);
+    expect(appServer.requests().some((request) => request.method === "turn/interrupt")).toBe(false);
+    response.mockRestore();
+    // A retry during the new turn steers the answer without replacing the turn.
+    await respondToAgentPermission({
+      agentManager: manager,
+      agentId: agent.id,
+      requestId: permission.id,
+      response: answer,
+      logger: createTestLogger(),
+    });
+    expect(session.getPendingPermissions()).toEqual([]);
+    expect(appServer.requests().some((request) => request.method === "turn/steer")).toBe(true);
+    expect(appServer.requests().some((request) => request.method === "turn/interrupt")).toBe(false);
+  } finally {
+    await manager.closeAgent(agent.id);
+    await unrelatedRun?.return(undefined);
+  }
+});
+
 test("Stop dismisses async questions before cancellation and keeps them dismissed after resume", async () => {
   const first = await setup();
   let metadata: Record<string, unknown> | undefined;
@@ -394,16 +593,28 @@ test("Stop dismisses async questions before cancellation and keeps them dismisse
 });
 
 test("late answers use the existing follow-up prompt and dismissal does not interrupt", async () => {
-  const { session, appServer, ask, finish } = await setup();
+  const { session, appServer, events, ask, finish } = await setup();
   try {
     await ask();
     const [permission] = session.getPendingPermissions();
     expect(permission).toBeDefined();
     await finish();
     expect(session.getPendingPermissions()).toHaveLength(1);
-    expect(await session.respondToPermission(permission.id, answer)).toEqual({
+    expect(
+      events.findLast(
+        (event) =>
+          event.type === "timeline" &&
+          event.item.type === "tool_call" &&
+          event.item.callId === questionItem.id,
+      ),
+    ).toMatchObject({ item: { status: "completed" } });
+    const result = await session.respondToPermission(permission.id, answer);
+    expect(result).toMatchObject({
       followUpPrompt: "Answers to your questions:\n\nWhich color?\nGreen",
     });
+    expect(session.getPendingPermissions()).toHaveLength(1);
+    await result?.completeFollowUp?.(true);
+    expect(session.getPendingPermissions()).toEqual([]);
     expect(appServer.requests().some((request) => request.method === "turn/interrupt")).toBe(false);
   } finally {
     await session.close();
