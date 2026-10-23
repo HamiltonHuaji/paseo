@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 
 import { AgentManager } from "../agent-manager.js";
@@ -64,6 +64,7 @@ function functionCallEvent(
   callId: string,
   name: string,
   argumentsJson: string,
+  namespace?: string,
 ): Record<string, unknown> {
   return {
     type: "response.output_item.done",
@@ -71,6 +72,7 @@ function functionCallEvent(
       type: "function_call",
       call_id: callId,
       name,
+      ...(namespace ? { namespace } : {}),
       arguments: argumentsJson,
     },
   };
@@ -126,7 +128,7 @@ function assistantMessageSse(text: string): string {
   ]);
 }
 
-async function startMockResponsesServer(sequence: string[]): Promise<{
+async function startMockResponsesServer(sequence: (string | null)[]): Promise<{
   url: string;
   close: () => Promise<void>;
   requestBodies: string[];
@@ -143,12 +145,17 @@ async function startMockResponsesServer(sequence: string[]): Promise<{
         res.end("not found");
         return;
       }
-      const body = sequence[index] ?? assistantMessageSse("done");
+      const body =
+        sequence[index] === null ? null : (sequence[index] ?? assistantMessageSse("done"));
       index += 1;
       res.statusCode = 200;
       res.setHeader("content-type", "text/event-stream");
       res.setHeader("cache-control", "no-cache");
-      res.end(body);
+      if (body === null) {
+        res.write(sse([responseCreated("interrupted-response")]));
+      } else {
+        res.end(body);
+      }
     });
   });
 
@@ -163,6 +170,7 @@ async function startMockResponsesServer(sequence: string[]): Promise<{
     requestBodies,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        server.closeAllConnections();
         server.close((error) => {
           if (error) reject(error);
           else resolve();
@@ -217,6 +225,124 @@ function waitForEvent<TEvent extends AgentStreamEvent>(params: {
 }
 
 describe("Codex app-server provider (local e2e)", () => {
+  test.runIf(isCodexInstalled())(
+    "keeps runtime MCP tools callable after interruption, rewind and resume",
+    async () => {
+      const cwd = mkdtempSync(path.join(os.tmpdir(), "codex-mcp-continuity-"));
+      const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-mcp-home-"));
+      const fixture = path.join(cwd, "mcp.mjs");
+      const calls = path.join(cwd, "calls.txt");
+      writeFileSync(calls, "");
+      writeFileSync(
+        fixture,
+        `import { appendFileSync } from "node:fs";
+import { McpServer } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/sdk/server/mcp.js"))};
+import { StdioServerTransport } from ${JSON.stringify(import.meta.resolve("@modelcontextprotocol/sdk/server/stdio.js"))};
+const server = new McpServer({ name: "continuity", version: "1.0.0" });
+server.registerTool("marker", { description: "Record an actual MCP call", inputSchema: {} }, async () => {
+  appendFileSync(${JSON.stringify(calls)}, "called\\n");
+  return { content: [{ type: "text", text: "MCP_CONTINUITY_OK" }] };
+});
+await server.connect(new StdioServerTransport());
+`,
+      );
+      const toolResponse = sse([
+        responseCreated("mcp-response"),
+        functionCallEvent("marker-call", "marker", "{}", "mcp__continuity"),
+        responseCompleted("mcp-response"),
+      ]);
+      const done = assistantMessageSse("done");
+      const model = await startMockResponsesServer([
+        toolResponse,
+        done,
+        toolResponse,
+        done,
+        null,
+        toolResponse,
+        done,
+        toolResponse,
+        done,
+        toolResponse,
+        done,
+      ]);
+      const client = new CodexAppServerAgentClient(createTestLogger());
+      const config = {
+        provider: "codex",
+        cwd,
+        modeId: "auto",
+        model: "mock-model",
+        mcpServers: {
+          continuity: { type: "stdio" as const, command: process.execPath, args: [fixture] },
+        },
+        toolPolicy: { preapproved: [{ server: "continuity", tool: "marker" }] },
+      };
+      const context = { env: { CODEX_HOME: codexHome } };
+      let session: Awaited<ReturnType<typeof client.createSession>> | undefined;
+      try {
+        writeMockCodexConfig(codexHome, model.url);
+        session = await client.createSession(config, context);
+        const active = session;
+        const userIds: string[] = [];
+        active.subscribe((event) => {
+          if (event.type === "timeline" && event.item.type === "user_message") {
+            userIds.push(event.item.messageId);
+          }
+        });
+        const assertCalls = (count: number) => {
+          expect(readFileSync(calls, "utf8").split("\n").filter(Boolean)).toHaveLength(count);
+        };
+        await active.run("first tool call");
+        assertCalls(1);
+        await active.run("second tool call");
+        assertCalls(2);
+
+        await active.startTurn("interrupt this response");
+        await expect.poll(() => model.requestBodies.length).toBe(5);
+        const canceled = waitForEvent({
+          session: active,
+          timeoutMs: 10_000,
+          label: "interrupted turn completion",
+          predicate: (event): event is Extract<AgentStreamEvent, { type: "turn_canceled" }> =>
+            event.type === "turn_canceled",
+        });
+        await active.interrupt();
+        await canceled;
+        await active.run("tool call after interruption");
+        assertCalls(3);
+
+        const before = active.describePersistence()?.sessionId;
+        expect(userIds[1]).toBeTruthy();
+        await active.revertConversation({ messageId: userIds[1]! });
+        expect(active.describePersistence()?.sessionId).not.toBe(before);
+        await active.run("tool call after rewind");
+        assertCalls(4);
+
+        const persistence = active.describePersistence();
+        expect(persistence).not.toBeNull();
+        await active.close();
+        session = await client.resumeSession(persistence!, config, context);
+        await session.run("tool call after resume");
+        assertCalls(5);
+        for (const index of [0, 2, 5, 7, 9]) {
+          expect(JSON.parse(model.requestBodies[index]!).tools).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                name: "mcp__continuity",
+                tools: expect.arrayContaining([expect.objectContaining({ name: "marker" })]),
+              }),
+            ]),
+          );
+        }
+      } finally {
+        await session?.close();
+        await model.close();
+        rmSync(cwd, { recursive: true, force: true });
+        rmSync(codexHome, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
+
   test.runIf(isCodexInstalled())(
     "reloads a persisted idle thread repeatedly without overlapping writers",
     async () => {
