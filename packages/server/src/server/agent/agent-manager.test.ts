@@ -12662,6 +12662,9 @@ test("history readers stay outside runtime metrics, retain metadata and retry a 
     expect((await storage.get(agent.id))?.lastStatus).toBe("closed");
     expect((await storage.get(agent.id))?.requiresAttention).toBe(false);
     expect(manager.listAgents()).toEqual([]);
+    expect(events.findLast((event) => event.type === "agent_state")).toMatchObject({
+      agent: { lifecycle: "closed", runtimeInfo: before!.runtimeInfo },
+    });
   } finally {
     await manager.flush();
     await storage.flush();
