@@ -26,6 +26,9 @@ Evidence is something someone else can look at:
 
 Redact what you need to, keep the technical details. If an agent did the work, submit its raw output. A summary drops the details someone else needs to check it.
 
+Recorded acceptance runs: [viewer transport](qa-evidence/viewer-contracts-2026-10-22.md) and
+[native composer, viewer lifecycle and two-host routing](qa-evidence/native-contracts-2026-10-23.md).
+
 ## Does it work well
 
 A feature that works but stutters, shifts the layout, or misaligns by two pixels is not done.
