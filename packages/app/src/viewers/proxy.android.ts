@@ -9,6 +9,7 @@ import {
   type ViewerProxyInput,
 } from "@getpaseo/client/internal/viewer-http-proxy";
 import { createViewerClient } from "./client";
+import { createViewerTaskLifetime } from "./task-lifetime";
 import { readValidatedJson } from "@/storage/validated-storage";
 
 interface ProxyEvents {
@@ -16,7 +17,7 @@ interface ProxyEvents {
   onData: (event: { id: string; base64: string }) => void;
   onEnd: (event: { id: string }) => void;
   onReset: (event: { id: string }) => void;
-  onStopped: (event: { disabled: boolean }) => void;
+  onStopped: (event: { disabled: boolean; serviceId: string }) => void;
 }
 declare class ProxyModule extends NativeModule<{
   [Event in keyof ProxyEvents]: ProxyEvents[Event];
@@ -28,6 +29,7 @@ declare class ProxyModule extends NativeModule<{
   end(id: string): Promise<void>;
   reset(id: string): Promise<void>;
   getState(): Promise<unknown>;
+  getServiceId(): Promise<string | null>;
 }
 
 const native = requireNativeModule<ProxyModule>("PaseoViewerProxy");
@@ -38,7 +40,7 @@ const stateReady = readValidatedJson(AsyncStorage, STORAGE_KEY, ViewerProxyState
 const upstreams = new Map<string, ReturnType<typeof createTunnelUpstream>>();
 const streams = new Map<string, { tunnel: DaemonTunnel | null; paused: boolean }>();
 let mutation = Promise.resolve();
-let finishTask: (() => void) | null = null;
+const tasks = createViewerTaskLifetime(() => native.getServiceId());
 
 function mutate<Result>(operation: () => Promise<Result>): Promise<Result> {
   const pending = mutation.then(operation);
@@ -147,13 +149,13 @@ native.addListener("onEnd", ({ id }) => {
 native.addListener("onReset", ({ id }) => {
   reset(id);
 });
-native.addListener("onStopped", ({ disabled }) => {
+native.addListener("onStopped", ({ disabled, serviceId }) => {
   for (const id of streams.keys()) reset(id);
   const active = [...upstreams.values()];
   upstreams.clear();
-  const finish = finishTask;
-  finishTask = null;
-  void Promise.allSettled(active.map((upstream) => upstream.close())).then(() => finish?.());
+  void Promise.allSettled(active.map((upstream) => upstream.close())).then(() =>
+    tasks.stop(serviceId),
+  );
   if (disabled)
     void mutate(async () => {
       const state = await stateReady;
@@ -162,10 +164,8 @@ native.addListener("onStopped", ({ disabled }) => {
     }).catch(reportError);
 });
 
-export function runViewerProxyTask(): Promise<void> {
-  return new Promise((resolve) => {
-    finishTask = resolve;
-  });
+export function runViewerProxyTask(serviceId: string): Promise<void> {
+  return tasks.run(serviceId);
 }
 export function canProxyViewers(): boolean {
   return true;

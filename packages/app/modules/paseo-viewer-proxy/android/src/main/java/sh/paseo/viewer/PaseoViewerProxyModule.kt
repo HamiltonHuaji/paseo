@@ -6,18 +6,22 @@ import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.functions.Coroutine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 class PaseoViewerProxyModule : Module() {
+  private val sink: (String, Map<String, Any>) -> Unit = { name, payload -> sendEvent(name, payload) }
   override fun definition() = ModuleDefinition {
     Name("PaseoViewerProxy")
     Events("onOpen", "onData", "onEnd", "onReset", "onStopped")
 
     OnCreate {
-      ViewerProxyService.eventSink = { name, payload -> sendEvent(name, payload) }
+      ViewerProxyService.eventSink = sink
     }
     OnDestroy {
-      ViewerProxyService.eventSink = null
-      appContext.reactContext?.stopService(Intent(appContext.reactContext, ViewerProxyService::class.java))
+      if (ViewerProxyService.eventSink === sink) {
+        ViewerProxyService.eventSink = null
+        appContext.reactContext?.stopService(Intent(appContext.reactContext, ViewerProxyService::class.java))
+      }
     }
 
     AsyncFunction("ensureListener") Coroutine { serverId: String, ports: List<Int> ->
@@ -25,7 +29,7 @@ class PaseoViewerProxyModule : Module() {
       withContext(Dispatchers.Main) {
         context.startForegroundService(Intent(context, ViewerProxyService::class.java))
       }
-      val service = ViewerProxyService.ready.await()
+      val service = withTimeout(10_000) { ViewerProxyService.ready.await() }
       withContext(Dispatchers.IO) {
         try { service.proxy.ensureListener(serverId, ports) }
         catch (error: Exception) {
@@ -40,6 +44,7 @@ class PaseoViewerProxyModule : Module() {
     AsyncFunction("resume") Coroutine { id: String ->
       withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.resume(id) }
     }
+    AsyncFunction("getServiceId") { ViewerProxyService.instance?.serviceId }
     AsyncFunction("getState") Coroutine { ->
       withContext(Dispatchers.IO) { ViewerProxyService.instance?.proxy?.state() ?: emptyList() }
     }

@@ -1,9 +1,9 @@
 import { AppRegistry } from "react-native";
 import { runViewerProxyTask, syncViewerProxyHosts, updateViewerProxyRoute } from "./proxy.android";
 
-async function runTask(): Promise<void> {
+async function runTask({ serviceId }: { serviceId: string }): Promise<void> {
   let stopped = false;
-  const finished = runViewerProxyTask().then(() => {
+  const finished = runViewerProxyTask(serviceId).then(() => {
     stopped = true;
     return undefined;
   });

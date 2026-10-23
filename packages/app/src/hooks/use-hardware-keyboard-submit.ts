@@ -3,19 +3,20 @@ import {
   addHardwareKeyboardQueueListener,
   addHardwareKeyboardSubmitListener,
   setHardwareKeyboardSubmitEnabled,
-} from "@/native/ios-hardware-keyboard-submit";
+} from "@/native/hardware-keyboard-submit";
 import {
   createHardwareKeyboardSubmitController,
   type HardwareKeyboardSubmitController,
 } from "./hardware-keyboard-submit-controller";
 
-interface UseIosHardwareKeyboardSubmitInput {
+interface UseHardwareKeyboardSubmitInput {
   isEnabled: boolean;
+  queueEnabled: boolean;
   onSubmit: () => void;
   onQueue: () => void;
 }
 
-export function useIosHardwareKeyboardSubmit(input: UseIosHardwareKeyboardSubmitInput) {
+export function useHardwareKeyboardSubmit(input: UseHardwareKeyboardSubmitInput) {
   const controllerRef = useRef<HardwareKeyboardSubmitController | null>(null);
   if (!controllerRef.current) {
     controllerRef.current = createHardwareKeyboardSubmitController({
@@ -26,14 +27,19 @@ export function useIosHardwareKeyboardSubmit(input: UseIosHardwareKeyboardSubmit
   }
   const controller = controllerRef.current;
 
-  controller.setOnSubmit(input.onSubmit);
-  controller.setOnQueue(input.onQueue);
+  controller.setOnSubmit(() => {
+    if (input.isEnabled) input.onSubmit();
+  });
+  controller.setOnQueue(() => {
+    if (input.isEnabled && input.queueEnabled) input.onQueue();
+  });
 
   useEffect(() => {
     if (!input.isEnabled) {
       return;
     }
+    controller.setQueueEnabled(input.queueEnabled);
     controller.enable();
     return () => controller.disable();
-  }, [controller, input.isEnabled]);
+  }, [controller, input.isEnabled, input.queueEnabled]);
 }

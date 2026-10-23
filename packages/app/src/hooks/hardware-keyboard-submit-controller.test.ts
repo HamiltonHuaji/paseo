@@ -142,6 +142,24 @@ describe("hardware-keyboard-submit-controller", () => {
     expect(keyboard.isEnabled).toBe(false);
   });
 
+  it("does not queue in idle and stops queuing when running ends", () => {
+    const keyboard = createFakeKeyboard();
+    const controller = createHardwareKeyboardSubmitController(keyboard);
+    let calls = 0;
+    controller.setOnQueue(() => {
+      calls += 1;
+    });
+    controller.enable();
+    keyboard.emitQueue();
+    expect(calls).toBe(0);
+    controller.setQueueEnabled(true);
+    keyboard.emitQueue();
+    expect(calls).toBe(1);
+    controller.setQueueEnabled(false);
+    keyboard.emitQueue();
+    expect(calls).toBe(1);
+  });
+
   it("dispatches queue separately from submit", () => {
     const keyboard = createFakeKeyboard();
     const controller = createHardwareKeyboardSubmitController(keyboard);
@@ -149,6 +167,7 @@ describe("hardware-keyboard-submit-controller", () => {
     controller.setOnSubmit(() => received.push("submit"));
     controller.setOnQueue(() => received.push("queue"));
 
+    controller.setQueueEnabled(true);
     controller.enable();
     keyboard.emitQueue();
     keyboard.emitSubmit();

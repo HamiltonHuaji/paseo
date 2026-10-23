@@ -6,6 +6,7 @@ private let hardwareQueueEventName = "onHardwareKeyboardQueue"
 
 private weak var activeModule: PaseoHardwareKeyboardModule?
 private var isHardwareSubmitEnabled = false
+private var isHardwareQueueEnabled = false
 
 @objc
 public class PaseoHardwareKeyboardReactDelegateHandler: ExpoReactDelegateHandler {
@@ -24,9 +25,10 @@ public class PaseoHardwareKeyboardModule: Module {
       activeModule = self
     }
 
-    Function("setHardwareKeyboardSubmitEnabled") { (enabled: Bool) in
+    Function("setHardwareKeyboardSubmitEnabled") { (enabled: Bool, queueEnabled: Bool) in
       DispatchQueue.main.async {
         isHardwareSubmitEnabled = enabled
+        isHardwareQueueEnabled = enabled && queueEnabled
       }
     }
 
@@ -35,6 +37,7 @@ public class PaseoHardwareKeyboardModule: Module {
         activeModule = nil
       }
       isHardwareSubmitEnabled = false
+      isHardwareQueueEnabled = false
     }
   }
 
@@ -53,7 +56,7 @@ private final class PaseoHardwareKeyboardRootViewController: UIViewController {
       return super.keyCommands
     }
 
-    let commands = [
+    var commands = [
       UIKeyCommand(
         input: "\r",
         modifierFlags: .command,
@@ -64,12 +67,10 @@ private final class PaseoHardwareKeyboardRootViewController: UIViewController {
         modifierFlags: .control,
         action: #selector(handleHardwareKeyboardSubmit(_:))
       ),
-      UIKeyCommand(
-        input: "\t",
-        modifierFlags: [],
-        action: #selector(handleHardwareKeyboardQueue(_:))
-      ),
     ]
+    if isHardwareQueueEnabled {
+      commands.append(UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(handleHardwareKeyboardQueue(_:))))
+    }
     if #available(iOS 15.0, *) {
       for command in commands {
         command.wantsPriorityOverSystemBehavior = true
@@ -88,13 +89,14 @@ private final class PaseoHardwareKeyboardRootViewController: UIViewController {
 
   @objc
   private func handleHardwareKeyboardQueue(_ sender: UIKeyCommand) {
-    guard canSubmitCurrentTextInput() else {
+    guard isHardwareQueueEnabled && canSubmitCurrentTextInput() else {
       return
     }
     activeModule?.emitHardwareKeyboardQueue()
   }
 
   private func canSubmitCurrentTextInput() -> Bool {
+    guard isHardwareSubmitEnabled else { return false }
     guard let responder = UIResponder.paseoCurrentFirstResponder else {
       return false
     }

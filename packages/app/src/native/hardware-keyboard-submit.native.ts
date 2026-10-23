@@ -4,7 +4,7 @@ type HardwareKeyboardSubmitHandler = () => void;
 type HardwareKeyboardQueueHandler = () => void;
 
 interface PaseoHardwareKeyboardModule {
-  setHardwareKeyboardSubmitEnabled(enabled: boolean): void;
+  setHardwareKeyboardSubmitEnabled(enabled: boolean, queueEnabled: boolean): void;
   addListener(
     eventName: "onHardwareKeyboardSubmit" | "onHardwareKeyboardQueue",
     handler: HardwareKeyboardSubmitHandler | HardwareKeyboardQueueHandler,
@@ -13,8 +13,8 @@ interface PaseoHardwareKeyboardModule {
 
 const module = requireNativeModule<PaseoHardwareKeyboardModule>("PaseoHardwareKeyboard");
 
-export function setHardwareKeyboardSubmitEnabled(enabled: boolean) {
-  module.setHardwareKeyboardSubmitEnabled(enabled);
+export function setHardwareKeyboardSubmitEnabled(enabled: boolean, queueEnabled: boolean) {
+  module.setHardwareKeyboardSubmitEnabled(enabled, queueEnabled);
 }
 
 export function addHardwareKeyboardSubmitListener(handler: HardwareKeyboardSubmitHandler) {

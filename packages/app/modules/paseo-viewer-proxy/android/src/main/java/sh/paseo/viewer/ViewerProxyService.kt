@@ -9,8 +9,10 @@ import com.facebook.react.HeadlessJsTaskService
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.jstasks.HeadlessJsTaskConfig
 import kotlinx.coroutines.CompletableDeferred
+import java.util.UUID
 
 class ViewerProxyService : HeadlessJsTaskService() {
+  val serviceId = UUID.randomUUID().toString()
   private var taskStarted = false
   private var disabled = false
   val proxy = LoopbackViewerProxy { name, payload ->
@@ -44,7 +46,8 @@ class ViewerProxyService : HeadlessJsTaskService() {
     }
     if (!taskStarted) {
       taskStarted = true
-      startTask(HeadlessJsTaskConfig("PaseoViewerProxy", Arguments.createMap(), 0, true))
+      val data = Arguments.createMap().apply { putString("serviceId", serviceId) }
+      startTask(HeadlessJsTaskConfig("PaseoViewerProxy", data, 0, true))
     }
     return START_NOT_STICKY
   }
@@ -58,8 +61,8 @@ class ViewerProxyService : HeadlessJsTaskService() {
     proxy.close()
     instance = null
     ready = CompletableDeferred()
-    eventSink?.invoke("onStopped", mapOf("disabled" to disabled))
-    super.onDestroy()
+    try { eventSink?.invoke("onStopped", mapOf("disabled" to disabled, "serviceId" to serviceId)) }
+    finally { super.onDestroy() }
   }
 
   companion object {

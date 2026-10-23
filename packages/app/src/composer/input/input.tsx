@@ -52,7 +52,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
-import { useIosHardwareKeyboardSubmit } from "@/hooks/use-ios-hardware-keyboard-submit";
+import { useHardwareKeyboardSubmit } from "@/hooks/use-hardware-keyboard-submit";
 import { formatShortcut, type ShortcutKey } from "@/utils/format-shortcut";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { MessageInputKeyboardActionKind } from "@/keyboard/actions";
@@ -1753,8 +1753,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         defaultSendBehavior,
         isAgentRunning,
       });
-    useIosHardwareKeyboardSubmit({
-      isEnabled: isInputFocused && !isSendButtonDisabled,
+    useHardwareKeyboardSubmit({
+      isEnabled: isInputFocused && !disabled && !isSubmitDisabled && !isSubmitLoading,
+      queueEnabled: isAgentRunning && Boolean(onQueue),
       onSubmit: handleSendMessage,
       onQueue: () => {
         if (isAgentRunning) handleQueueMessage();

@@ -3,7 +3,7 @@ import type { EventSubscription } from "expo-modules-core";
 type HardwareKeyboardSubmitHandler = () => void;
 type HardwareKeyboardQueueHandler = () => void;
 
-export function setHardwareKeyboardSubmitEnabled(_enabled: boolean) {}
+export function setHardwareKeyboardSubmitEnabled(_enabled: boolean, _queueEnabled: boolean) {}
 
 export function addHardwareKeyboardSubmitListener(
   _handler: HardwareKeyboardSubmitHandler,
