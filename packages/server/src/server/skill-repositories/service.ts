@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { mergePersistedRecord } from "../persisted-record.js";
 import {
   SkillRepositorySubscriptionSchema,
   type SkillRepositorySubscription,
@@ -106,6 +107,8 @@ export class SkillRepositoryService {
     syncErrors: {},
     remoteCheckedAt: {},
   };
+  private rawStore: unknown = structuredClone(this.store);
+  private persistedStore: Store = structuredClone(this.store);
   private readonly executors = new Map<object, Executor>();
   private readonly jobs = new Map<string, PendingJob>();
   private readonly originByAgent = new Map<string, { source: object | null; turnId?: string }>();
@@ -119,8 +122,15 @@ export class SkillRepositoryService {
 
   static async open(paseoHome: string): Promise<SkillRepositoryService> {
     const service = new SkillRepositoryService(paseoHome);
-    const raw = await fs.readFile(service.file, "utf8").catch(() => null);
-    if (raw !== null) service.store = StoreSchema.parse(JSON.parse(raw));
+    const raw = await fs.readFile(service.file, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (raw !== null) {
+      service.rawStore = JSON.parse(raw);
+      service.store = StoreSchema.parse(service.rawStore);
+      service.persistedStore = structuredClone(service.store);
+    }
     return service;
   }
 
@@ -259,7 +269,14 @@ export class SkillRepositoryService {
   private saveStore(): Promise<void> {
     this.storeWrites = this.storeWrites
       .catch(() => {})
-      .then(() => writeAtomic(this.file, this.store));
+      .then(async () => {
+        const next = structuredClone(this.store);
+        const raw = mergePersistedRecord(this.rawStore, this.persistedStore, next, "repositoryId");
+        await writeAtomic(this.file, raw);
+        this.rawStore = raw;
+        this.persistedStore = next;
+        return undefined;
+      });
     return this.storeWrites;
   }
 

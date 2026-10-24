@@ -23,7 +23,7 @@ export const claudeSettingsFormat: AgentHookConfigFormat<ClaudeSettings> = {
   parse(raw) {
     const parsed = JSON.parse(raw) as unknown;
     if (!isRecord(parsed)) {
-      return {};
+      throw new Error("Claude settings must be a JSON object");
     }
     return parsed;
   },
@@ -32,7 +32,7 @@ export const claudeSettingsFormat: AgentHookConfigFormat<ClaudeSettings> = {
   },
   install(config, provider) {
     const install = provider.install;
-    const hooks = normalizeHooks(config.hooks);
+    const hooks = editableHooks(config.hooks);
     for (const event of provider.events) {
       const userEntries = removePaseoHooks(hooks[event.event], install.hookMarker);
       hooks[event.event] = [
@@ -53,7 +53,7 @@ export const claudeSettingsFormat: AgentHookConfigFormat<ClaudeSettings> = {
   },
   uninstall(config, provider) {
     const install = provider.install;
-    const hooks = normalizeHooks(config.hooks);
+    const hooks = editableHooks(config.hooks);
     for (const event of provider.events) {
       const entries = removePaseoHooks(hooks[event.event], install.hookMarker);
       if (entries.length > 0) {
@@ -81,6 +81,12 @@ function normalizeHooks(value: unknown): Record<string, unknown> {
   return isRecord(value) ? { ...value } : {};
 }
 
+function editableHooks(value: unknown): Record<string, unknown> {
+  if (value === undefined) return {};
+  if (!isRecord(value)) throw new Error("Cannot update unsupported Claude hooks format");
+  return { ...value };
+}
+
 function normalizeMatchers(value: unknown): ClaudeHookMatcher[] {
   if (!Array.isArray(value)) {
     return [];
@@ -95,15 +101,20 @@ function normalizeCommandHooks(value: unknown): ClaudeCommandHook[] {
   return value.filter(isRecord);
 }
 
-function removePaseoHooks(value: unknown, marker: string): ClaudeHookMatcher[] {
-  const entries: ClaudeHookMatcher[] = [];
-  for (const entry of normalizeMatchers(value)) {
-    const hooks = normalizeCommandHooks(entry.hooks).filter(
-      (hook) => !commandContainsMarker(hook, marker),
-    );
-    if (hooks.length > 0) {
-      entries.push(Object.assign({}, entry, { hooks }));
+function removePaseoHooks(value: unknown, marker: string): unknown[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("Cannot update unsupported Claude hook event format");
+  const entries: unknown[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || !Array.isArray(entry.hooks)) {
+      entries.push(entry);
+      continue;
     }
+    const hooks = entry.hooks.filter(
+      (hook) => !isRecord(hook) || !commandContainsMarker(hook, marker),
+    );
+    if (hooks.length === entry.hooks.length) entries.push(entry);
+    else if (hooks.length > 0) entries.push({ ...entry, hooks });
   }
   return entries;
 }

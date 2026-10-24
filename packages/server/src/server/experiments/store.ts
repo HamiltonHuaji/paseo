@@ -17,6 +17,7 @@ import {
   type UpdateExperimentInput,
   type ViewerConfig,
 } from "@getpaseo/protocol/experiments";
+import { mergePersistedRecord } from "../persisted-record.js";
 
 interface StatementSync {
   all(...params: unknown[]): unknown[];
@@ -212,6 +213,7 @@ export class ProjectExperimentStore {
 
   updateAttempt(input: UpdateAttemptInput): ExperimentAttempt {
     const existing = this.getAttempt(input.attempt);
+    const stored = this.db.prepare("SELECT * FROM attempts WHERE id = ?").get(input.attempt) as Row;
     const progressPlans = resolveProgressPlans(input);
     if (progressPlans !== undefined) this.validateProgressPlans(progressPlans);
     const resultSummary = hasOwn(input, "resultSummary")
@@ -231,12 +233,17 @@ export class ProjectExperimentStore {
         hasOwn(input, "wandbId") ? input.wandbId : existing.wandbId,
         hasOwn(input, "jobId") ? input.jobId : existing.jobId,
         hasOwn(input, "outputDir") ? input.outputDir : existing.outputDir,
-        progressPlans !== undefined
-          ? serializeNullable(progressPlans)
-          : serializeNullable(existing.progressPlans ?? null),
-        hasOwn(input, "progressSource")
-          ? serializeNullable(input.progressSource ?? null)
-          : serializeNullable(existing.progressSource),
+        updateNullable(
+          stored.progress_plans_json,
+          ProgressPlanSetSchema,
+          progressPlans,
+          (value) => value.unit ?? value.label,
+        ),
+        updateNullable(
+          stored.progress_source_json,
+          ProgressSourceSchema,
+          hasOwn(input, "progressSource") ? (input.progressSource ?? null) : undefined,
+        ),
         resultSummary ? (existing.endedAt ?? now) : existing.endedAt,
         now,
         input.attempt,
@@ -309,18 +316,31 @@ export class ProjectExperimentStore {
     target: { experiment: string } | { attempt: string },
     viewer: ViewerConfig | null,
   ): ViewerConfig | null {
-    const serialized = serializeNullable(viewer);
     const now = new Date().toISOString();
     if ("experiment" in target) {
       this.getExperiment(target.experiment);
+      const stored = this.db
+        .prepare("SELECT viewer_config_json FROM experiments WHERE id = ?")
+        .get(target.experiment) as Row;
       this.db
         .prepare("UPDATE experiments SET viewer_config_json = ?, updated_at = ? WHERE id = ?")
-        .run(serialized, now, target.experiment);
+        .run(
+          updateNullable(stored.viewer_config_json, ViewerConfigSchema, viewer),
+          now,
+          target.experiment,
+        );
     } else {
       this.getAttempt(target.attempt);
+      const stored = this.db
+        .prepare("SELECT viewer_config_json FROM attempts WHERE id = ?")
+        .get(target.attempt) as Row;
       this.db
         .prepare("UPDATE attempts SET viewer_config_json = ?, updated_at = ? WHERE id = ?")
-        .run(serialized, now, target.attempt);
+        .run(
+          updateNullable(stored.viewer_config_json, ViewerConfigSchema, viewer),
+          now,
+          target.attempt,
+        );
     }
     return viewer;
   }
@@ -497,7 +517,11 @@ export class ProjectExperimentStore {
           for (const row of rows) {
             const plan = parseNullable(row.progress_plan_json, ProgressPlanSchema);
             update.run(
-              serializeNullable(plan ? { sourceUnit: plan.unit, units: [plan] } : null),
+              serializeNullable(
+                plan
+                  ? { sourceUnit: plan.unit, units: [JSON.parse(String(row.progress_plan_json))] }
+                  : null,
+              ),
               row.id,
             );
           }
@@ -758,8 +782,21 @@ function serializeNullable(value: unknown): string | null {
 }
 
 function parseNullable<T>(value: unknown, schema: { parse(input: unknown): T }): T | null {
-  if (typeof value !== "string") return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") throw new Error("Invalid persisted JSON column");
   return schema.parse(JSON.parse(value));
+}
+
+function updateNullable<T>(
+  value: unknown,
+  schema: { parse(input: unknown): T },
+  next: T | null | undefined,
+  arrayItemKey: string | ((value: Record<string, unknown>) => unknown) = "id",
+): string | null {
+  const previous = parseNullable(value, schema);
+  if (next === undefined) return typeof value === "string" ? value : null;
+  const raw: unknown = typeof value === "string" ? JSON.parse(value) : null;
+  return serializeNullable(mergePersistedRecord(raw, previous, next, arrayItemKey));
 }
 
 function stringOrNull(value: unknown): string | null {

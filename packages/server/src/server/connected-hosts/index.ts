@@ -21,6 +21,7 @@ import {
   type HostUpdate,
 } from "@getpaseo/protocol/hosts";
 import type { DaemonPermission, WSHelloMessage } from "@getpaseo/protocol/messages";
+import { mergePersistedRecord } from "../persisted-record.js";
 
 export class HostError extends Error {
   constructor(
@@ -51,6 +52,8 @@ interface Route {
 export class ConnectedHosts {
   private readonly budget = new HostTransportBudget();
   private rows: Saved[] = [];
+  private rawRows: unknown = [];
+  private persistedRows: Saved[] = [];
   private readonly live = new Map<string, Live>();
   private readonly routes = new Set<Route>();
   private readonly listeners = new Set<() => void>();
@@ -66,9 +69,9 @@ export class ConnectedHosts {
   }
   private async load(): Promise<void> {
     try {
-      this.rows = z
-        .array(SavedSchema)
-        .parse(JSON.parse(await readFile(join(this.home, "hosts.json"), "utf8")));
+      this.rawRows = JSON.parse(await readFile(join(this.home, "hosts.json"), "utf8"));
+      this.rows = z.array(SavedSchema).parse(this.rawRows);
+      this.persistedRows = structuredClone(this.rows);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT")
         throw new Error("Cannot read saved connected hosts", { cause: error });
@@ -95,11 +98,15 @@ export class ConnectedHosts {
     for (const listener of this.listeners) listener();
   }
   private async persist(rows: Saved[]): Promise<void> {
+    const next = structuredClone(rows);
+    const raw = mergePersistedRecord(this.rawRows, this.persistedRows, next, "registrationId");
     await mkdir(this.home, { recursive: true });
     const temp = join(this.home, `.hosts-${randomUUID()}.tmp`);
     try {
-      await writeFile(temp, JSON.stringify(rows), { mode: 0o600 });
+      await writeFile(temp, JSON.stringify(raw), { mode: 0o600 });
       await rename(temp, join(this.home, "hosts.json"));
+      this.rawRows = raw;
+      this.persistedRows = next;
     } finally {
       await rm(temp, { force: true });
     }

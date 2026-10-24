@@ -6,10 +6,12 @@ import {
   createDaemonChannel,
   type Transport as RelayTransport,
   type KeyPair,
+  type EncryptedFrameEncoder,
 } from "@getpaseo/relay/e2ee";
 import { buildRelayWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
 import type { ExternalSocketMetadata } from "./websocket-server.js";
 import { createEncryptedRelaySocket } from "./websocket/encrypted-relay-socket.js";
+import { RelayFrameEncoder } from "./relay-frame-encoder.js";
 
 export interface RelayTransportOptions {
   logger: pino.Logger;
@@ -56,6 +58,7 @@ type ControlMessage =
 const CONTROL_PING_INTERVAL_MS = 10_000;
 const CONTROL_STALE_TIMEOUT_MS = 30_000;
 const CONTROL_READY_TIMEOUT_MS = 8_000;
+const SHUTDOWN_CLOSE_TIMEOUT_MS = 1_000;
 const RELAY_WEBSOCKET_OPTIONS = {
   handshakeTimeout: 10_000,
   perMessageDeflate: false,
@@ -66,6 +69,34 @@ const RELAY_WEBSOCKET_OPTIONS = {
 
 function createDefaultRelayWebSocket(url: string): RelayWebSocketLike {
   return new WebSocket(url, RELAY_WEBSOCKET_OPTIONS);
+}
+
+async function waitForRelaySocketClose(closed: Promise<void>): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), SHUTDOWN_CLOSE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([closed.then(() => true), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function closeRelaySocket(socket: RelayWebSocketLike, closed: Promise<void>): Promise<void> {
+  if (socket.readyState === WebSocket.CLOSED) return;
+  let closeSent = false;
+  try {
+    socket.close();
+    closeSent = true;
+  } catch {
+    // A failed graceful close still needs transport termination below.
+  }
+  if (closeSent && (await waitForRelaySocketClose(closed))) return;
+  socket.terminate();
+  if (!(await waitForRelaySocketClose(closed))) {
+    throw new Error("Relay socket did not close after termination");
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,12 +153,28 @@ export function startRelayTransport({
   createWebSocket = createDefaultRelayWebSocket,
 }: RelayTransportOptions): RelayTransportController {
   const relayLogger = logger.child({ module: "relay-transport" });
+  const frameEncoder = new RelayFrameEncoder();
 
   let stopped = false;
   let controlWs: RelayWebSocketLike | null = null;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempt = 0;
   const dataSockets = new Map<string, RelayWebSocketLike>(); // connectionId -> ws
+  // Routing can forget a disconnected client before its close handshake finishes.
+  // Keep transport ownership until close so shutdown also drains those sockets.
+  const openSockets = new Map<RelayWebSocketLike, Promise<void>>();
+  const dataOpenTimeouts = new Set<ReturnType<typeof setTimeout>>();
+  const createOwnedWebSocket = (url: string): RelayWebSocketLike => {
+    const socket = createWebSocket(url);
+    const closed = new Promise<void>((resolve) => {
+      socket.once("close", () => {
+        openSockets.delete(socket);
+        resolve();
+      });
+    });
+    openSockets.set(socket, closed);
+    return socket;
+  };
   let controlKeepaliveInterval: ReturnType<typeof setInterval> | null = null;
   let controlReadyTimeout: ReturnType<typeof setTimeout> | null = null;
   let controlLastSeenAt = 0;
@@ -147,22 +194,21 @@ export function startRelayTransport({
       clearTimeout(controlReadyTimeout);
       controlReadyTimeout = null;
     }
-    if (controlWs) {
-      try {
-        controlWs.close();
-      } catch {
-        // ignore
-      }
-      controlWs = null;
-    }
-    for (const ws of dataSockets.values()) {
-      try {
-        ws.close();
-      } catch {
-        // ignore
-      }
-    }
+    for (const timer of dataOpenTimeouts) clearTimeout(timer);
+    dataOpenTimeouts.clear();
+    controlWs = null;
     dataSockets.clear();
+    const results = await Promise.allSettled([
+      ...[...openSockets].map(([socket, closed]) => closeRelaySocket(socket, closed)),
+      frameEncoder.close(),
+    ]);
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length) {
+      throw new AggregateError(
+        failures.map((result) => result.reason),
+        "Failed to stop relay transport",
+      );
+    }
   };
 
   const connectControl = (): void => {
@@ -175,7 +221,7 @@ export function startRelayTransport({
       serverId,
       role: "server",
     });
-    const socket = createWebSocket(url);
+    const socket = createOwnedWebSocket(url);
     controlWs = socket;
     let controlConnected = false;
 
@@ -360,11 +406,12 @@ export function startRelayTransport({
       role: "server",
       connectionId,
     });
-    const socket = createWebSocket(url);
+    const socket = createOwnedWebSocket(url);
     dataSockets.set(connectionId, socket);
 
     let attached = false;
     const openTimeout = setTimeout(() => {
+      dataOpenTimeouts.delete(openTimeout);
       if (stopped) return;
       if (socket.readyState === WebSocket.OPEN) return;
       relayLogger.warn({ connectionId }, "relay_data_open_timeout_terminating");
@@ -374,9 +421,12 @@ export function startRelayTransport({
         // ignore
       }
     }, 15_000);
+    dataOpenTimeouts.add(openTimeout);
 
     socket.on("open", () => {
       clearTimeout(openTimeout);
+      dataOpenTimeouts.delete(openTimeout);
+      if (stopped) return;
       relayLogger.info({ connectionId }, "relay_data_connected");
       if (attached) return;
       attached = true;
@@ -392,6 +442,7 @@ export function startRelayTransport({
           relayLogger.child({ connectionId }),
           attachSocket,
           externalMetadata,
+          frameEncoder.encode,
         );
       } else {
         void attachSocket(socket, externalMetadata);
@@ -400,6 +451,7 @@ export function startRelayTransport({
 
     socket.on("close", (code, reason) => {
       clearTimeout(openTimeout);
+      dataOpenTimeouts.delete(openTimeout);
       relayLogger.warn(
         { code, reason: reason?.toString?.(), url, connectionId },
         "relay_data_disconnected",
@@ -425,6 +477,7 @@ async function attachEncryptedSocket(
   logger: pino.Logger,
   attachSocket: (ws: RelaySocketLike, metadata?: ExternalSocketMetadata) => Promise<void>,
   metadata?: ExternalSocketMetadata,
+  encode?: EncryptedFrameEncoder,
 ): Promise<void> {
   const handshakeTimeout = setTimeout(() => {
     logger.warn("relay_e2ee_handshake_timeout_terminating");
@@ -442,14 +495,19 @@ async function attachEncryptedSocket(
       }
       pendingMessages.push(data);
     };
-    const channel = await createDaemonChannel(relayTransport, daemonKeyPair, {
-      onmessage: emitMessage,
-      onclose: (code, reason) => emitter.emit("close", code, reason),
-      onerror: (error) => {
-        logger.warn({ err: error }, "relay_e2ee_error");
-        emitter.emit("error", error);
+    const channel = await createDaemonChannel(
+      relayTransport,
+      daemonKeyPair,
+      {
+        onmessage: emitMessage,
+        onclose: (code, reason) => emitter.emit("close", code, reason),
+        onerror: (error) => {
+          logger.warn({ err: error }, "relay_e2ee_error");
+          emitter.emit("error", error);
+        },
       },
-    });
+      { encode },
+    );
     clearTimeout(handshakeTimeout);
     const encryptedSocket = createEncryptedRelaySocket({
       channel,

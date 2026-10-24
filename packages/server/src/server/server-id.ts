@@ -1,5 +1,5 @@
 import path from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "./private-files.js";
@@ -45,39 +45,22 @@ export function getOrCreateServerId(
       ? env.PASEO_SERVER_ID.trim()
       : null;
 
-  if (envOverride) {
-    // Persist the override for consistent identity across restarts.
-    if (!existsSync(serverIdPath)) {
-      try {
-        writePrivateFileAtomicSync(serverIdPath, `${envOverride}\n`);
-        log?.info({ serverId: envOverride }, "Persisted PASEO_SERVER_ID override");
-      } catch (error) {
-        log?.warn({ error }, "Failed to persist PASEO_SERVER_ID override");
-      }
-    } else {
-      ensurePrivateFile(serverIdPath);
-    }
-    return envOverride;
-  }
-
-  if (existsSync(serverIdPath)) {
-    try {
-      ensurePrivateFile(serverIdPath);
-      const raw = readFileSync(serverIdPath, "utf8");
-      const parsed = raw.trim();
-      if (parsed.length > 0) {
-        return parsed;
-      }
-    } catch (error) {
-      log?.warn({ error }, "Failed to read server-id file, regenerating");
-    }
-  }
-
-  const created = generateServerId();
+  let stored: string | null;
   try {
-    writePrivateFileAtomicSync(serverIdPath, `${created}\n`);
+    ensurePrivateFile(serverIdPath);
+    stored = readFileSync(serverIdPath, "utf8").trim();
   } catch (error) {
-    log?.warn({ error }, "Failed to persist serverId (continuing with in-memory id)");
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    stored = null;
   }
+
+  if (stored !== null) {
+    if (!stored) throw new Error(`Server ID file is empty: ${serverIdPath}`);
+    return envOverride ?? stored;
+  }
+
+  const created = envOverride ?? generateServerId();
+  writePrivateFileAtomicSync(serverIdPath, `${created}\n`);
+  log?.info({ serverId: created }, "Persisted server ID");
   return created;
 }

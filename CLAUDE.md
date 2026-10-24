@@ -30,6 +30,7 @@ The pinned `docs/refactors/experiment-viewer-transport-spec.md` must not be chan
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | [Fork behavior contracts](docs/contracts/README.md)                       | Stable behavior IDs and baseline review scope                                                                                  |
 | [Session contracts](docs/contracts/sessions.md)                           | Native fork, rewind, identity, lineage and recovery                                                                            |
+| [Session history performance](docs/session-history-performance.md)        | Outcome budgets, read compatibility and reproducible daemon/SDK/CLI scenarios; execution scripts stay outside Git              |
 | [Model and storage contracts](docs/contracts/models-and-storage.md)       | Model discovery, effective configuration and project storage                                                                   |
 | [Client contracts](docs/contracts/clients.md)                             | File, Markdown, composer, tabs and heartbeat behavior; VS Code retired                                                         |
 | [Distribution contracts](docs/contracts/distribution.md)                  | Fork identity, updates and release behavior                                                                                    |
@@ -43,6 +44,7 @@ The pinned `docs/refactors/experiment-viewer-transport-spec.md` must not be chan
 | [docs/architecture.md](docs/architecture.md)                              | System design, package layering, WebSocket protocol, agent lifecycle, data flow                                                |
 | [docs/agent-lifecycle.md](docs/agent-lifecycle.md)                        | Agent states, parent/child relationships, archive semantics, tabs vs archive, subagents track                                  |
 | [docs/data-model.md](docs/data-model.md)                                  | File-based JSON persistence, Zod schemas, atomic writes, no migrations                                                         |
+| [Data integrity contracts](docs/contracts/data-integrity.md)              | User data preservation across validation failures, edits, migrations and version drift                                         |
 | [docs/glossary.md](docs/glossary.md)                                      | Authoritative terminology — UI label wins, no synonyms                                                                         |
 | [docs/coding-standards.md](docs/coding-standards.md)                      | Type hygiene, error handling, state design, React patterns, file organization                                                  |
 | [Canvas readability contract](docs/contracts/canvas.md)                   | Shared canvas relationship readability, space use, stability and evaluation                                                    |

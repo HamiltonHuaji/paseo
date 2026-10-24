@@ -70,7 +70,9 @@ export function createHostTransportFactory(
           {
             headers: options?.headers,
             ...(socketPath ? { socketPath } : {}),
-            maxPayload: 100 * 1024 * 1024,
+            // Explicit full-history reads can exceed ws's 100 MiB default.
+            // Interactive consumers page their requests; this is not a wire limit.
+            maxPayload: 0,
           },
         );
         disposeSocket = () => socket.terminate();

@@ -1048,7 +1048,9 @@ export default function RootLayout() {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState !== "active") {
-        void flushDraftPersistStorage();
+        void flushDraftPersistStorage().catch((error) => {
+          console.warn("[DraftStore] Background checkpoint failed; pending drafts retained", error);
+        });
       }
     });
     return () => subscription.remove();

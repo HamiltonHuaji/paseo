@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { StateStorage } from "zustand/middleware";
 import { createWorkspaceServiceRoutePreferencesStore } from "./store";
 
@@ -27,12 +27,19 @@ describe("workspace service route preferences", () => {
     first.getState().setPreferredRoute("desktop", "direct");
     first.getState().setPreferredRoute("devbox", "public");
 
+    await vi.waitFor(() => {
+      const saved = storage.values.get("workspace-service-route-preferences");
+      expect(saved && JSON.parse(saved).state.byServerId).toEqual({
+        desktop: "direct",
+        devbox: "public",
+      });
+    });
     const restored = createWorkspaceServiceRoutePreferencesStore(storage);
     await restored.persist.rehydrate();
     expect(restored.getState().byServerId).toEqual({ desktop: "direct", devbox: "public" });
   });
 
-  it("clears the complete persisted value when one route kind is invalid", async () => {
+  it("retains the saved document when one route kind is unsupported", async () => {
     const storage = createMemoryStorage({
       "workspace-service-route-preferences": JSON.stringify({
         state: { byServerId: { desktop: "direct", broken: "unknown" } },
@@ -43,6 +50,6 @@ describe("workspace service route preferences", () => {
     await store.persist.rehydrate();
 
     expect(store.getState().byServerId).toEqual({});
-    expect(storage.values.has("workspace-service-route-preferences")).toBe(false);
+    expect(storage.values.has("workspace-service-route-preferences")).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const MIN_WINDOW_WIDTH = 400;
@@ -27,15 +27,10 @@ export interface WorkArea {
   height: number;
 }
 
-interface PersistedWindowStateDocument {
-  version: 1;
-  state: WindowState;
-}
-
 export interface WindowStateStore {
   /** Returns the persisted state, or null when nothing usable is stored. */
   load(): Promise<WindowState | null>;
-  /** Persists the state atomically off the main thread (serialized writes). */
+  /** Persists the state atomically (serialized writes). */
   save(state: WindowState): Promise<void>;
   /** Persists the state synchronously — used as the final writer on close/quit. */
   saveSync(state: WindowState): void;
@@ -88,8 +83,48 @@ export function coerceWindowState(input: unknown): WindowState | null {
   return state;
 }
 
-function serializeDocument(state: WindowState): string {
-  const document: PersistedWindowStateDocument = { version: 1, state };
+function parseDocument(text: string, filePath: string) {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error(`Cannot read saved ${filePath}: invalid JSON; original data was retained`);
+  }
+  if (!isRecord(raw) || raw.version !== 1 || !isRecord(raw.state)) {
+    throw new Error(
+      `Cannot read saved ${filePath}: unsupported document; original data was retained`,
+    );
+  }
+  const view = coerceWindowState(raw.state);
+  if (!view) {
+    throw new Error(`Cannot read saved ${filePath}: invalid geometry; original data was retained`);
+  }
+  return { raw, state: raw.state, view };
+}
+
+function serializeDocument(state: WindowState, previous: string | null, filePath: string): string {
+  if (
+    !coerceWindowState(state) ||
+    typeof state.isMaximized !== "boolean" ||
+    (state.x !== undefined && !Number.isFinite(state.x)) ||
+    (state.y !== undefined && !Number.isFinite(state.y))
+  ) {
+    throw new Error(`Cannot save invalid window geometry to ${filePath}`);
+  }
+  const document =
+    previous === null
+      ? { version: 1, state }
+      : (() => {
+          const saved = parseDocument(previous, filePath);
+          const next = { ...saved.state };
+          for (const key of ["x", "y", "width", "height", "isMaximized"] as const) {
+            // A display fallback is not an edit to an unknown saved value.
+            if (state[key] === saved.view[key]) continue;
+            if (state[key] === undefined) delete next[key];
+            else next[key] = state[key];
+          }
+          return { ...saved.raw, state: next };
+        })();
   return `${JSON.stringify(document, null, 2)}\n`;
 }
 
@@ -178,40 +213,39 @@ export function createWindowStateStore({
         throw error;
       }
 
-      let parsed: unknown;
       try {
-        parsed = JSON.parse(raw);
+        return parseDocument(raw, filePath).view;
       } catch (error) {
-        // A corrupted file shouldn't block launch; non-critical state falls back.
-        if (error instanceof SyntaxError) {
-          return null;
-        }
-        throw error;
-      }
-
-      if (!isRecord(parsed)) {
+        // Geometry can fall back for launch, but every writer still validates the source.
+        console.warn(error instanceof Error ? error.message : `Cannot read saved ${filePath}`);
         return null;
       }
-      return coerceWindowState(parsed.state);
     },
 
     async save(state: WindowState): Promise<void> {
-      const contents = serializeDocument(state);
+      const snapshot = { ...state };
       async function write(): Promise<void> {
         if (finalized) {
           return;
         }
+        let previous: string | null;
+        try {
+          previous = await readFile(filePath, "utf8");
+        } catch (error) {
+          if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+          previous = null;
+        }
+        const contents = serializeDocument(snapshot, previous, filePath);
         await mkdir(userDataPath, { recursive: true });
         const tempPath = tempFilePath();
-        await writeFile(tempPath, contents, "utf8");
-        if (finalized) {
-          // A synchronous final write (saveSync) landed while this one was in
-          // flight. Keep it as the last writer instead of overwriting it, and
-          // discard our now-stale temp file so it can't accumulate in userData.
+        try {
+          await writeFile(tempPath, contents, "utf8");
+          // Do not yield between the final-writer check and rename: a queued async
+          // rename could otherwise land after saveSync and overwrite its snapshot.
+          if (!finalized) renameSync(tempPath, filePath);
+        } finally {
           await unlink(tempPath).catch(() => undefined);
-          return;
         }
-        await rename(tempPath, filePath);
       }
       const queued = persistQueue.then(write, write);
       persistQueue = queued.catch(() => undefined);
@@ -219,12 +253,27 @@ export function createWindowStateStore({
     },
 
     saveSync(state: WindowState): void {
-      finalized = true;
-      const contents = serializeDocument(state);
+      let previous: string | null;
+      try {
+        previous = readFileSync(filePath, "utf8");
+      } catch (error) {
+        if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+        previous = null;
+      }
+      const contents = serializeDocument(state, previous, filePath);
       mkdirSync(userDataPath, { recursive: true });
       const tempPath = tempFilePath();
-      writeFileSync(tempPath, contents, "utf8");
-      renameSync(tempPath, filePath);
+      try {
+        writeFileSync(tempPath, contents, "utf8");
+        renameSync(tempPath, filePath);
+        finalized = true;
+      } finally {
+        try {
+          unlinkSync(tempPath);
+        } catch {
+          /* Preserve the original write error. */
+        }
+      }
     },
   };
 }

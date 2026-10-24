@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseStoredValue } from "@/storage/persisted-value";
 
 export type MobilePanelView = "agent" | "agent-list" | "file-explorer";
 
@@ -138,8 +139,11 @@ function migrateTreeRailWidth(state: MigratablePanelState, version: number): voi
 }
 
 export function migratePanelState(persistedState: unknown, version: number): MigratablePanelState {
-  const result = PanelPersistedStateSchema.safeParse(persistedState);
-  const state: MigratablePanelState = result.success ? result.data : {};
+  const state: MigratablePanelState = parseStoredValue(
+    PanelPersistedStateSchema,
+    persistedState,
+    "panel-state",
+  );
 
   // The docked explorer sidebar is gone; wider layouts render the explorer as
   // workspace tabs. Left behind, `fileExplorerOpen` kept drawing a sidebar that

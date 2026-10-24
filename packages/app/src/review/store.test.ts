@@ -138,8 +138,8 @@ describe("normalizePersistedState", () => {
     expect(backing.values.has("@paseo:review-draft-store")).toBe(true);
   });
 
-  it("rejects the complete payload when any draft comment or field is invalid", () => {
-    const normalized = normalizePersistedState({
+  it("rejects malformed drafts instead of replacing saved comments with empty defaults", () => {
+    const malformed = {
       drafts: {
         "review:key": [
           {
@@ -159,15 +159,15 @@ describe("normalizePersistedState", () => {
         "review:scope:base": "base",
         "review:scope:dirty": "uncommitted",
       },
-    });
+    };
 
-    expect(normalized.drafts).toEqual({});
+    expect(() => normalizePersistedState(malformed)).toThrow("original data was retained");
   });
 
-  it("returns empty state for null, non-object, or malformed inputs", () => {
-    expect(normalizePersistedState(null)).toEqual({ drafts: {} });
-    expect(normalizePersistedState("nope")).toEqual({ drafts: {} });
-    expect(normalizePersistedState({ drafts: [] })).toEqual({ drafts: {} });
+  it("refuses null, non-object, or malformed saved inputs", () => {
+    expect(() => normalizePersistedState(null)).toThrow("original data was retained");
+    expect(() => normalizePersistedState("nope")).toThrow("original data was retained");
+    expect(() => normalizePersistedState({ drafts: [] })).toThrow("original data was retained");
   });
 });
 

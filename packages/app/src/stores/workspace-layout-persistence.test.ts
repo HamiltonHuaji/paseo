@@ -1,5 +1,5 @@
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { StateStorage } from "zustand/middleware";
 import { createWorkspaceLayoutStore } from "./workspace-layout-store";
 
@@ -29,8 +29,8 @@ it("skips unchanged reconciliations and immediately saves real layout changes", 
     });
   openAgent("agent-1");
   const layout = store.getState().layoutByWorkspace[workspaceKey];
+  await vi.waitFor(() => expect(writes).toBe(1));
   const writesBefore = writes;
-  expect(writesBefore).toBe(1);
   for (let index = 0; index < 50; index += 1) {
     store.getState().reconcileTabs(workspaceKey, {
       agentsHydrated: true,
@@ -45,7 +45,7 @@ it("skips unchanged reconciliations and immediately saves real layout changes", 
   expect(writes).toBe(writesBefore);
 
   openAgent("agent-2");
-  expect(writes).toBe(writesBefore + 1);
+  await vi.waitFor(() => expect(writes).toBe(writesBefore + 1));
   const restored = createWorkspaceLayoutStore(undefined, storage);
   await restored.persist.rehydrate();
   expect(restored.getState().layoutByWorkspace[workspaceKey]).toEqual(
@@ -73,6 +73,7 @@ it("keeps the saved layout when the shell publishes its layout mode before hydra
     intent: "reveal",
   });
 
+  await vi.waitFor(() => expect(values.size).toBe(1));
   // A page load: the shell publishes its mode from the first commit, before the read settles.
   const loaded = createWorkspaceLayoutStore(undefined, storage);
   loaded.getState().setLayoutMode("single-pane");

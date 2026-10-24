@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { isAbsolute, join, resolve } from "path";
 import { z } from "zod";
+import { mergePersistedRecord } from "../server/persisted-record.js";
 
 const ChangeRequestLookupTargetSchema = z.object({
   headRef: z.string().min(1),
@@ -341,8 +342,15 @@ function writePaseoWorktreeMetadataFile(
   metadata: PaseoWorktreeMetadata,
 ): void {
   const metadataPath = getPaseoWorktreeMetadataPath(worktreeRoot);
+  let persisted: unknown = metadata;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(metadataPath, "utf8"));
+    persisted = mergePersistedRecord(raw, PaseoWorktreeMetadataSchema.parse(raw), metadata);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   mkdirSync(join(getGitDirForWorktreeRoot(worktreeRoot), "paseo"), { recursive: true });
   const tempPath = `${metadataPath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+  writeFileSync(tempPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
   renameSync(tempPath, metadataPath);
 }

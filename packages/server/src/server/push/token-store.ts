@@ -1,5 +1,5 @@
 import type pino from "pino";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 import { ensurePrivateFile, writePrivateFileAtomicSync } from "../private-files.js";
 
@@ -11,6 +11,7 @@ import { ensurePrivateFile, writePrivateFileAtomicSync } from "../private-files.
 export class PushTokenStore {
   private readonly logger: pino.Logger;
   private subscriptions = new Map<string, number>();
+  private document: Record<string, unknown> = {};
   private readonly filePath: string;
   private readonly now: () => number;
   private readonly leaseMs: number;
@@ -76,66 +77,97 @@ export class PushTokenStore {
   }
 
   private loadFromDisk(): void {
+    let raw: string;
     try {
-      if (!existsSync(this.filePath)) {
-        return;
-      }
       ensurePrivateFile(this.filePath);
-      const raw = readFileSync(this.filePath, "utf-8");
-      const parsed = JSON.parse(raw) as { subscriptions?: unknown; tokens?: unknown };
-      const loaded = new Map<string, number>();
-      const subscriptions = Array.isArray(parsed.subscriptions) ? parsed.subscriptions : [];
-      for (const value of subscriptions) {
-        if (!value || typeof value !== "object") continue;
-        const candidate = value as { token?: unknown; expiresAt?: unknown };
-        if (typeof candidate.token !== "string" || typeof candidate.expiresAt !== "string")
-          continue;
-        const token = candidate.token.trim();
-        const expiresAt = Date.parse(candidate.expiresAt);
-        if (token && Number.isFinite(expiresAt)) {
-          loaded.set(token, expiresAt);
-        }
-      }
-      this.subscriptions = loaded;
-
-      const legacyTokens = Array.isArray(parsed.tokens)
-        ? parsed.tokens.filter((token): token is string => typeof token === "string")
-        : [];
-      if (legacyTokens.length > 0) {
-        const migrated = new Map(loaded);
-        const expiresAt = this.now() + this.leaseMs;
-        for (const token of legacyTokens) {
-          const normalized = token.trim();
-          if (normalized) migrated.set(normalized, expiresAt);
-        }
-        this.persist(migrated);
-        this.subscriptions = migrated;
-      }
-      this.logger.info({ total: this.subscriptions.size }, "Loaded push tokens");
+      raw = readFileSync(this.filePath, "utf-8");
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      this.logger.warn({ err }, "Failed to load push tokens");
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
     }
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      !isTokenObject(parsed) ||
+      (parsed.subscriptions !== undefined && !Array.isArray(parsed.subscriptions)) ||
+      (parsed.tokens !== undefined && !Array.isArray(parsed.tokens))
+    ) {
+      throw new Error(`Invalid push token store: ${this.filePath}`);
+    }
+    this.document = parsed;
+    const loaded = new Map<string, number>();
+    for (const value of Array.isArray(parsed.subscriptions) ? parsed.subscriptions : []) {
+      const subscription = parseSubscription(value);
+      if (subscription) loaded.set(subscription.token, subscription.expiresAt);
+    }
+    this.subscriptions = loaded;
+
+    const legacyTokens = Array.isArray(parsed.tokens)
+      ? parsed.tokens.filter((token): token is string => typeof token === "string")
+      : [];
+    if (legacyTokens.length > 0) {
+      const migrated = new Map(loaded);
+      const expiresAt = this.now() + this.leaseMs;
+      for (const token of legacyTokens) {
+        const normalized = token.trim();
+        if (normalized) migrated.set(normalized, expiresAt);
+      }
+      this.persist(migrated);
+      this.subscriptions = migrated;
+    }
+    this.logger.info({ total: this.subscriptions.size }, "Loaded push tokens");
   }
 
   private persist(subscriptions: ReadonlyMap<string, number>): void {
     try {
-      const payload =
-        JSON.stringify(
-          {
-            subscriptions: Array.from(subscriptions, ([token, expiresAt]) => ({
-              token,
-              expiresAt: new Date(expiresAt).toISOString(),
-            })),
-          },
-          null,
-          2,
-        ) + "\n";
+      const remaining = new Map(subscriptions);
+      const entries: unknown[] = [];
+      for (const value of Array.isArray(this.document.subscriptions)
+        ? this.document.subscriptions
+        : []) {
+        const previous = parseSubscription(value);
+        if (!previous || !isTokenObject(value)) {
+          entries.push(value);
+          continue;
+        }
+        const expiresAt = subscriptions.get(previous.token);
+        if (expiresAt === undefined) continue;
+        entries.push(
+          expiresAt === previous.expiresAt
+            ? value
+            : { ...value, expiresAt: new Date(expiresAt).toISOString() },
+        );
+        remaining.delete(previous.token);
+      }
+      for (const [token, expiresAt] of remaining) {
+        entries.push({ token, expiresAt: new Date(expiresAt).toISOString() });
+      }
+      const document: Record<string, unknown> = { ...this.document, subscriptions: entries };
+      if (Array.isArray(document.tokens)) {
+        // Migrate understood legacy strings once; keep unrecognized entries in
+        // the same file so a newer daemon can still read them.
+        const opaqueTokens = document.tokens.filter((token) => typeof token !== "string");
+        if (opaqueTokens.length > 0) document.tokens = opaqueTokens;
+        else delete document.tokens;
+      }
+      const payload = JSON.stringify(document, null, 2) + "\n";
       this.write(this.filePath, payload);
+      this.document = document;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       this.logger.warn({ err }, "Failed to persist push tokens");
       throw err;
     }
   }
+}
+
+function isTokenObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseSubscription(value: unknown): { token: string; expiresAt: number } | null {
+  if (!isTokenObject(value)) return null;
+  if (typeof value.token !== "string" || typeof value.expiresAt !== "string") return null;
+  const token = value.token.trim();
+  const expiresAt = Date.parse(value.expiresAt);
+  return token && Number.isFinite(expiresAt) ? { token, expiresAt } : null;
 }

@@ -6,7 +6,7 @@ import {
   createShortcutOverrideStore,
   type ShortcutOverrideStore,
 } from "@/keyboard/shortcut-override-store";
-import { readValidatedJson } from "@/storage/validated-storage";
+import { readValidatedJson, writeValidatedJson } from "@/storage/validated-storage";
 
 const STORAGE_KEY = "@paseo:keyboard-shortcut-overrides";
 const QUERY_KEY = ["keyboard-shortcut-overrides"];
@@ -60,31 +60,45 @@ function getStore(queryClient: QueryClient): ShortcutOverrideStore {
 
   const created = createShortcutOverrideStore({
     cache: {
-      read: () => queryClient.getQueryData<ShortcutOverrides>(QUERY_KEY) ?? EMPTY_OVERRIDES,
+      read: () => {
+        const value = queryClient.getQueryData<ShortcutOverrides>(QUERY_KEY);
+        if (!value) throw new Error(`Cannot update ${STORAGE_KEY} before it is loaded`);
+        return value;
+      },
       write: (next) => {
         queryClient.setQueryData<ShortcutOverrides>(QUERY_KEY, next);
       },
     },
     storage: {
-      write: (serialized) => AsyncStorage.setItem(STORAGE_KEY, serialized),
+      write: (serialized) =>
+        writeValidatedJson(
+          AsyncStorage,
+          STORAGE_KEY,
+          ShortcutOverridesSchema,
+          ShortcutOverridesSchema.parse(JSON.parse(serialized)),
+        ),
       remove: () => AsyncStorage.removeItem(STORAGE_KEY),
     },
     onError: (err) => {
       console.error("[KeyboardShortcutOverrides] Failed to save overrides:", err);
     },
   });
-  stores.set(queryClient, created);
-  return created;
+  async function afterLoad(operation: () => Promise<void>): Promise<void> {
+    await queryClient.ensureQueryData({ queryKey: QUERY_KEY, queryFn: loadOverridesFromStorage });
+    await operation();
+  }
+  const ready: ShortcutOverrideStore = {
+    set: (id, combo) => afterLoad(() => created.set(id, combo)),
+    clear: (id) => afterLoad(() => created.clear(id)),
+    remove: (id) => afterLoad(() => created.remove(id)),
+    resetAll: () => afterLoad(created.resetAll),
+  };
+  stores.set(queryClient, ready);
+  return ready;
 }
 
 async function loadOverridesFromStorage(): Promise<ShortcutOverrides> {
-  try {
-    return (
-      (await readValidatedJson(AsyncStorage, STORAGE_KEY, ShortcutOverridesSchema)) ??
-      EMPTY_OVERRIDES
-    );
-  } catch (err) {
-    console.error("[KeyboardShortcutOverrides] Failed to load overrides:", err);
-  }
-  return EMPTY_OVERRIDES;
+  return (
+    (await readValidatedJson(AsyncStorage, STORAGE_KEY, ShortcutOverridesSchema)) ?? EMPTY_OVERRIDES
+  );
 }

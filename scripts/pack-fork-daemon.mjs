@@ -184,10 +184,24 @@ async function copyPackedPackage(
   const requireFromPackage = createRequire(path.join(packageDirectory, "package.json"));
   for (const name of nestedDependencies.keys()) {
     const dependencyDirectory = await findPackageDirectory(requireFromPackage.resolve(name), name);
-    await copyRawPackedPackage(
-      dependencyDirectory,
-      path.join(targetDirectory, "node_modules", ...name.split("/")),
-    );
+    const nestedDirectory = path.join(targetDirectory, "node_modules", ...name.split("/"));
+    await copyRawPackedPackage(dependencyDirectory, nestedDirectory);
+    const nestedManifestPath = path.join(nestedDirectory, "package.json");
+    const nestedManifest = await readJson(nestedManifestPath);
+    // A bundled external package has the same peer-resolution problem as a
+    // bundled workspace. Required peers must remain owned by the distribution.
+    const distributionManifest = await readJson(path.join(STAGE_DIRECTORY, "package.json"));
+    for (const peer of Object.keys(nestedManifest.peerDependencies ?? {})) {
+      if (
+        !nestedManifest.peerDependenciesMeta?.[peer]?.optional &&
+        !distributionManifest.dependencies[peer]
+      ) {
+        throw new Error(`Bundled ${name} requires an undeclared distribution peer: ${peer}`);
+      }
+    }
+    delete nestedManifest.peerDependencies;
+    delete nestedManifest.peerDependenciesMeta;
+    await writeFile(nestedManifestPath, `${JSON.stringify(nestedManifest, null, 2)}\n`);
   }
 }
 
@@ -268,6 +282,11 @@ export async function packForkDaemon() {
   );
   await copyFile(path.join(REPO_ROOT, "LICENSE"), path.join(STAGE_DIRECTORY, "LICENSE"));
 
+  await writeFile(
+    path.join(STAGE_DIRECTORY, "package.json"),
+    `${JSON.stringify(packageManifest, null, 2)}\n`,
+  );
+
   for (const directory of INTERNAL_PACKAGE_DIRECTORIES) {
     const manifest = internalManifests.find(
       (candidate) => candidate.name === `@getpaseo/${path.basename(directory)}`,
@@ -282,10 +301,6 @@ export async function packForkDaemon() {
     );
   }
 
-  await writeFile(
-    path.join(STAGE_DIRECTORY, "package.json"),
-    `${JSON.stringify(packageManifest, null, 2)}\n`,
-  );
   await writeFile(
     path.join(STAGE_DIRECTORY, "paseo-distribution.json"),
     `${JSON.stringify(distributionManifest, null, 2)}\n`,

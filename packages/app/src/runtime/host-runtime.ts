@@ -15,11 +15,9 @@ import {
 import {
   connectionFromListen,
   createRemoteSshHostConnection,
-  normalizeStoredHostProfile,
   upsertHostConnectionInProfiles,
   registryHasConnection,
   relayConnectionFromOffer,
-  StoredHostRegistrySchema,
   type HostConnection,
   type HostProfile,
 } from "@/types/host-connection";
@@ -40,7 +38,8 @@ import { isWeb } from "@/constants/platform";
 import { connectToDaemon, getConnectionAuthFailureReason } from "@/utils/test-daemon-connection";
 import { getOrCreateClientId } from "@/utils/client-id";
 import { z } from "zod";
-import { readValidatedJson, readValidatedString } from "@/storage/validated-storage";
+import { readValidatedString } from "@/storage/validated-storage";
+import { HostRegistryStorage } from "./host-registry-storage";
 import {
   selectBestConnection,
   type ConnectionCandidate,
@@ -1463,7 +1462,6 @@ export class HostRuntimeController {
   }
 }
 
-const REGISTRY_STORAGE_KEY = "@paseo:daemon-registry";
 const LOCALHOST_FALLBACK_ENDPOINT = "localhost:6767";
 const DEFAULT_LOCALHOST_BOOTSTRAP_TIMEOUT_MS = 2500;
 const E2E_STORAGE_KEY = "@paseo:e2e";
@@ -1573,6 +1571,7 @@ export class HostRuntimeStore {
   private registryLoad: Promise<void> | null = null;
   private readonly hostConfirmations = new HostConfirmations();
   private storage: HostRuntimeStorage;
+  private readonly hostRegistryStorage: HostRegistryStorage;
   private replicaCache: ReplicaCache;
   private readonly revokePushNotifications: typeof revokePushNotifications;
 
@@ -1584,6 +1583,7 @@ export class HostRuntimeStore {
   }) {
     this.deps = input?.deps ?? createDefaultDeps((serverId) => this.getClient(serverId));
     this.storage = input?.storage ?? AsyncStorage;
+    this.hostRegistryStorage = new HostRegistryStorage(this.storage);
     this.replicaCache = new ReplicaCache(input?.replicaRowStore ?? createReplicaRowStore());
     this.revokePushNotifications = input?.revokePushNotifications ?? revokePushNotifications;
   }
@@ -1663,38 +1663,10 @@ export class HostRuntimeStore {
   }
 
   private async loadFromStorage(): Promise<void> {
-    let shouldPersistHosts = false;
     let profiles: HostProfile[] = [];
     try {
-      const stored = await readValidatedJson(
-        this.storage,
-        REGISTRY_STORAGE_KEY,
-        StoredHostRegistrySchema,
-      );
-      if (stored) {
-        const normalizedProfiles: HostProfile[] = [];
-        for (const entry of stored) {
-          const profile = normalizeStoredHostProfile(entry);
-          if (!profile) {
-            await this.storage.removeItem(REGISTRY_STORAGE_KEY);
-            normalizedProfiles.length = 0;
-            break;
-          }
-          // COMPAT(connectionPassword): added in v0.9.1, remove after 2027-03-24 with stored-password migration.
-          if (
-            entry.connections.some(
-              (connection) => connection.type === "directTcp" && connection.password,
-            )
-          ) {
-            shouldPersistHosts = true;
-          }
-          normalizedProfiles.push(profile);
-        }
-        profiles = normalizedProfiles.filter((entry) => !isPlaceholderServerId(entry.serverId));
-        if (profiles.length !== normalizedProfiles.length) {
-          shouldPersistHosts = true;
-        }
-      }
+      const stored = await this.hostRegistryStorage.read();
+      profiles = stored.filter((entry) => !isPlaceholderServerId(entry.serverId));
       this.hosts = profiles;
       this.replicaCache.setHosts(profiles.map((profile) => profile.serverId));
       projectIconCache.setHosts(profiles.map((profile) => profile.serverId));
@@ -1711,11 +1683,6 @@ export class HostRuntimeStore {
     } finally {
       this.hostRegistryStatus = "ready";
       this.emitHostList();
-      if (shouldPersistHosts) {
-        void this.persistHosts().catch((error) =>
-          console.error("[HostRuntime] Failed to persist host registry", error),
-        );
-      }
     }
   }
 
@@ -2296,7 +2263,7 @@ export class HostRuntimeStore {
   }
 
   private async persistHosts(hosts = this.hosts): Promise<void> {
-    await this.storage.setItem(REGISTRY_STORAGE_KEY, JSON.stringify(hosts));
+    await this.hostRegistryStorage.write(hosts);
   }
 
   private emitHostList(): void {

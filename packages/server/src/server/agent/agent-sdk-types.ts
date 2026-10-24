@@ -601,6 +601,20 @@ export interface ImportedTimelineEntry {
   timestamp?: string;
 }
 
+/** Read-only native history. Pages are chronological; traversal starts at the tail. */
+export interface AgentHistoryReader {
+  readBefore(
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    entries: (ImportedTimelineEntry & { turnId?: string; providerMessageId?: string })[];
+    nextCursor: string | null;
+  }>;
+  close(): Promise<void>;
+}
+
+export class AgentHistoryPaginationUnavailableError extends Error {}
+
 export interface ImportedProviderSession {
   session: AgentSession;
   config: AgentSessionConfig;
@@ -775,6 +789,12 @@ export interface ResolveAgentDefaultModeInput {
 export interface AgentClient {
   readonly provider: AgentProvider;
   readonly capabilities: AgentCapabilityFlags;
+  openHistoryReader?(
+    handle: AgentPersistenceHandle,
+    config: AgentSessionConfig,
+    launchContext?: AgentLaunchContext,
+    signal?: AbortSignal,
+  ): Promise<AgentHistoryReader>;
   createSession(
     config: AgentSessionConfig,
     launchContext?: AgentLaunchContext,

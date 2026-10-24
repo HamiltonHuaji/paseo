@@ -103,7 +103,7 @@ describe("createShortcutOverrideStore", () => {
   it("reverts the cache and reports when the write fails", async () => {
     const h = createHarness({ seed: { "new-workspace": "Mod+1" }, failWrites: [1] });
 
-    await h.store.clear("new-workspace");
+    await expect(h.store.clear("new-workspace")).rejects.toThrow();
 
     expect(h.cached()).toEqual({ "new-workspace": "Mod+1" });
     expect(h.persisted()).toEqual({ "new-workspace": "Mod+1" });
@@ -122,7 +122,7 @@ describe("createShortcutOverrideStore", () => {
   it("restores the map when the reset fails", async () => {
     const h = createHarness({ seed: { "new-workspace": "Mod+1" }, failRemove: true });
 
-    await h.store.resetAll();
+    await expect(h.store.resetAll()).rejects.toThrow();
 
     expect(h.cached()).toEqual({ "new-workspace": "Mod+1" });
     expect(h.persisted()).toEqual({ "new-workspace": "Mod+1" });
@@ -136,7 +136,7 @@ describe("createShortcutOverrideStore", () => {
     // without awaiting.
     const first = h.store.set("new-workspace", "Mod+1");
     const second = h.store.set("new-workspace", "Mod+2");
-    await Promise.all([first, second]);
+    await Promise.all([expect(first).rejects.toThrow(), second]);
 
     // The failed write must not roll its own stale value back over the one
     // that landed, or the row would show Mod+1 and the relaunch would fire
@@ -175,7 +175,7 @@ describe("createShortcutOverrideStore", () => {
   it("keeps running after a failed operation", async () => {
     const h = createHarness({ failWrites: [1] });
 
-    await h.store.set("a", "Mod+1");
+    await expect(h.store.set("a", "Mod+1")).rejects.toThrow();
     await h.store.set("b", "Mod+2");
 
     expect(h.persisted()).toEqual({ b: "Mod+2" });

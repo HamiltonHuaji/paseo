@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { MAX_PHYSICAL_SOCKET_BUFFERED_BYTES } from "./physical-socket.js";
+import { sendBoundedPhysicalFrameAndWait } from "./physical-socket.js";
 
 export interface EncryptedRelayChannel {
   setState: (state: "open") => void;
@@ -11,6 +11,7 @@ export interface EncryptedRelayChannel {
 export interface EncryptedRelaySocket {
   readonly readyState: number;
   readonly bufferedAmount: number;
+  outboundWireByteLength: (data: string | Uint8Array | ArrayBuffer) => number;
   send: (data: string | Uint8Array | ArrayBuffer) => void | Promise<void>;
   close: (code?: number, reason?: string) => void;
   terminate: () => void;
@@ -45,6 +46,20 @@ export function createEncryptedRelaySocket(params: {
     readyState = 3;
   });
 
+  const transport = {
+    get readyState() {
+      return readyState;
+    },
+    get bufferedAmount() {
+      return getTransportBufferedAmount() ?? 0;
+    },
+    send: (data: string | Uint8Array | ArrayBuffer) =>
+      channel.send(normalizeRelaySendPayload(data)).catch((error) => {
+        emitter.emit("error", error);
+        throw error;
+      }),
+  };
+
   return {
     get readyState() {
       return readyState;
@@ -52,23 +67,23 @@ export function createEncryptedRelaySocket(params: {
     get bufferedAmount() {
       return getTransportBufferedAmount() ?? 0;
     },
-    send: (data) => {
+    outboundWireByteLength: (data) =>
+      channel.outboundWireByteLength(normalizeRelaySendPayload(data)),
+    send: async (data) => {
       if (readyState !== 1) {
-        return Promise.reject(new Error("Encrypted relay socket is not open"));
+        throw new Error("Encrypted relay socket is not open");
       }
       const outbound = normalizeRelaySendPayload(data);
       const outboundBytes = channel.outboundWireByteLength(outbound);
-      const queuedBytes = getTransportBufferedAmount() ?? 0;
-      if (queuedBytes + outboundBytes > MAX_PHYSICAL_SOCKET_BUFFERED_BYTES) {
-        terminate();
-        return Promise.reject(
-          new Error("Encrypted relay socket exceeded its outbound high-water mark"),
-        );
-      }
-      return channel.send(outbound).catch((error) => {
-        emitter.emit("error", error);
-        throw error;
+      const sent = await sendBoundedPhysicalFrameAndWait({
+        socket: transport,
+        frame: outbound,
+        frameBytes: outboundBytes,
+        onHighWater: terminate,
       });
+      if (!sent) {
+        throw new Error("Encrypted relay socket exceeded its outbound high-water mark");
+      }
     },
     close,
     terminate,

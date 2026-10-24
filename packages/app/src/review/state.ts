@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseStoredValue } from "@/storage/persisted-value";
 
 export type ReviewDraftMode = "uncommitted" | "base" | "all";
 export type ReviewDraftSide = "old" | "new";
@@ -115,9 +116,8 @@ export function serializeReviewDraftState(
 }
 
 export function normalizePersistedState(state: unknown): ReviewDraftStoreState {
-  const result = SerializedReviewDraftStateSchema.safeParse(state);
   return {
-    drafts: result.success ? result.data.drafts : {},
+    drafts: parseStoredValue(SerializedReviewDraftStateSchema, state, "review-drafts").drafts,
   };
 }
 

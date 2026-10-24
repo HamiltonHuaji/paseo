@@ -2,9 +2,11 @@ import { withPaseoAgentCliEnvironment } from "../paseo-cli-environment.js";
 import { validateProviderOptions } from "../provider-options.js";
 import {
   getAgentStreamEventTurnId,
+  AgentHistoryPaginationUnavailableError,
   type AgentPermissionAction,
   type AgentCapabilityFlags,
   type AgentClient,
+  type AgentHistoryReader,
   type AgentCreateSessionOptions,
   type AgentConversationForkInput,
   type AgentFeature,
@@ -2130,6 +2132,261 @@ const CodexThreadItemsListResponseSchema = z
     nextCursor: z.string().nullable().optional(),
   })
   .passthrough();
+
+const CodexHistoryTurnSchema = z.object({
+  id: z.string(),
+  startedAt: z.number().nullable().optional(),
+  completedAt: z.number().nullable().optional(),
+});
+const CodexHistoryCursorSchema = z.object({
+  turns: z.array(CodexHistoryTurnSchema),
+  turnsCursor: z.string().nullable().optional(),
+  itemCursor: z.string().optional(),
+});
+const CodexHistoryTurnsSchema = z.object({
+  data: z.array(CodexHistoryTurnSchema),
+  nextCursor: z.string().nullable().optional(),
+});
+
+function createCodexHistoryReader(
+  client: CodexAppServerClient,
+  handle: AgentPersistenceHandle,
+  cwd: string | undefined,
+): AgentHistoryReader {
+  const questions = new CodexAsyncQuestions(handle.metadata?.asyncQuestions);
+  type ItemPage = z.infer<typeof CodexThreadItemsListResponseSchema>;
+  type TurnPage = z.infer<typeof CodexHistoryTurnsSchema>;
+  type Cursor = z.infer<typeof CodexHistoryCursorSchema>;
+  interface PrefetchedResponse<T> {
+    promise: Promise<T>;
+    resolve: (page: T) => void;
+    reject: (error: unknown) => void;
+    started: boolean;
+    response?: T;
+  }
+  type PrefetchedPage = PrefetchedResponse<ItemPage>;
+  const pages = new Map<string, PrefetchedPage>();
+  let nextTurns: (PrefetchedResponse<TurnPage> & { cursor: string | undefined }) | undefined;
+  let currentState: Cursor | undefined;
+  let expectedCursor: string | null | undefined;
+  let active = 0;
+  let closed = false;
+  const pageKey = (turnId: string, cursor?: string) => JSON.stringify([turnId, cursor]);
+  const createPrefetched = <T>(): PrefetchedResponse<T> => {
+    let resolve!: (page: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((accept, decline) => {
+      resolve = accept;
+      reject = decline;
+    });
+    // A prefetched failure belongs to its eventual reader. Queued pages are
+    // also owned here so closing can reject them without starting new RPCs.
+    void promise.catch(() => {});
+    return { promise, resolve, reject, started: false };
+  };
+  const ensurePage = (turnId: string, cursor?: string) => {
+    const key = pageKey(turnId, cursor);
+    let page = pages.get(key);
+    if (!page) {
+      page = createPrefetched<ItemPage>();
+      pages.set(key, page);
+    }
+    return page;
+  };
+  const startPage = (turnId: string, cursor: string | undefined, page: PrefetchedPage) => {
+    page.started = true;
+    active += 1;
+    void Promise.resolve()
+      .then(() => {
+        if (closed) throw new Error("Codex history reader is closed");
+        return client.request("thread/items/list", {
+          threadId: handle.sessionId,
+          turnId,
+          sortDirection: "desc",
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+        });
+      })
+      .then((response) => CodexThreadItemsListResponseSchema.parse(response))
+      .then(
+        (response) => {
+          active -= 1;
+          page.response = response;
+          // Queue native work before waking the consumer's synchronous mapping.
+          refill();
+          page.resolve(response);
+          return undefined;
+        },
+        (error) => {
+          active -= 1;
+          refill();
+          page.reject(error);
+          return undefined;
+        },
+      );
+  };
+  const ensureTurns = (cursor: string | undefined) => {
+    if (!nextTurns) nextTurns = { ...createPrefetched<TurnPage>(), cursor };
+    return nextTurns;
+  };
+  const startTurns = (page: NonNullable<typeof nextTurns>) => {
+    page.started = true;
+    active += 1;
+    void Promise.resolve()
+      .then(() => {
+        if (closed) throw new Error("Codex history reader is closed");
+        return client.request("thread/turns/list", {
+          threadId: handle.sessionId,
+          sortDirection: "desc",
+          itemsView: "notLoaded",
+          limit: 100,
+          ...(page.cursor ? { cursor: page.cursor } : {}),
+        });
+      })
+      .then((response) => CodexHistoryTurnsSchema.parse(response))
+      .then(
+        (response) => {
+          active -= 1;
+          page.response = response;
+          refill();
+          page.resolve(response);
+          return undefined;
+        },
+        (error) => {
+          active -= 1;
+          refill();
+          page.reject(error);
+          return undefined;
+        },
+      );
+  };
+  const prefetchFollowingTurns = (state: Cursor) => {
+    // One extra metadata page lets the item buffer span a turn-page boundary.
+    // It shares the four RPC slots, and never advances the consumer's cursor.
+    if (state.turns.length <= 32 && state.turnsCursor) {
+      ensureTurns(state.turnsCursor);
+    }
+    if (nextTurns && !nextTurns.started && active < 4) startTurns(nextTurns);
+    return nextTurns?.response?.data ?? [];
+  };
+  const refill = () => {
+    if (closed || !currentState) return;
+    const followingTurns = prefetchFollowingTurns(currentState);
+    // Share one bounded buffer across current and following turns, preferring
+    // their nearest known continuations. Only admit pages when an RPC slot is
+    // available: distant queued first pages must not block nearby continuations.
+    // Completed pages can keep filling this buffer while the caller sends data.
+    for (const [index, turn] of [...currentState.turns, ...followingTurns].entries()) {
+      let cursor = index === 0 ? currentState.itemCursor : undefined;
+      for (let count = 0; count < 32; count += 1) {
+        if (active >= 4) return;
+        let page = pages.get(pageKey(turn.id, cursor));
+        if (!page) {
+          if (pages.size >= 32) return;
+          page = ensurePage(turn.id, cursor);
+        }
+        if (!page.started) startPage(turn.id, cursor, page);
+        if (!page.response?.nextCursor || page.response.nextCursor === cursor) break;
+        cursor = page.response.nextCursor;
+      }
+    }
+  };
+  const loadTurns = async (state: Cursor) => {
+    currentState = state;
+    const pendingTurns = ensureTurns(state.turnsCursor ?? undefined);
+    refill();
+    const turns = await pendingTurns.promise;
+    if (nextTurns === pendingTurns) nextTurns = undefined;
+    state.turns = turns.data;
+    state.turnsCursor = turns.nextCursor;
+  };
+  const clearPages = () => {
+    currentState = undefined;
+    nextTurns?.reject(new Error("Codex history prefetch cleared"));
+    nextTurns = undefined;
+    for (const page of pages.values()) page.reject(new Error("Codex history prefetch cleared"));
+    pages.clear();
+  };
+  const close = () => {
+    closed = true;
+    clearPages();
+    return client.dispose();
+  };
+  return {
+    close,
+    readBefore: async (cursor, signal) => {
+      signal?.throwIfAborted();
+      if (closed) throw new Error("Codex history reader is closed");
+      if (cursor !== expectedCursor) clearPages();
+      const abort = () => {
+        void close();
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      try {
+        const state = CodexHistoryCursorSchema.parse(cursor ? JSON.parse(cursor) : { turns: [] });
+        if (!state.turns.length) {
+          await loadTurns(state);
+        }
+        signal?.throwIfAborted();
+        const turn = state.turns[0];
+        if (!turn) {
+          return { entries: [], nextCursor: state.turnsCursor ? JSON.stringify(state) : null };
+        }
+        // Global item order puts long-running commands at their completion
+        // position, even after later turns. Preserve the full-history turn order
+        // while bounding each turn page and allowing at most four in-flight RPCs.
+        currentState = state;
+        // A cursor reset can leave old requests settling in all four slots.
+        // Own the requested page even then; their completion will start it.
+        const requestedPage = ensurePage(turn.id, state.itemCursor);
+        refill();
+        const key = pageKey(turn.id, state.itemCursor);
+        const response = await requestedPage.promise;
+        signal?.throwIfAborted();
+        pages.delete(key);
+        if (response.nextCursor) {
+          if (response.nextCursor === state.itemCursor)
+            throw new Error("Codex repeated a history cursor");
+          state.itemCursor = response.nextCursor;
+        } else {
+          state.turns.shift();
+          delete state.itemCursor;
+        }
+        // Refill the consumed slot before the caller serializes or sends its
+        // page, so bounded provider work can overlap that transport wait.
+        refill();
+        expectedCursor = state.turns.length || state.turnsCursor ? JSON.stringify(state) : null;
+        return {
+          nextCursor: expectedCursor,
+          entries: response.data.toReversed().flatMap((entry) =>
+            threadItemToTimelineEntries(entry.item, { cwd }).map((item) => ({
+              item:
+                item.type === "tool_call" && item.name === "request_user_input_async"
+                  ? (questions.timeline(item.callId) ?? item)
+                  : settleHistoricalSubAgentItem(item, readCodexSubAgentActivity(entry.item)),
+              timestamp:
+                readCodexHistoryTimestamp(entry.item) ??
+                readCodexTurnHistoryTimestamp(turn, item) ??
+                undefined,
+              turnId: entry.turnId,
+              providerMessageId: nonEmptyString(toObjectRecord(entry.item)?.id) ?? undefined,
+            })),
+          ),
+        };
+      } catch (error) {
+        if (error instanceof CodexAppServerRpcError && error.code === -32601) {
+          throw new AgentHistoryPaginationUnavailableError(
+            "Codex does not support history pagination",
+            { cause: error },
+          );
+        }
+        throw error;
+      } finally {
+        signal?.removeEventListener("abort", abort);
+      }
+    },
+  };
+}
 
 export async function resolveCodexForkBeforeTurnId(input: {
   threadId: string;
@@ -7847,6 +8104,45 @@ export class CodexAppServerAgentClient implements AgentClient {
     );
     await session.connect();
     return session;
+  }
+
+  async openHistoryReader(
+    handle: AgentPersistenceHandle,
+    config: AgentSessionConfig,
+    launchContext?: AgentLaunchContext,
+    signal?: AbortSignal,
+  ): Promise<AgentHistoryReader> {
+    signal?.throwIfAborted();
+    const environment = await resolveCodexStorageEnvironment(
+      buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env),
+      config.cwd,
+      typeof handle.metadata?.paseoCodexHome === "string"
+        ? handle.metadata.paseoCodexHome
+        : undefined,
+      true,
+    );
+    signal?.throwIfAborted();
+    const child = await this.spawnAppServer(launchContext?.env, {
+      environment,
+      cwd: config.cwd,
+      agentId: launchContext?.agentId,
+    });
+    const client = new CodexAppServerClient(child, this.logger);
+    const abortInitialization = () => {
+      void client.dispose();
+    };
+    signal?.addEventListener("abort", abortInitialization, { once: true });
+    try {
+      signal?.throwIfAborted();
+      await client.request("initialize", buildCodexAppServerInitializeParams());
+      client.notify("initialized", {});
+    } catch (error) {
+      await client.dispose();
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", abortInitialization);
+    }
+    return createCodexHistoryReader(client, handle, config.cwd);
   }
 
   async forkSession(

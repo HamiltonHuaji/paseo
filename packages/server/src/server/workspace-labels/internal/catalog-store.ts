@@ -31,10 +31,11 @@ const WorkspaceLabelWorkspaceStateSchema = z.object({
   labels: z.array(z.string()).optional(),
   updatedAt: z.string(),
 });
+const StoredWorkspaceLabelDefinitionSchema = WorkspaceLabelDefinitionSchema.passthrough();
 const WorkspaceLabelTransactionSchema = z.object({
   phase: z.enum(["prepared", "committed"]),
-  beforeLabels: z.array(WorkspaceLabelDefinitionSchema),
-  afterLabels: z.array(WorkspaceLabelDefinitionSchema),
+  beforeLabels: z.array(StoredWorkspaceLabelDefinitionSchema),
+  afterLabels: z.array(StoredWorkspaceLabelDefinitionSchema),
   beforeWorkspaces: z.array(WorkspaceLabelWorkspaceStateSchema),
   afterWorkspaces: z.array(WorkspaceLabelWorkspaceStateSchema),
 });
@@ -170,7 +171,7 @@ export class WorkspaceLabelCatalogStore {
   private async readCatalog(): Promise<WorkspaceLabelDefinition[]> {
     try {
       const raw = await fs.readFile(this.filePath, "utf8");
-      return z.array(WorkspaceLabelDefinitionSchema).parse(JSON.parse(raw));
+      return z.array(StoredWorkspaceLabelDefinitionSchema).parse(JSON.parse(raw));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;

@@ -2238,7 +2238,7 @@ export async function createPaseoDaemon(
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     await wsServer?.agentMessages.close();
-    agentManager.prepareForShutdown();
+    await agentManager.prepareForShutdown();
     await closeAllAgents(logger, agentManager);
     await withTimeout({
       promise: pluginRuntime.drainEvents(),

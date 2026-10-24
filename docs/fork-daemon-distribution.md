@@ -21,6 +21,11 @@ The outer package is `@hamiltonhuaji/paseo-fork`; its executable stays `paseo`. 
 bundled internal workspace before loading the CLI, so an official package elsewhere in the global
 npm prefix cannot satisfy a missing fork dependency.
 
+The outer package owns required peer dependencies, including peers of bundled third-party
+packages. Leaving those peer declarations in a nested bundled manifest can make npm finish
+successfully with an empty dependency directory. Check an actual installed CLI and daemon when
+changing this packaging; a successful install command alone does not prove the package can load.
+
 Agent terminals and managed Codex tools use the CLI from the running distribution. Build the CLI
 before starting Codex from a source checkout; a missing source or bundled CLI must not resolve to an
 outer checkout or separately installed package. A restart through the wrong CLI can replace the

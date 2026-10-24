@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type pino from "pino";
@@ -35,21 +35,23 @@ export async function loadOrCreateDaemonKeyPair(
   const log = logger?.child({ module: "daemon-keypair" });
   const filePath = path.join(paseoHome, KEYPAIR_FILENAME);
 
-  if (existsSync(filePath)) {
-    try {
-      ensurePrivateFile(filePath);
-      const raw = readFileSync(filePath, "utf8");
-      const parsed = KeyPairSchema.parse(JSON.parse(raw));
+  let raw: string | null;
+  try {
+    ensurePrivateFile(filePath);
+    raw = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    raw = null;
+  }
+  if (raw !== null) {
+    const parsed = KeyPairSchema.parse(JSON.parse(raw));
 
-      const publicKey = importPublicKey(parsed.publicKeyB64);
-      const secretKey = importSecretKey(parsed.secretKeyB64);
-      const publicKeyB64 = exportPublicKey(publicKey);
+    const publicKey = importPublicKey(parsed.publicKeyB64);
+    const secretKey = importSecretKey(parsed.secretKeyB64);
+    const publicKeyB64 = exportPublicKey(publicKey);
 
-      log?.info({ filePath }, "Loaded daemon keypair");
-      return { keyPair: { publicKey, secretKey }, publicKeyB64 };
-    } catch (error) {
-      log?.warn({ err: error, filePath }, "Failed to load daemon keypair, regenerating");
-    }
+    log?.info({ filePath }, "Loaded daemon keypair");
+    return { keyPair: { publicKey, secretKey }, publicKeyB64 };
   }
 
   const keyPair = generateKeyPair();

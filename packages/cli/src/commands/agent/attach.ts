@@ -134,12 +134,13 @@ export async function runAttachCommand(
         client,
         agentId: resolvedId,
         timeoutMs: LIVE_HISTORY_FETCH_TIMEOUT_MS,
+        tail: 50,
       });
       for (const item of timelineItems) {
         printTimelineItem(item);
       }
     } catch (error) {
-      console.warn("Warning: failed to fetch existing timeline", error);
+      throw new Error("Could not load recent history; attach did not complete", { cause: error });
     }
 
     // Subscribe to new events

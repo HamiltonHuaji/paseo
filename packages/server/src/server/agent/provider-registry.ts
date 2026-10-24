@@ -605,6 +605,19 @@ function wrapClientProvider(
           })
       : undefined,
     readSessionLineage: inner.readSessionLineage?.bind(inner),
+    openHistoryReader: inner.openHistoryReader
+      ? (handle, config, context, signal) =>
+          inner.openHistoryReader!(
+            { ...handle, provider: inner.provider },
+            {
+              ...config,
+              provider: inner.provider,
+              providerOptions: mergeProviderOptions(providerOptions, config.providerOptions),
+            },
+            context,
+            signal,
+          )
+      : undefined,
     ...wrapSessionListing(inner, providerOptions),
     importSession: importSession
       ? async (input, context) => {

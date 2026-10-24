@@ -1,6 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { readValidatedJson, readValidatedString } from "@/storage/validated-storage";
+import {
+  readValidatedJson,
+  readValidatedString,
+  writeValidatedJson,
+} from "@/storage/validated-storage";
 
 export const CHANGES_PREFERENCES_STORAGE_KEY = "@paseo:changes-preferences";
 export const LEGACY_WRAP_LINES_STORAGE_KEY = "diff-wrap-lines";
@@ -72,19 +76,41 @@ export async function loadChangesPreferencesFromStorage(
     ...DEFAULT_CHANGES_PREFERENCES,
     ...(legacyWrapLines !== null ? { wrapLines: legacyWrapLines } : {}),
   } satisfies ChangesPreferences;
-  await storage.setItem(CHANGES_PREFERENCES_STORAGE_KEY, JSON.stringify(next));
+  await writeValidatedJson(
+    storage,
+    CHANGES_PREFERENCES_STORAGE_KEY,
+    changesPreferencesSchema,
+    next,
+  );
   return next;
 }
+
+const preferenceWrites = new WeakMap<KeyValueStorage, Promise<void>>();
 
 export async function saveChangesPreferences(input: {
   queryClient: QueryClient;
   updates: Partial<ChangesPreferences>;
   storage: KeyValueStorage;
 }): Promise<void> {
-  const prev =
-    input.queryClient.getQueryData<ChangesPreferences>(CHANGES_PREFERENCES_QUERY_KEY) ??
-    DEFAULT_CHANGES_PREFERENCES;
+  const write = (preferenceWrites.get(input.storage) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => saveChangesPreferencesNow(input));
+  preferenceWrites.set(input.storage, write);
+  await write;
+}
+
+async function saveChangesPreferencesNow(input: {
+  queryClient: QueryClient;
+  updates: Partial<ChangesPreferences>;
+  storage: KeyValueStorage;
+}): Promise<void> {
+  const prev = await loadChangesPreferencesFromStorage(input.storage);
   const next = { ...prev, ...input.updates };
+  await writeValidatedJson(
+    input.storage,
+    CHANGES_PREFERENCES_STORAGE_KEY,
+    changesPreferencesSchema,
+    next,
+  );
   input.queryClient.setQueryData<ChangesPreferences>(CHANGES_PREFERENCES_QUERY_KEY, next);
-  await input.storage.setItem(CHANGES_PREFERENCES_STORAGE_KEY, JSON.stringify(next));
 }

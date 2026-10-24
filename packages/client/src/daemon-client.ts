@@ -5,6 +5,7 @@ import {
 import type { TunnelTarget } from "@getpaseo/protocol/tunnels";
 import { DaemonTunnel } from "./daemon-tunnel.js";
 import { ViewerHttpStream } from "./viewer-http-stream.js";
+import { fetchTimelinePages } from "./timeline-pages.js";
 import type { ScheduleCadence } from "@getpaseo/protocol/schedule/types";
 import {
   HOST_ROUTE_OPCODE,
@@ -4196,6 +4197,13 @@ export class DaemonClient {
   async fetchAgentTimeline(
     agentId: string,
     options: FetchAgentTimelineOptions = {},
+  ): Promise<FetchAgentTimelinePayload> {
+    return fetchTimelinePages((page) => this.fetchAgentTimelinePage(agentId, page), options);
+  }
+
+  private async fetchAgentTimelinePage(
+    agentId: string,
+    options: FetchAgentTimelineOptions,
   ): Promise<FetchAgentTimelinePayload> {
     const resolvedRequestId = this.createRequestId(options.requestId);
     const message = SessionInboundMessageSchema.parse({

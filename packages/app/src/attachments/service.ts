@@ -100,7 +100,7 @@ export async function encodeAttachmentsForSend(
   }
 
   const store = await getAttachmentStore();
-  const encoded = await Promise.all(
+  return await Promise.all(
     attachments.map(async (attachment) => {
       try {
         const data = await store.encodeBase64({ attachment });
@@ -109,19 +109,12 @@ export async function encodeAttachmentsForSend(
           mimeType: attachment.mimeType,
         };
       } catch (error) {
-        console.error("[attachments] Failed to encode attachment for send", {
-          id: attachment.id,
-          error,
-        });
-        return null;
+        // A partial send is not success: its caller would clear the draft and
+        // release the original attachment even when the read failure is temporary.
+        throw new Error(`Cannot read attachment ${attachment.id} for sending`, { cause: error });
       }
     }),
   );
-
-  const valid = encoded.filter(
-    (entry): entry is { data: string; mimeType: string } => entry !== null,
-  );
-  return valid.length > 0 ? valid : undefined;
 }
 
 export async function resolveAttachmentPreviewUrl(attachment: AttachmentMetadata): Promise<string> {

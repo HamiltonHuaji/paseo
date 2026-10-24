@@ -8,6 +8,7 @@ import {
   type StoredSchedule,
 } from "@getpaseo/protocol/schedule/types";
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import { mergePersistedRecord } from "../persisted-record.js";
 
 function generateScheduleId(): string {
   return randomBytes(4).toString("hex");
@@ -218,7 +219,15 @@ export class ScheduleStore {
 
   private async write(schedule: StoredSchedule): Promise<void> {
     await this.ensureDir();
-    await writeJsonFileAtomic(this.filePath(schedule.id), schedule);
+    const filePath = this.filePath(schedule.id);
+    let value: unknown = schedule;
+    try {
+      const raw: unknown = JSON.parse(await readFile(filePath, "utf-8"));
+      value = mergePersistedRecord(raw, StoredScheduleSchema.parse(raw), schedule);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await writeJsonFileAtomic(filePath, value);
   }
 
   async delete(id: string): Promise<void> {

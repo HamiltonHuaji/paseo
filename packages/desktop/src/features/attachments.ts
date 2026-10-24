@@ -163,15 +163,17 @@ export async function deleteManagedAttachmentFile(input: { path?: unknown }): Pr
 export async function garbageCollectManagedAttachmentFiles(input: {
   referencedIds?: unknown;
 }): Promise<number> {
+  if (
+    !Array.isArray(input.referencedIds) ||
+    !input.referencedIds.every(
+      (value): value is string =>
+        typeof value === "string" && ATTACHMENT_ID_PATTERN.test(value.trim()),
+    )
+  ) {
+    throw new Error("Cannot collect attachments: invalid reference list; files were retained");
+  }
+  const referencedIds = new Set(input.referencedIds.map((value) => value.trim()));
   const dirPath = await ensureAttachmentsDir();
-  const referencedIds = Array.isArray(input.referencedIds)
-    ? new Set(
-        input.referencedIds
-          .filter((value): value is string => typeof value === "string")
-          .map((value) => value.trim())
-          .filter((value) => ATTACHMENT_ID_PATTERN.test(value)),
-      )
-    : new Set<string>();
 
   const entries = await readdir(dirPath, { withFileTypes: true });
   const toDelete = entries.filter(

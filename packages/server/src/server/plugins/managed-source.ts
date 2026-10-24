@@ -21,12 +21,13 @@ import {
 } from "@getpaseo/protocol/messages";
 import { runGitCommand } from "../../utils/run-git-command.js";
 import { ensurePrivateDirectory, writePrivateFileAtomicSync } from "../private-files.js";
+import { mergePersistedRecord } from "../persisted-record.js";
 import { readPluginManifest, type PluginManifest } from "./manifest.js";
 import { acquireNpm, isNpmSource, readNpmArtifact, resolveNpm } from "./managed-source/npm.js";
 
 const GIT_TIMEOUT_MS = 120_000;
 const GIT_ENV = { GIT_TERMINAL_PROMPT: "0" } as const;
-// COMPAT(plugin-source-record): v0.8.0; accept and strip pre-correction selector/revision/root copies until daemon floor supports artifact-derived metadata.
+// COMPAT(plugin-source-record): v0.8.0; ignore pre-correction selector/revision/root copies until daemon floor supports artifact-derived metadata.
 const ManagedPluginRecordSchema = z.union([
   z.object({
     kind: z.literal("git").default("git"),
@@ -58,18 +59,21 @@ interface OwnedLocation {
 export class ManagedPluginSources {
   private readonly root: string;
   private readonly metadataPath: string;
-  private readonly records: Record<string, ManagedPluginRecord>;
+  private records: Record<string, ManagedPluginRecord>;
+  private rawRecords: unknown;
   constructor(
     paseoHome: string,
     private readonly registryOptions: RegistryOptions = {},
   ) {
     this.root = path.resolve(paseoHome, "plugins");
     this.metadataPath = path.join(this.root, "sources.json");
-    this.records = existsSync(this.metadataPath)
-      ? z
-          .record(PluginIdSchema, ManagedPluginRecordSchema)
-          .parse(JSON.parse(readFileSync(this.metadataPath, "utf8")))
-      : {};
+    try {
+      this.rawRecords = JSON.parse(readFileSync(this.metadataPath, "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      this.rawRecords = {};
+    }
+    this.records = z.record(PluginIdSchema, ManagedPluginRecordSchema).parse(this.rawRecords);
   }
 
   private locate(
@@ -375,8 +379,7 @@ export class ManagedPluginSources {
   }
 
   commit(pluginId: string, record: ManagedPluginRecord): void {
-    this.records[pluginId] = ManagedPluginRecordSchema.parse(record);
-    this.writeRecords();
+    this.writeRecords({ ...this.records, [pluginId]: ManagedPluginRecordSchema.parse(record) });
   }
   async discard(candidate: ManagedPluginCandidate): Promise<void> {
     await rm(candidate.versionRoot, { recursive: true, force: true });
@@ -393,8 +396,9 @@ export class ManagedPluginSources {
       await assertRealContainment(this.root, pluginRoot);
       await rm(pluginRoot, { recursive: true, force: true });
     }
-    delete this.records[pluginId];
-    this.writeRecords();
+    const records = { ...this.records };
+    delete records[pluginId];
+    this.writeRecords(records);
   }
   private async createStagingRoot(): Promise<string> {
     const stagingRoot = path.join(this.root, ".staging", randomUUID());
@@ -402,8 +406,11 @@ export class ManagedPluginSources {
     await assertRealContainment(this.root, stagingRoot);
     return stagingRoot;
   }
-  private writeRecords(): void {
-    writePrivateFileAtomicSync(this.metadataPath, `${JSON.stringify(this.records, null, 2)}\n`);
+  private writeRecords(records: Record<string, ManagedPluginRecord>): void {
+    const raw = mergePersistedRecord(this.rawRecords, this.records, records);
+    writePrivateFileAtomicSync(this.metadataPath, `${JSON.stringify(raw, null, 2)}\n`);
+    this.rawRecords = raw;
+    this.records = records;
   }
 }
 

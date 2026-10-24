@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readValidatedJson } from "@/storage/validated-storage";
+import { mergeStoredEdits, parseStoredValue } from "@/storage/persisted-value";
 import {
   FormPreferencesSchema,
   StoredFormPreferencesSchema,
@@ -25,9 +26,26 @@ export class AsyncStorageCreateAgentPreferenceStorage implements CreateAgentPref
   async write(preferences: FormPreferences): Promise<void> {
     const result = FormPreferencesSchema.safeParse(preferences);
     if (!result.success) {
-      await AsyncStorage.removeItem(CREATE_AGENT_PREFERENCES_STORAGE_KEY);
-      return;
+      throw new Error(`Invalid preferences for ${CREATE_AGENT_PREFERENCES_STORAGE_KEY}`);
     }
-    await AsyncStorage.setItem(CREATE_AGENT_PREFERENCES_STORAGE_KEY, JSON.stringify(result.data));
+    const raw = await AsyncStorage.getItem(CREATE_AGENT_PREFERENCES_STORAGE_KEY);
+    let next: unknown = result.data;
+    if (raw !== null) {
+      let decoded: unknown;
+      try {
+        decoded = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          `Cannot read saved ${CREATE_AGENT_PREFERENCES_STORAGE_KEY}; original data was retained`,
+        );
+      }
+      const previous = parseStoredValue(
+        StoredFormPreferencesSchema,
+        decoded,
+        CREATE_AGENT_PREFERENCES_STORAGE_KEY,
+      );
+      next = mergeStoredEdits(decoded, previous, result.data);
+    }
+    await AsyncStorage.setItem(CREATE_AGENT_PREFERENCES_STORAGE_KEY, JSON.stringify(next));
   }
 }

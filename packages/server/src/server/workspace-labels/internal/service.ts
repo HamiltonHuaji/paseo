@@ -169,6 +169,7 @@ export class WorkspaceLabelService {
           };
         }
         const label = {
+          ...existing,
           name: nameChanged && newName !== null ? newName : existing.name,
           color: input.color ?? existing.color,
         };

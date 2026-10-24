@@ -1,5 +1,10 @@
 # Timeline sync
 
+Fork history performance and cross-version acceptance are defined by
+[SESSION-05–07](contracts/sessions.md#session-05--长历史的交互性能) and the
+[history performance scenarios](session-history-performance.md). The implementation described
+here does not establish that a candidate has passed those requirements.
+
 Agent chat delivery has two paths:
 
 1. **Live stream** — `agent_stream` WebSocket messages for immediacy. These may be delta-shaped lifecycle updates.

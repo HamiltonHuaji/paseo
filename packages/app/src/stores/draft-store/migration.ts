@@ -1,6 +1,8 @@
 import type { AttachmentMetadata, UserComposerAttachment } from "@/attachments/types";
 import { isLegacyNewWorkspaceDraftKey, NEW_WORKSPACE_DRAFT_KEY } from "@/stores/draft-keys";
 import { z } from "zod";
+import equal from "fast-deep-equal/es6";
+import { isStoredObject, parseStoredValue } from "@/storage/persisted-value";
 import {
   AttachmentMetadataSchema,
   LegacyDraftImageSchema,
@@ -97,7 +99,19 @@ const FlatDraftRecordSchema = RawDraftInputSchema.extend({
   updatedAt: z.number().optional(),
   version: z.number().int().positive().optional(),
 });
-const PersistedDraftRecordSchema = z.union([NestedDraftRecordSchema, FlatDraftRecordSchema]);
+const PersistedDraftRecordSchema = z.unknown().transform((raw, context) => {
+  // A malformed nested input must never match the all-optional legacy flat shape.
+  const schema =
+    isStoredObject(raw) && Object.hasOwn(raw, "input")
+      ? NestedDraftRecordSchema
+      : FlatDraftRecordSchema;
+  const result = schema.safeParse(raw);
+  if (!result.success) {
+    for (const issue of result.error.issues) context.addIssue({ ...issue });
+    return z.NEVER;
+  }
+  return result.data;
+});
 export const PersistedDraftStoreSchema = z.strictObject({
   drafts: z.record(z.string(), PersistedDraftRecordSchema).optional(),
   createModalDraft: PersistedDraftRecordSchema.nullable().optional(),
@@ -151,8 +165,7 @@ export async function migrateDraftInput(
   input: { rawInput: unknown },
   ports: { migrateLegacyImages: MigrateLegacyImages },
 ): Promise<CanonicalDraftInput> {
-  const result = RawDraftInputSchema.safeParse(input.rawInput);
-  const rawInput = result.success ? result.data : {};
+  const rawInput = parseStoredValue(RawDraftInputSchema, input.rawInput, "paseo-drafts");
   const attachments = (rawInput.attachments ?? [])
     .map(normalizePersistedComposerAttachment)
     .filter((attachment): attachment is UserComposerAttachment => attachment !== null);
@@ -191,14 +204,15 @@ async function buildMigratedDraftRecord(
   };
 }
 
-function migrateNewWorkspaceDraftKeys(
-  drafts: Record<string, DraftRecord>,
-): Record<string, DraftRecord> {
+function migrateNewWorkspaceDraftKeys(drafts: Record<string, DraftRecord>): {
+  drafts: Record<string, DraftRecord>;
+  promotedKey?: string;
+} {
   const legacyEntries = Object.entries(drafts).filter(([draftKey]) =>
     isLegacyNewWorkspaceDraftKey(draftKey),
   );
   if (legacyEntries.length === 0) {
-    return drafts;
+    return { drafts };
   }
 
   const nextDrafts = { ...drafts };
@@ -207,14 +221,14 @@ function migrateNewWorkspaceDraftKeys(
   }
 
   if (nextDrafts[NEW_WORKSPACE_DRAFT_KEY]) {
-    return nextDrafts;
+    return { drafts: nextDrafts };
   }
 
-  const newestActiveDraft = legacyEntries
-    .map(([, draft]) => draft)
-    .filter((draft) => draft.lifecycle === "active")
-    .sort((left, right) => right.updatedAt - left.updatedAt)[0];
-  if (newestActiveDraft) {
+  const newestActiveEntry = legacyEntries
+    .filter(([, draft]) => draft.lifecycle === "active")
+    .sort((left, right) => right[1].updatedAt - left[1].updatedAt)[0];
+  if (newestActiveEntry) {
+    const newestActiveDraft = newestActiveEntry[1];
     // Legacy scoped drafts did not record whether a PR came from the Base
     // picker. That checkout context is unsafe to carry onto a global surface.
     nextDrafts[NEW_WORKSPACE_DRAFT_KEY] = {
@@ -228,19 +242,109 @@ function migrateNewWorkspaceDraftKeys(
     };
   }
 
-  return nextDrafts;
+  return { drafts: nextDrafts, promotedKey: newestActiveEntry?.[0] };
+}
+
+function cannotReconcileMigration(): never {
+  throw new Error("Cannot migrate saved paseo-drafts without discarding unknown data");
+}
+
+function reconcileDraftValue(raw: unknown, before: unknown, after: unknown): unknown {
+  if (equal(before, after)) return raw;
+  if (!isStoredObject(before) || !isStoredObject(after) || !isStoredObject(raw)) {
+    // Array migrations may remove or reorder attachments. Without a proven mapping,
+    // an unknown field on one item cannot be assigned to another surviving item.
+    if (!equal(raw, before)) cannotReconcileMigration();
+    return after;
+  }
+  const result = { ...raw };
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (!Object.hasOwn(after, key)) {
+      if (!equal(raw[key], before[key])) cannotReconcileMigration();
+      delete result[key];
+    } else if (!Object.hasOwn(before, key)) {
+      if (Object.hasOwn(raw, key) && !equal(raw[key], after[key])) cannotReconcileMigration();
+      result[key] = after[key];
+    } else {
+      result[key] = reconcileDraftValue(raw[key], before[key], after[key]);
+    }
+  }
+  return result;
+}
+
+function nestDraftInput(record: Record<string, unknown>): Record<string, unknown> {
+  if (Object.hasOwn(record, "input")) return record;
+  const nested = { ...record };
+  const input: Record<string, unknown> = {};
+  for (const key of ["text", "attachments", "images", "cwd"]) {
+    if (Object.hasOwn(nested, key)) {
+      input[key] = nested[key];
+      delete nested[key];
+    }
+  }
+  return { ...nested, input };
+}
+
+function reconcileDraftRecord(
+  raw: unknown,
+  before: PersistedDraftRecord | null | undefined,
+  after: DraftRecord | null,
+): unknown {
+  if (isStoredObject(raw) && before) {
+    return reconcileDraftValue(nestDraftInput(raw), nestDraftInput(before), after);
+  }
+  return reconcileDraftValue(raw, before, after);
+}
+
+function reconcileDraftState(
+  raw: unknown,
+  before: z.infer<typeof PersistedDraftStoreSchema>,
+  after: { drafts: Record<string, DraftRecord>; promotedKey?: string },
+  createModalDraft: DraftRecord | null,
+): DraftStoreState {
+  if (!isStoredObject(raw)) cannotReconcileMigration();
+  const rawDrafts = isStoredObject(raw.drafts) ? raw.drafts : {};
+  const drafts: Record<string, unknown> = {};
+  for (const [key, record] of Object.entries(after.drafts)) {
+    const sourceKey =
+      key === NEW_WORKSPACE_DRAFT_KEY && after.promotedKey ? after.promotedKey : key;
+    Object.defineProperty(drafts, key, {
+      value: reconcileDraftRecord(rawDrafts[sourceKey], before.drafts?.[sourceKey], record),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  for (const [key, record] of Object.entries(before.drafts ?? {})) {
+    if (Object.hasOwn(drafts, key) || key === after.promotedKey) continue;
+    // A migration may discard a recognized obsolete record, never its unknown data.
+    if (!equal(rawDrafts[key], record)) cannotReconcileMigration();
+  }
+  return {
+    ...raw,
+    drafts: drafts as Record<string, DraftRecord>,
+    createModalDraft: reconcileDraftRecord(
+      raw.createModalDraft,
+      before.createModalDraft,
+      createModalDraft,
+    ) as DraftRecord | null,
+  };
 }
 
 export async function migratePersistedState(
   state: unknown,
   ports: { migrateLegacyImages: MigrateLegacyImages; nowMs: number },
 ): Promise<DraftStoreState> {
-  const result = PersistedDraftStoreSchema.safeParse(state);
-  const input = result.success ? result.data : {};
+  const input = parseStoredValue(PersistedDraftStoreSchema, state, "paseo-drafts");
 
   const nextDrafts: Record<string, DraftRecord> = {};
   for (const [draftKey, rawRecord] of Object.entries(input.drafts ?? {})) {
-    nextDrafts[draftKey] = await buildMigratedDraftRecord(rawRecord, ports, ports.nowMs);
+    Object.defineProperty(nextDrafts, draftKey, {
+      value: await buildMigratedDraftRecord(rawRecord, ports, ports.nowMs),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
 
   let createModalDraft: DraftRecord | null = null;
@@ -248,9 +352,11 @@ export async function migratePersistedState(
     createModalDraft = await buildMigratedDraftRecord(input.createModalDraft, ports, ports.nowMs);
   }
 
-  return {
-    // COMPAT(newWorkspaceDraftSingleton): migrated in v0.1.108; remove after 2027-01-13.
-    drafts: migrateNewWorkspaceDraftKeys(nextDrafts),
+  // COMPAT(newWorkspaceDraftSingleton): migrated in v0.1.108; remove after 2027-01-13.
+  return reconcileDraftState(
+    state,
+    input,
+    migrateNewWorkspaceDraftKeys(nextDrafts),
     createModalDraft,
-  };
+  );
 }

@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 
 import { writeJsonFileAtomic } from "./atomic-file.js";
+import { mergePersistedRecord } from "./persisted-record.js";
 import { areEquivalentPaths } from "../utils/path.js";
 import {
   generateProjectId,
@@ -177,16 +178,23 @@ export interface WorkspaceRegistry {
 
 type RegistryRecord = PersistedProjectRecord | PersistedWorkspaceRecord;
 
+interface RegistryFileEntry<TRecord> {
+  value: unknown;
+  parsed: TRecord | null;
+}
+
 class FileBackedRegistry<TRecord extends RegistryRecord> {
   private readonly filePath: string;
   protected readonly logger: Logger;
   private readonly schema: z.ZodType<TRecord, unknown>;
   private readonly getId: (record: TRecord) => string;
   private loaded = false;
+  private loading: Promise<void> | null = null;
   private readonly cache = new Map<string, TRecord>();
+  private fileEntries: RegistryFileEntry<TRecord>[] = [];
   private mutationQueue: Promise<void> = Promise.resolve();
   private mutationsBlockedUntilRestart = false;
-  private readonly writeRecords: (filePath: string, records: readonly TRecord[]) => Promise<void>;
+  private readonly writeRecords: (filePath: string, records: readonly unknown[]) => Promise<void>;
 
   constructor(options: {
     filePath: string;
@@ -194,7 +202,7 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
     schema: z.ZodType<TRecord, unknown>;
     getId: (record: TRecord) => string;
     component: string;
-    writeRecords?: (filePath: string, records: readonly TRecord[]) => Promise<void>;
+    writeRecords?: (filePath: string, records: readonly unknown[]) => Promise<void>;
   }) {
     this.filePath = options.filePath;
     this.schema = options.schema;
@@ -285,24 +293,71 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
   }
 
   private async load(): Promise<void> {
-    if (this.loaded) {
-      return;
+    if (this.loaded) return;
+    if (!this.loading) {
+      this.loading = this.loadFile().finally(() => {
+        this.loading = null;
+      });
     }
+    await this.loading;
+  }
 
-    this.cache.clear();
+  private async loadFile(): Promise<void> {
+    let values: unknown[];
     try {
       const raw = await fs.readFile(this.filePath, "utf8");
-      const parsed = z.array(this.schema).parse(JSON.parse(raw));
-      for (const record of parsed) {
-        this.cache.set(this.getId(record), record);
-      }
+      values = z.array(z.unknown()).parse(JSON.parse(raw));
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {
         this.logger.error({ err: error, filePath: this.filePath }, "Failed to load registry file");
+        throw error;
       }
+      values = [];
     }
+
+    const entries = values.map((value, index): RegistryFileEntry<TRecord> => {
+      const result = this.schema.safeParse(value);
+      if (result.success) return { value, parsed: result.data };
+      this.logger.warn(
+        { err: result.error, filePath: this.filePath, index },
+        "Preserving unsupported registry record",
+      );
+      return { value, parsed: null };
+    });
+    this.cache.clear();
+    for (const entry of entries) {
+      if (entry.parsed) this.cache.set(this.getId(entry.parsed), entry.parsed);
+    }
+    this.fileEntries = entries;
     this.loaded = true;
+  }
+
+  private stageFileEntries(records: ReadonlyMap<string, TRecord>): RegistryFileEntry<TRecord>[] {
+    const remaining = new Map(records);
+    const entries: RegistryFileEntry<TRecord>[] = [];
+    for (const entry of this.fileEntries) {
+      if (!entry.parsed) {
+        entries.push(entry);
+        continue;
+      }
+      const id = this.getId(entry.parsed);
+      const next = records.get(id);
+      if (!next) continue;
+      // The last readable duplicate is the runtime authority. Preserve preceding
+      // copies unless this ID is explicitly removed.
+      if (this.cache.get(id) !== entry.parsed) {
+        entries.push(entry);
+        continue;
+      }
+      entries.push({
+        value: mergePersistedRecord(entry.value, entry.parsed, next),
+        parsed: next,
+      });
+      remaining.delete(id);
+    }
+    for (const record of remaining.values()) entries.push({ value: record, parsed: record });
+    return entries;
   }
 
   protected async mutateMany(
@@ -342,12 +397,19 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
       const recordsChanged = !mapsEqual(this.cache, staged);
       if (!recordsChanged && !hooks?.forcePersist?.(result)) return result;
       const records = Array.from(staged.values());
+      const fileEntries = this.stageFileEntries(staged);
       await hooks?.beforeWrite?.(records);
-      if (recordsChanged) await this.writeRecords(this.filePath, records);
+      if (recordsChanged) {
+        await this.writeRecords(
+          this.filePath,
+          fileEntries.map((entry) => entry.value),
+        );
+      }
       await hooks?.afterWrite?.();
       if (recordsChanged) {
         this.cache.clear();
         for (const [id, record] of staged) this.cache.set(id, record);
+        this.fileEntries = fileEntries;
       }
       hooks?.afterCommit?.();
       return result;
@@ -388,10 +450,7 @@ export class FileBackedProjectRegistry
     logger: Logger,
     options?: {
       projectIdFactory?: () => string;
-      writeRecords?: (
-        filePath: string,
-        records: readonly PersistedProjectRecord[],
-      ) => Promise<void>;
+      writeRecords?: (filePath: string, records: readonly unknown[]) => Promise<void>;
     },
   ) {
     super({
@@ -518,10 +577,7 @@ export class FileBackedWorkspaceRegistry
     filePath: string,
     logger: Logger,
     options?: {
-      writeRecords?: (
-        filePath: string,
-        records: readonly PersistedWorkspaceRecord[],
-      ) => Promise<void>;
+      writeRecords?: (filePath: string, records: readonly unknown[]) => Promise<void>;
     },
   ) {
     super({

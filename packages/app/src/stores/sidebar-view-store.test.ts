@@ -216,8 +216,7 @@ describe("sidebar view store", () => {
     });
   });
 
-  // The persisted schema is a `z.strictObject` behind `createValidatedPersistStorage`, so a key
-  // the schema does not list fails the parse and takes every other sidebar setting down with it.
+  // Recognized legacy fields survive migration; opaque fields stay in the saved document.
   it("carries a persisted project filter through the version migration", () => {
     expect(
       migrateSidebarViewState({
@@ -234,14 +233,10 @@ describe("sidebar view store", () => {
     });
   });
 
-  it("never keeps project filters from state the schema rejects", () => {
-    expect(migrateSidebarViewState({ projectFilters: "project-a" })).toEqual({
-      showBackground: false,
-      groupMode: "project",
-      hostFilters: [],
-      projectFilters: [],
-      labelFilter: { labels: [] },
-    });
+  it("rejects malformed saved filters instead of migrating them to empty defaults", () => {
+    expect(() => migrateSidebarViewState({ projectFilters: "project-a" })).toThrow(
+      "original data was retained",
+    );
   });
 
   it("falls back to the legacy storage key when the new key is empty", async () => {

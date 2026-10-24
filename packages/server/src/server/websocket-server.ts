@@ -1277,7 +1277,31 @@ export class VoiceAssistantWebSocketServer {
     return { sockets: writableSockets, payload, bytes: outboundFrameByteLength(payload) };
   }
 
+  private readonly timelineDeliveries = new WeakMap<WebSocketLike, Promise<void>>();
+
   private async sendMessageToClientAndWait(
+    ws: WebSocketLike,
+    message: WSOutboundMessage,
+  ): Promise<void> {
+    const isTimeline =
+      message.type === "session" &&
+      (message.message.type === "fetch_agent_timeline_response" ||
+        message.message.type === "agent.provider_subagents.timeline.get.response");
+    if (!isTimeline) return this.sendJsonToClientAndWait(ws, message);
+
+    // Keep queued histories as shared item references until the preceding
+    // response drains. Ordinary RPC replies do not wait in this queue.
+    const previous = this.timelineDeliveries.get(ws) ?? Promise.resolve();
+    const sending = previous.catch(() => {}).then(() => this.sendJsonToClientAndWait(ws, message));
+    this.timelineDeliveries.set(ws, sending);
+    try {
+      await sending;
+    } finally {
+      if (this.timelineDeliveries.get(ws) === sending) this.timelineDeliveries.delete(ws);
+    }
+  }
+
+  private async sendJsonToClientAndWait(
     ws: WebSocketLike,
     message: WSOutboundMessage,
   ): Promise<void> {

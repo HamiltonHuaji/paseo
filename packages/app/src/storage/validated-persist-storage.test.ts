@@ -30,13 +30,16 @@ describe("createValidatedPersistStorage", () => {
       "unknown envelope fields",
       JSON.stringify({ state: { enabled: true }, version: 1, extra: true }),
     ],
-  ])("clears %s", async (_label, stored) => {
+  ])("retains %s", async (label, stored) => {
     const backing = new MemoryStorage();
     backing.values.set("settings", stored);
     const storage = createValidatedPersistStorage(backing, StateSchema);
 
-    await expect(storage.getItem("settings")).resolves.toBeNull();
-    expect(backing.values.has("settings")).toBe(false);
+    const read = storage.getItem("settings");
+    if (label.startsWith("unknown"))
+      await expect(read).resolves.toEqual({ state: { enabled: true }, version: 1 });
+    else await expect(read).rejects.toThrow("original data was retained");
+    expect(backing.values.get("settings")).toBe(stored);
   });
 
   it("returns schema-validated state", async () => {
@@ -50,7 +53,7 @@ describe("createValidatedPersistStorage", () => {
     });
   });
 
-  it("clears a value rejected by the schema before writing", async () => {
+  it("preserves the old value when a new value is rejected", async () => {
     const backing = new MemoryStorage();
     backing.values.set("settings", JSON.stringify({ state: { count: 1 } }));
     const storage = createValidatedPersistStorage(
@@ -58,9 +61,9 @@ describe("createValidatedPersistStorage", () => {
       z.strictObject({ count: z.number().finite() }),
     );
 
-    await storage.setItem("settings", { state: { count: Number.NaN } });
+    await expect(storage.setItem("settings", { state: { count: Number.NaN } })).rejects.toThrow();
 
-    expect(backing.values.has("settings")).toBe(false);
+    expect(backing.values.get("settings")).toBe(JSON.stringify({ state: { count: 1 } }));
   });
 });
 
@@ -112,7 +115,7 @@ it("retries an unchanged state after a failed save", async () => {
   expect(backing.getItem("layout")).toBe(JSON.stringify(value));
 });
 
-it("saves the same state again after removal or rehydration clears invalid storage", async () => {
+it("allows explicit removal but blocks overwriting failed hydration", async () => {
   const backing = new MemoryStorage();
   const storage = createValidatedPersistStorage(backing, StateSchema, { skipUnchanged: true });
   const value = { state: { enabled: true }, version: 1 };
@@ -122,7 +125,7 @@ it("saves the same state again after removal or rehydration clears invalid stora
   expect(backing.getItem("layout")).toBe(JSON.stringify(value));
 
   backing.values.set("layout", "{");
-  await expect(storage.getItem("layout")).resolves.toBeNull();
-  await storage.setItem("layout", value);
-  expect(backing.getItem("layout")).toBe(JSON.stringify(value));
+  await expect(storage.getItem("layout")).rejects.toThrow("original data was retained");
+  await expect(storage.setItem("layout", value)).rejects.toThrow("Cannot overwrite");
+  expect(backing.getItem("layout")).toBe("{");
 });

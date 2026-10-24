@@ -21,6 +21,7 @@ export interface SeedAgentTimelineOptions {
 
 interface AgentTimelineState {
   epoch: string;
+  revision: number;
   projection: TimelineProjection;
   minSeq: number;
   nextSeq: number;
@@ -32,6 +33,7 @@ function cloneRow<T extends AgentTimelineRow>(row: T): T {
 
 export class InMemoryAgentTimelineStore {
   private readonly states = new Map<string, AgentTimelineState>();
+  private nextRevision = 0;
 
   has(agentId: string): boolean {
     return this.states.has(agentId);
@@ -47,6 +49,7 @@ export class InMemoryAgentTimelineStore {
     for (const row of rows) projection.append(row);
     this.states.set(agentId, {
       epoch: options?.epoch ?? randomUUID(),
+      revision: ++this.nextRevision,
       projection,
       minSeq: projection.getRows()[0]?.seqStart ?? 0,
       nextSeq,
@@ -83,14 +86,18 @@ export class InMemoryAgentTimelineStore {
     clientMessageId: string,
     providerMessageId: string,
   ): AgentTimelineRow | null {
-    return this.requireState(agentId).projection.enrichSubmittedUserMessage(
-      clientMessageId,
-      providerMessageId,
-    );
+    const state = this.requireState(agentId);
+    const row = state.projection.enrichSubmittedUserMessage(clientMessageId, providerMessageId);
+    if (row) state.revision = ++this.nextRevision;
+    return row;
   }
 
   getEpoch(agentId: string): string {
     return this.requireState(agentId).epoch;
+  }
+
+  getRevision(agentId: string): number {
+    return this.requireState(agentId).revision;
   }
 
   fetch(agentId: string, options?: AgentTimelineFetchOptions): AgentTimelineFetchResult {
@@ -145,6 +152,7 @@ export class InMemoryAgentTimelineStore {
     state.nextSeq += 1;
     if (state.minSeq === 0) state.minSeq = row.seq;
     state.projection.append(row);
+    state.revision = ++this.nextRevision;
     return cloneRow(row);
   }
 

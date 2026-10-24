@@ -40,6 +40,17 @@ export interface EncryptedChannelEvents {
 
 type ChannelState = "connecting" | "handshaking" | "open" | "closed";
 
+export interface EncryptedFrameRequest {
+  sharedKey: SharedKey;
+  data: string | ArrayBuffer;
+  binaryCiphertext: boolean;
+  signal: AbortSignal;
+}
+
+export type EncryptedFrameEncoder = (
+  request: EncryptedFrameRequest,
+) => string | ArrayBuffer | Promise<string | ArrayBuffer>;
+
 interface EncryptedChannelOptions {
   /**
    * If set, the channel can validate repeated plaintext `{type:"e2ee_hello"}`
@@ -51,6 +62,19 @@ interface EncryptedChannelOptions {
    */
   daemonKeyPair?: KeyPair;
   binaryCiphertext?: boolean;
+  encode?: EncryptedFrameEncoder;
+}
+
+export function encodeEncryptedFrame(
+  sharedKey: SharedKey,
+  data: string | ArrayBuffer,
+  binaryCiphertext: boolean,
+): string | ArrayBuffer {
+  const ciphertext = encrypt(sharedKey, data);
+  if (binaryCiphertext && data instanceof ArrayBuffer) return ciphertext;
+  // COMPAT(binaryCiphertext): added in v0.2.3, remove base64 binary sends
+  // after 2027-01-27 once the supported peer floor includes negotiation.
+  return arrayBufferToBase64(ciphertext);
 }
 
 interface E2EEHelloMessage {
@@ -228,6 +252,7 @@ export async function createDaemonChannel(
   transport: Transport,
   daemonKeyPair: KeyPair,
   events: EncryptedChannelEvents = {},
+  options: Pick<EncryptedChannelOptions, "encode"> = {},
 ): Promise<EncryptedChannel> {
   return new Promise((resolve, reject) => {
     const bufferedMessages: TransportMessage[] = [];
@@ -285,6 +310,7 @@ export async function createDaemonChannel(
         );
 
         const channel = new EncryptedChannel(transport, sharedKey, events, {
+          ...options,
           daemonKeyPair,
           binaryCiphertext,
         });
@@ -326,6 +352,7 @@ export class EncryptedChannel {
   private pendingSends: Array<string | ArrayBuffer> = [];
   private onOpenCallbacks: Array<() => void> = [];
   private onCloseCallbacks: Array<() => void> = [];
+  private readonly encodingController = new AbortController();
 
   constructor(
     transport: Transport,
@@ -341,7 +368,7 @@ export class EncryptedChannel {
     Object.assign(transport, {
       onmessage: (message: TransportMessage) => this.handleMessage(message),
       onclose: (code: number, reason: string) => {
-        this.state = "closed";
+        this.setState("closed");
         this.events.onclose?.(code, reason);
         for (const cb of this.onCloseCallbacks) cb();
       },
@@ -353,6 +380,10 @@ export class EncryptedChannel {
 
   setState(state: ChannelState): void {
     this.state = state;
+    if (state === "closed") {
+      this.encodingController.abort(new Error("Encrypted channel closed"));
+      this.pendingSends = [];
+    }
   }
 
   private async handleMessage(message: TransportMessage): Promise<void> {
@@ -371,7 +402,7 @@ export class EncryptedChannel {
           } catch (error) {
             const err = error instanceof Error ? error : new Error(String(error));
             this.events.onerror?.(err);
-            this.state = "closed";
+            this.setState("closed");
             this.transport.close(1011, err.message);
           }
         }
@@ -452,6 +483,7 @@ export class EncryptedChannel {
       // re-handshake. Emitting an error event here can cause higher-level code
       // to tear down the session without triggering a clean reconnect.
       try {
+        this.setState("closed");
         this.transport.close(1011, err.message);
       } catch {
         // ignore
@@ -472,14 +504,17 @@ export class EncryptedChannel {
       throw new Error("Channel not open");
     }
 
-    const ciphertext = encrypt(this.sharedKey, data);
-    if (this.options.binaryCiphertext && data instanceof ArrayBuffer) {
-      await this.transport.send(ciphertext);
-      return;
-    }
-    // COMPAT(binaryCiphertext): added in v0.2.3, remove base64 binary sends
-    // after 2027-01-27 once the supported peer floor includes negotiation.
-    await this.transport.send(arrayBufferToBase64(ciphertext));
+    const encoded = this.options.encode
+      ? this.options.encode({
+          sharedKey: this.sharedKey,
+          data,
+          binaryCiphertext: this.options.binaryCiphertext === true,
+          signal: this.encodingController.signal,
+        })
+      : encodeEncryptedFrame(this.sharedKey, data, this.options.binaryCiphertext === true);
+    const frame = encoded instanceof Promise ? await encoded : encoded;
+    if (!this.isOpen()) throw new Error("Channel closed while encoding frame");
+    await this.transport.send(frame);
   }
 
   outboundWireByteLength(data: string | ArrayBuffer): number {
@@ -520,12 +555,12 @@ export class EncryptedChannel {
   }
 
   private rejectKeyRotation(): void {
-    this.state = "closed";
+    this.setState("closed");
     this.transport.close(REHANDSHAKE_REJECTION_CODE, REHANDSHAKE_KEY_MISMATCH_CLOSE_REASON);
   }
 
   close(code = 1000, reason = "Normal closure"): void {
-    this.state = "closed";
+    this.setState("closed");
     this.transport.close(code, reason);
   }
 

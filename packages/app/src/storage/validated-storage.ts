@@ -1,16 +1,32 @@
 import { z } from "zod";
+import { mergeStoredEdits, parseStoredValue } from "./persisted-value";
 
 export interface ValidatedStorage {
   getItem(key: string): Promise<string | null>;
   removeItem(key: string): Promise<void>;
 }
 
-async function clearInvalidValue(storage: ValidatedStorage, key: string): Promise<void> {
-  try {
-    await storage.removeItem(key);
-  } catch {
-    // Invalid persisted data must never cross the boundary, even when cleanup fails.
+/** Read-modify-write the one saved document; a failed read never becomes defaults. */
+export async function writeValidatedJson<Value>(
+  storage: ValidatedStorage & { setItem(key: string, value: string): Promise<void> },
+  key: string,
+  schema: z.ZodType<Value>,
+  next: Value,
+): Promise<void> {
+  const value = schema.parse(next);
+  const text = await storage.getItem(key);
+  if (text === null) {
+    await storage.setItem(key, JSON.stringify(value));
+    return;
   }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error(`Cannot write saved ${key}: invalid JSON; original data was retained`);
+  }
+  const before = parseStoredValue(schema, raw, key);
+  await storage.setItem(key, JSON.stringify(mergeStoredEdits(raw, before, value)));
 }
 
 export async function readValidatedString<Value>(
@@ -22,8 +38,7 @@ export async function readValidatedString<Value>(
   if (raw === null) return null;
   const result = schema.safeParse(raw);
   if (result.success) return result.data;
-  await clearInvalidValue(storage, key);
-  return null;
+  throw new Error(`Cannot read saved ${key}; original data was retained`);
 }
 
 export async function readValidatedJson<Value>(
@@ -37,11 +52,7 @@ export async function readValidatedJson<Value>(
   try {
     decoded = JSON.parse(raw);
   } catch {
-    await clearInvalidValue(storage, key);
-    return null;
+    throw new Error(`Cannot read saved ${key}: invalid JSON; original data was retained`);
   }
-  const result = schema.safeParse(decoded);
-  if (result.success) return result.data;
-  await clearInvalidValue(storage, key);
-  return null;
+  return parseStoredValue(schema, decoded, key);
 }

@@ -1,28 +1,29 @@
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
+import { z } from "zod";
 
 type AgentSkillSelection = { mode: "all" } | { mode: "custom"; skills: string[] };
 
 const LEGACY_FILENAME = "skill-selection.json";
+const LegacyDocumentSchema = z.strictObject({
+  version: z.literal(1).optional(),
+  selection: z.discriminatedUnion("mode", [
+    z.strictObject({ mode: z.literal("all") }),
+    z.strictObject({ mode: z.literal("custom"), skills: z.array(z.string()) }),
+  ]),
+});
 
 function parseSelection(value: unknown): AgentSkillSelection | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { mode: "all" };
-  const document = value as { selection?: unknown };
-  if (!document.selection || typeof document.selection !== "object") return { mode: "all" };
-  const selection = document.selection as { mode?: unknown; skills?: unknown };
+  const result = LegacyDocumentSchema.safeParse(value);
+  if (!result.success) {
+    throw new Error("Cannot migrate skill-selection.json; original data was retained");
+  }
+  const { selection } = result.data;
   if (selection.mode === "all") return { mode: "all" };
-  if (selection.mode !== "custom" || !Array.isArray(selection.skills)) return { mode: "all" };
   return {
     mode: "custom",
-    skills: [
-      ...new Set(
-        selection.skills
-          .filter((name): name is string => typeof name === "string")
-          .map((name) => name.trim())
-          .filter(Boolean),
-      ),
-    ].sort(),
+    skills: [...new Set(selection.skills.map((name) => name.trim()).filter(Boolean))].sort(),
   };
 }
 
@@ -40,7 +41,7 @@ export async function readLegacySkillSelection(): Promise<AgentSkillSelection | 
   try {
     return parseSelection(JSON.parse(raw));
   } catch {
-    return { mode: "all" };
+    throw new Error("Cannot migrate skill-selection.json; original data was retained");
   }
 }
 

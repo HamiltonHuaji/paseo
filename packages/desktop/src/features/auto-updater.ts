@@ -104,9 +104,12 @@ export async function resolveStagingUserId(filePath: string): Promise<string> {
     if (UUID.check(id)) {
       return id;
     }
+    throw new Error(`Invalid staging user ID in ${filePath}; original data was retained`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.warn(`[auto-updater] Couldn't read staging user ID, creating a blank one: ${error}`);
+      throw new Error(`Cannot read staging user ID from ${filePath}; original data was retained`, {
+        cause: error,
+      });
     }
   }
 
@@ -114,9 +117,13 @@ export async function resolveStagingUserId(filePath: string): Promise<string> {
 
   try {
     await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, id);
+    await writeFile(filePath, id, { flag: "wx" });
   } catch (error) {
-    console.warn(`[auto-updater] Couldn't write out staging user ID: ${error}`);
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      // Another process initialized this identity after our absent-file read.
+      return resolveStagingUserId(filePath);
+    }
+    throw new Error(`Cannot save staging user ID to ${filePath}`, { cause: error });
   }
 
   return id;
@@ -124,9 +131,11 @@ export async function resolveStagingUserId(filePath: string): Promise<string> {
 
 export function getStagingUserId(): Promise<string> {
   if (cachedStagingUserIdPromise == null) {
-    cachedStagingUserIdPromise = resolveStagingUserId(
-      path.join(app.getPath("userData"), ".updaterId"),
-    );
+    const pending = resolveStagingUserId(path.join(app.getPath("userData"), ".updaterId"));
+    cachedStagingUserIdPromise = pending;
+    void pending.catch(() => {
+      if (cachedStagingUserIdPromise === pending) cachedStagingUserIdPromise = null;
+    });
   }
   return cachedStagingUserIdPromise;
 }

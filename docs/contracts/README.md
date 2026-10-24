@@ -5,21 +5,24 @@
 
 ## 模块入口
 
-| 文档                                    | 验收范围                                                         |
-| --------------------------------------- | ---------------------------------------------------------------- |
-| [会话](sessions.md)                     | 原生分叉、rewind、身份与关系、恢复、MCP 可用性、状态、问题与导入 |
-| [模型与项目存储](models-and-storage.md) | 完整模型目录、有效配置、项目级 Codex 会话与共享用户资源          |
-| [Paseo Works](works.md)                 | 工作记录、成果、进度、指标、Canvas、agent 工作方式及 v1 共存     |
-| [Viewer](viewers.md)                    | 成果入口、静态资源、远程访问、Android 后台与目标规格边界         |
-| [Skills](skills.md)                     | 用户目录所有权、仓库同步、客户端凭证与多设备订阅                 |
-| [Canvas](canvas.md)                     | 关系可读性、空间利用、布局连续性和密集图验收                     |
-| [客户端](clients.md)                    | 文件、Markdown、输入、tabs 与 heartbeat；VS Code 已退役          |
-| [发行](distribution.md)                 | fork 身份、更新、共存、版本漂移与不可变产物                      |
-| [升级验收记录](baseline-review.md)      | 每次 bump 的记录格式、初始证据与已知缺口                         |
+| 文档                                    | 验收范围                                                            |
+| --------------------------------------- | ------------------------------------------------------------------- |
+| [会话](sessions.md)                     | 原生分叉、rewind、身份与关系、恢复、MCP、状态、导入、历史性能与兼容 |
+| [模型与项目存储](models-and-storage.md) | 完整模型目录、有效配置、项目级 Codex 会话与共享用户资源             |
+| [Paseo Works](works.md)                 | 工作记录、成果、进度、指标、Canvas、agent 工作方式及 v1 共存        |
+| [Viewer](viewers.md)                    | 成果入口、静态资源、远程访问、Android 后台与目标规格边界            |
+| [Skills](skills.md)                     | 用户目录所有权、仓库同步、客户端凭证与多设备订阅                    |
+| [Canvas](canvas.md)                     | 关系可读性、空间利用、布局连续性和密集图验收                        |
+| [客户端](clients.md)                    | 文件、Markdown、输入、tabs 与 heartbeat；VS Code 已退役             |
+| [发行](distribution.md)                 | fork 身份、更新、共存、版本漂移与不可变产物                         |
+| [数据完整性](data-integrity.md)         | 读取、编辑、迁移与清理中的用户数据保留，未知格式与失败边界          |
+| [升级验收记录](baseline-review.md)      | 每次 bump 的记录格式、初始证据与已知缺口                            |
 
 执行流程见 [Fork overlay workflow](../fork-overlay.md)。上述模块拥有长期行为要求；
 架构和专题文档解释实现边界，升级记录保存某个版本的满足情况。Works 可以索引记录和
 运行证据，但阅读、迁移和验收本契约不依赖某台 daemon、Works 数据库或临时工作区。
+历史性能的场景和预算见[会话历史性能测试项目](../session-history-performance.md)；
+其临时执行代码留在仓库外，后续 bump 仍逐项核对 SESSION-05–07。
 
 ## 当前迁移范围
 
@@ -29,6 +32,7 @@ Works、Experiments、Viewer 与 Skills 已有迁移源码和分项运行证据�
 Canvas 迭代暂停，已有改动和证据保留；VS Code 扩展按用户决定退役。
 全部编号的当前结果见[分阶段迁移验收](reviews/0.13.0-beta.1.md)，
 后续模块、存储与明确未满足项见[剩余契约评审](reviews/0.13.0-beta.1-remaining.md)。
+长历史与数据保留的修复、旧端硬上限决定见 [v0.13.3 验收](reviews/0.13.3.md)。
 
 ## 编号与范围
 

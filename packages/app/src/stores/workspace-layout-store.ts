@@ -66,6 +66,7 @@ import {
 import { isSheetTabModified, resolveCompactSheetPolicy } from "@/workspace-tabs/compact-sheet";
 import { panelResourceKey, type CompactSheetPolicy } from "@/panels/panel-manifest";
 import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
+import { parseStoredValue } from "@/storage/persisted-value";
 import { panelTargetSupportsHostForWorkspaceKey } from "@/plugins/workspace-panels/locations";
 
 export {
@@ -387,19 +388,21 @@ function migrateWorkspaceLayoutPersistedState(
   version: number,
   ids: WorkspaceLayoutIdSource,
 ): z.infer<typeof WorkspaceLayoutPersistedStateSchema> {
-  const result = WorkspaceLayoutPersistedStateSchema.safeParse(persistedState);
-  if (!result.success || version >= WORKSPACE_LAYOUT_PERSIST_VERSION) {
-    return result.success ? result.data : { layoutByWorkspace: {} };
-  }
+  const data = parseStoredValue(
+    WorkspaceLayoutPersistedStateSchema,
+    persistedState,
+    "workspace-layout-state",
+  );
+  if (version >= WORKSPACE_LAYOUT_PERSIST_VERSION) return data;
 
   const layoutByWorkspace: Record<string, WorkspaceLayout> = {};
   const explorerPaneIdByWorkspace: Record<string, string | null> = {};
-  const sidePaneIdByWorkspace = { ...result.data.sidePaneIdByWorkspace };
-  for (const [workspaceKey, layout] of Object.entries(result.data.layoutByWorkspace)) {
+  const sidePaneIdByWorkspace = { ...data.sidePaneIdByWorkspace };
+  for (const [workspaceKey, layout] of Object.entries(data.layoutByWorkspace)) {
     const migrated = migrateVersionOneWorkspaceLayout({
       layout,
-      legacyExplorerPaneId: result.data.explorerPaneIdByWorkspace?.[workspaceKey],
-      rememberedSidePaneId: result.data.sidePaneIdByWorkspace?.[workspaceKey],
+      legacyExplorerPaneId: data.explorerPaneIdByWorkspace?.[workspaceKey],
+      rememberedSidePaneId: data.sidePaneIdByWorkspace?.[workspaceKey],
       ids,
     });
     layoutByWorkspace[workspaceKey] = migrated.layout;
@@ -408,7 +411,7 @@ function migrateWorkspaceLayoutPersistedState(
   }
 
   return {
-    ...result.data,
+    ...data,
     layoutByWorkspace,
     explorerPaneIdByWorkspace,
     sidePaneIdByWorkspace,
@@ -2217,6 +2220,8 @@ export function createWorkspaceLayoutStore(
         version: WORKSPACE_LAYOUT_PERSIST_VERSION,
         storage: createValidatedPersistStorage(storage, WorkspaceLayoutPersistedStateSchema, {
           skipUnchanged: true,
+          version: WORKSPACE_LAYOUT_PERSIST_VERSION,
+          migrate: (state, version) => migrateWorkspaceLayoutPersistedState(state, version, ids),
         }),
         migrate: (persistedState, version) =>
           migrateWorkspaceLayoutPersistedState(persistedState, version, ids),

@@ -54,6 +54,8 @@ export function createDraftPersistStorage<T>(
   let pending: { name: string; value: Parameters<typeof storage.setItem>[1] } | null = null;
   let timer: unknown = null;
   let lastWriteAt = -Infinity;
+  let inFlight: Promise<void> | null = null;
+  let removalEpoch = 0;
 
   const cancelTimer = () => {
     if (timer !== null) {
@@ -63,17 +65,38 @@ export function createDraftPersistStorage<T>(
   };
   const flush = async (): Promise<void> => {
     cancelTimer();
+    if (inFlight) {
+      await inFlight;
+      return flush();
+    }
     const write = pending;
     pending = null;
     if (!write) {
       return;
     }
     lastWriteAt = scheduler.now();
+    const writeEpoch = removalEpoch;
+    inFlight = (async () => {
+      try {
+        await storage.setItem(write.name, write.value);
+      } catch (error) {
+        // A newer checkpoint supersedes this one; otherwise retain it for retry.
+        if (writeEpoch === removalEpoch) pending ??= write;
+        throw error;
+      }
+    })();
     try {
-      await storage.setItem(write.name, write.value);
-    } catch (error) {
-      console.warn("[DraftStore] Failed to persist draft checkpoint", error);
+      await inFlight;
+    } finally {
+      inFlight = null;
     }
+  };
+  const checkpoint = () => {
+    const result = flush();
+    void result.catch((error) => {
+      console.warn("[DraftStore] Failed to persist draft checkpoint", error);
+    });
+    return result;
   };
 
   return {
@@ -82,13 +105,14 @@ export function createDraftPersistStorage<T>(
       pending = { name, value };
       const delay = DRAFT_PERSIST_INTERVAL_MS - (scheduler.now() - lastWriteAt);
       if (delay <= 0) {
-        return flush();
+        return checkpoint();
       }
       timer ??= scheduler.schedule(() => {
-        void flush();
+        void checkpoint();
       }, delay);
     },
     removeItem: (name) => {
+      removalEpoch += 1;
       cancelTimer();
       pending = null;
       lastWriteAt = scheduler.now();

@@ -78,14 +78,17 @@ describe("changes preferences commitsCollapsed", () => {
     expect(prefs.commitsCollapsed).toBe(false);
   });
 
-  it("falls back to collapsed for invalid commitsCollapsed", async () => {
+  it("retains and reports invalid commitsCollapsed", async () => {
     const storage = createInMemoryKeyValueStorage({
       [CHANGES_PREFERENCES_STORAGE_KEY]: JSON.stringify({ commitsCollapsed: "nope" }),
     });
 
-    const prefs = await loadChangesPreferencesFromStorage(storage);
-
-    expect(prefs.commitsCollapsed).toBe(true);
+    await expect(loadChangesPreferencesFromStorage(storage)).rejects.toThrow(
+      CHANGES_PREFERENCES_STORAGE_KEY,
+    );
+    expect(storage.entries.get(CHANGES_PREFERENCES_STORAGE_KEY)).toBe(
+      JSON.stringify({ commitsCollapsed: "nope" }),
+    );
   });
 });
 

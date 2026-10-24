@@ -72,13 +72,33 @@ configure_dev_daemon_config() {
 const fs = require("fs");
 const [path, listen] = [process.argv[1], process.argv[2]];
 let cfg = {};
-try { cfg = JSON.parse(fs.readFileSync(path, "utf8")); } catch {}
-cfg.version = cfg.version || 1;
-cfg.daemon = cfg.daemon || {};
+try {
+  cfg = JSON.parse(fs.readFileSync(path, "utf8"));
+} catch (error) {
+  if (error.code !== "ENOENT") {
+    console.error(`Cannot read ${path}; original configuration was retained.`);
+    process.exit(1);
+  }
+}
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+if (!isObject(cfg) || (cfg.version !== undefined && cfg.version !== 1) ||
+    (cfg.daemon !== undefined && !isObject(cfg.daemon)) ||
+    (cfg.daemon?.cors !== undefined && !isObject(cfg.daemon.cors))) {
+  console.error(`Cannot update unsupported ${path}; original configuration was retained.`);
+  process.exit(1);
+}
+cfg.version ??= 1;
+cfg.daemon ??= {};
 cfg.daemon.listen = listen;
-cfg.daemon.cors = cfg.daemon.cors || {};
+cfg.daemon.cors ??= {};
 cfg.daemon.cors.allowedOrigins = ["*"];
-fs.writeFileSync(path, JSON.stringify(cfg, null, 2));
+const temporary = `${path}.tmp.${process.pid}`;
+try {
+  fs.writeFileSync(temporary, JSON.stringify(cfg, null, 2), { flag: "wx", mode: 0o600 });
+  fs.renameSync(temporary, path);
+} finally {
+  try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== "ENOENT") throw error; }
+}
 ' "$PASEO_HOME/config.json" "$PASEO_LISTEN"
 }
 
@@ -103,7 +123,7 @@ configure_dev_paseo_home() {
     fi
     mkdir -p "$PASEO_HOME"
     if [ "${PASEO_DEV_MANAGED_HOME:-0}" = "1" ] || [ -n "${PASEO_DEV_SEED_HOME:-}" ]; then
-      configure_dev_daemon_config
+      configure_dev_daemon_config || return "$?"
     fi
     return
   fi
@@ -136,7 +156,7 @@ configure_dev_command_env() {
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   if [ "$#" -gt 0 ]; then
-    configure_dev_command_env
+    configure_dev_command_env || exit "$?"
     exec "$@"
   fi
 

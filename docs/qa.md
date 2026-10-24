@@ -46,7 +46,7 @@ Paseo is composable by design, which means your change sits next to features you
 
 Performance is part of this. The app is Expo React Native, not a web app in a native shell. You are not writing CSS, styles resolve differently, and performance characteristics differ per platform. What feels instant in a desktop dev build can be visibly slow on a phone.
 
-If your change touches a hot path such as the terminal, the message list, or git polling, submit before and after numbers. [terminal-performance.md](terminal-performance.md) has the terminal pipeline and its benchmarks, and [development.md](development.md) covers renderer and React profiling.
+If your change touches a hot path such as the terminal, the message list, or git polling, submit before and after numbers. [terminal-performance.md](terminal-performance.md) has the terminal pipeline and its benchmarks, [session-history-performance.md](session-history-performance.md) defines history budgets and cross-version scenarios, and [development.md](development.md) covers renderer and React profiling.
 
 ## Every platform it affects
 
@@ -73,7 +73,9 @@ App and daemon versions also drift, in both directions. That has its own contrac
 
 Tests are evidence only when they exercise the real thing.
 
-- A bug fix needs a regression test that fails on the old code for the reported reason.
+- A bug fix needs regression verification that fails on the old code for the reported reason.
+  For the fork's history performance work, follow the execution-code and result-retention policy
+  in [the test project](session-history-performance.md#执行材料).
 - A feature needs tests that go through the same interface a user or a caller uses.
 - Web flows need an actual Playwright run, not a mocked-out approximation of one.
 - Agent provider work needs manual verification against the real provider by someone who can tell that it worked. A fixture and a mock prove the fixture parses, nothing more.

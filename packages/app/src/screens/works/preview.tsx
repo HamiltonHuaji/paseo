@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import type { WorkCard, WorkMetrics } from "@getpaseo/protocol/work-objects";
 import { useFetchQuery } from "@/data/query";
+import { readValidatedJson } from "@/storage/validated-storage";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -19,8 +20,18 @@ import { Metrics, metricTitle } from "./metrics";
 import { workStyles as styles } from "./styles";
 
 const DisplaySchema = z.record(z.string(), z.array(z.string()));
+const StoredDisplaySchema = z.record(z.string(), z.unknown());
 const EMPTY_DISPLAY: z.infer<typeof DisplaySchema> = {};
 const EMPTY_PANELS: string[] = [];
+
+function projectDisplay(stored: Record<string, unknown>): z.infer<typeof DisplaySchema> {
+  return Object.fromEntries(
+    Object.entries(stored).flatMap(([cardId, value]) => {
+      const panels = z.array(z.string()).safeParse(value);
+      return panels.success ? [[cardId, panels.data]] : [];
+    }),
+  );
+}
 
 export function useCanvasDisplay() {
   const { serverId, projectId } = useWorks();
@@ -30,18 +41,20 @@ export function useCanvasDisplay() {
   const query = useFetchQuery({
     queryKey: key,
     queryFn: async () => {
-      const stored = await AsyncStorage.getItem(storageKey);
-      return stored ? DisplaySchema.parse(JSON.parse(stored)) : EMPTY_DISPLAY;
+      const stored = await readValidatedJson(AsyncStorage, storageKey, StoredDisplaySchema);
+      return stored === null ? EMPTY_DISPLAY : projectDisplay(stored);
     },
     dataShape: "value",
     staleTimeMs: 60_000,
   });
   const save = useMutation({
+    scope: { id: storageKey },
     mutationFn: async ({ cardId, panels }: { cardId: string; panels: string[] }) => {
-      const current = cache.getQueryData<z.infer<typeof DisplaySchema>>(key) ?? EMPTY_DISPLAY;
-      const next = { ...current, [cardId]: panels };
+      // Re-read inside the per-key mutation queue; a failed query is not an empty document.
+      const current = await readValidatedJson(AsyncStorage, storageKey, StoredDisplaySchema);
+      const next = { ...current, [cardId]: z.array(z.string()).parse(panels) };
       await AsyncStorage.setItem(storageKey, JSON.stringify(next));
-      return next;
+      return projectDisplay(next);
     },
     onSuccess: (value) => cache.setQueryData(key, value),
   });

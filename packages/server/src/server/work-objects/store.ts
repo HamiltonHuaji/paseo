@@ -22,6 +22,7 @@ import {
   type WorkPlacement,
   type WorkStorage,
 } from "@getpaseo/protocol/work-objects";
+import { mergePersistedRecord } from "../persisted-record.js";
 
 // The daemon runs on Node 22+, while its declarations still target @types/node 20.
 interface Database {
@@ -240,9 +241,16 @@ export class WorkStore {
     return this.transaction(() => {
       for (const placement of placements) {
         this.getCard(placement.cardId);
+        const row = this.db
+          .prepare("SELECT record FROM placements WHERE card_id = ?")
+          .get(placement.cardId);
+        const raw: unknown = row ? JSON.parse(RecordRowSchema.parse(row).record) : undefined;
+        const next = row
+          ? mergePersistedRecord(raw, WorkPlacementSchema.parse(raw), placement)
+          : placement;
         this.db
           .prepare("INSERT OR REPLACE INTO placements VALUES (?, ?)")
-          .run(placement.cardId, JSON.stringify(placement));
+          .run(placement.cardId, JSON.stringify(next));
       }
       return this.placements();
     });
@@ -427,7 +435,21 @@ export class WorkStore {
     if (object.config) z.record(z.string(), z.json()).parse(object.config);
     if (object.progress && !object.progress.plan && !object.progress.source)
       throw new WorkError("invalid_input", "Progress requires a plan or source");
-    const record = JSON.stringify({ ...object, touches: [] });
+    const row = this.db
+      .prepare(`SELECT record FROM ${tableFor(object.id)} WHERE id = ?`)
+      .get(object.id);
+    const next = { ...object, touches: [] };
+    const raw: unknown = row ? JSON.parse(RecordRowSchema.parse(row).record) : undefined;
+    const record = JSON.stringify(
+      row
+        ? mergePersistedRecord(
+            raw,
+            WorkObjectSchema.parse(raw),
+            next,
+            (value) => value.id ?? value.unit ?? value.key ?? value.label,
+          )
+        : next,
+    );
     const search = normalize(`${object.title}\n${object.body}`);
     if (object.kind === "card") {
       if (object.goal !== null)

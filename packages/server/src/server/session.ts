@@ -8329,19 +8329,30 @@ export class Session {
       : undefined;
 
     try {
-      const snapshot = await ensureAgentLoaded(msg.agentId, {
-        agentManager: this.agentManager,
-        agentStorage: this.agentStorage,
-        purpose: "history",
-        logger: this.sessionLogger,
-      });
-      const agentPayload = await this.buildAgentPayload(snapshot);
-
-      const fetchedControlTimeline = this.agentManager.fetchTimeline(msg.agentId, {
-        direction,
-        cursor,
-        limit: pageLimit,
-      });
+      const options = { direction, cursor, limit: pageLimit };
+      const record = await this.agentStorage.get(msg.agentId);
+      const persisted =
+        record &&
+        (await this.agentManager.fetchPersistedTimeline(
+          record,
+          options,
+          this.delivery.requestSignal,
+        ));
+      const snapshot =
+        this.agentManager.getAgent(msg.agentId) ??
+        (persisted
+          ? null
+          : await ensureAgentLoaded(msg.agentId, {
+              agentManager: this.agentManager,
+              agentStorage: this.agentStorage,
+              purpose: "history",
+              logger: this.sessionLogger,
+            }));
+      const agentPayload = snapshot
+        ? await this.buildAgentPayload(snapshot)
+        : this.buildStoredAgentPayload(record!);
+      const fetchedControlTimeline =
+        persisted ?? this.agentManager.fetchTimeline(msg.agentId, options);
       const selectedTimeline = {
         timeline: fetchedControlTimeline,
         entries: fetchedControlTimeline.rows,
@@ -8362,7 +8373,7 @@ export class Session {
         this.supportsTimelineItem(entry.item, source),
       );
 
-      this.emitForSource(
+      await this.emitForSource(
         {
           type: "fetch_agent_timeline_response",
           payload: {
@@ -8383,7 +8394,7 @@ export class Session {
             ...(msg.mergeWindow === true ? { mergeWindow: true } : {}),
             entries: entries.map((entry) => {
               const payloadEntry = {
-                provider: snapshot.provider,
+                provider: agentPayload.provider,
                 item: entry.item,
                 timestamp: entry.timestamp,
                 seqStart: entry.seqStart,
@@ -8411,7 +8422,7 @@ export class Session {
         { err: error, agentId: msg.agentId },
         "Failed to handle fetch_agent_timeline_request",
       );
-      this.emitForSource(
+      await this.emitForSource(
         {
           type: "fetch_agent_timeline_response",
           payload: {
@@ -8455,22 +8466,36 @@ export class Session {
     });
   }
 
+  private async readTimelineForQuery(agentId: string) {
+    const record = await this.agentStorage.get(agentId);
+    const persisted =
+      record &&
+      (await this.agentManager.fetchPersistedTimeline(
+        record,
+        { limit: 0 },
+        this.delivery.requestSignal,
+      ));
+    if (persisted) return { rows: persisted.rows, epoch: persisted.epoch };
+    await ensureAgentLoaded(agentId, {
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
+      purpose: "history",
+      logger: this.sessionLogger,
+    });
+    const { epoch } = this.agentManager.fetchTimeline(agentId, {
+      direction: "tail",
+      limit: 1,
+    });
+    const rows = await this.agentManager.getTimelineRows(agentId);
+    return { rows, epoch };
+  }
+
   private async handleAgentTimelineSearchRequest(
     msg: Extract<SessionInboundMessage, { type: "agent.timeline.search.request" }>,
     source?: object,
   ): Promise<void> {
     try {
-      await ensureAgentLoaded(msg.agentId, {
-        agentManager: this.agentManager,
-        agentStorage: this.agentStorage,
-        purpose: "history",
-        logger: this.sessionLogger,
-      });
-      const rows = await this.agentManager.getTimelineRows(msg.agentId);
-      const { epoch } = this.agentManager.fetchTimeline(msg.agentId, {
-        direction: "tail",
-        limit: 1,
-      });
+      const { rows, epoch } = await this.readTimelineForQuery(msg.agentId);
       const result = await searchTimeline({ rows, query: msg.query, cursor: msg.cursor });
       if (
         this.agentManager.fetchTimeline(msg.agentId, { direction: "tail", limit: 1 }).epoch !==
@@ -8514,18 +8539,15 @@ export class Session {
     source?: object,
   ): Promise<void> {
     try {
-      await ensureAgentLoaded(msg.agentId, {
-        agentManager: this.agentManager,
-        agentStorage: this.agentStorage,
-        purpose: "history",
-        logger: this.sessionLogger,
-      });
-      const rows = await this.agentManager.getTimelineRows(msg.agentId);
+      const { rows, epoch } = await this.readTimelineForQuery(msg.agentId);
       const timeline = this.agentManager.fetchTimeline(msg.agentId, {
         direction: "tail",
         limit: 1,
       });
-      const index = buildTimelinePromptIndex(timeline.epoch, rows);
+      if (timeline.epoch !== epoch) {
+        throw new Error("History changed; list prompts again");
+      }
+      const index = buildTimelinePromptIndex(epoch, rows);
       this.emitForSource(
         {
           type: "agent.timeline.list_prompts.response",
@@ -8621,7 +8643,7 @@ export class Session {
         },
       );
       const rows = timeline.rows.filter((row) => this.supportsTimelineItem(row.item, source));
-      this.emitForSource(
+      await this.emitForSource(
         {
           type: "agent.provider_subagents.timeline.get.response",
           payload: {
@@ -8667,7 +8689,7 @@ export class Session {
         source,
       );
     } catch (error) {
-      this.emitForSource(
+      await this.emitForSource(
         {
           type: "agent.provider_subagents.timeline.get.response",
           payload: {
@@ -9230,11 +9252,10 @@ export class Session {
     return pending;
   }
 
-  private emitForSource(msg: SessionOutboundMessage, source?: object): void {
+  private emitForSource(msg: SessionOutboundMessage, source?: object): void | Promise<void> {
     if (source && this.onMessageToSource) {
       msg = this.delivery.authorizeReply(msg, source);
-      this.onMessageToSource(source, msg);
-      return;
+      return this.onMessageToSource(source, msg);
     }
     this.emit(msg);
   }

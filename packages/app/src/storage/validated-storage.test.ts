@@ -19,24 +19,24 @@ describe("validated storage reads", () => {
     ["malformed JSON", "{"],
     ["wrong field type", JSON.stringify({ enabled: "yes" })],
     ["unknown field", JSON.stringify({ enabled: true, surprise: true })],
-  ])("clears invalid JSON payloads: %s", async (_label, raw) => {
+  ])("retains saved JSON payloads: %s", async (label, raw) => {
     const storage = new MemoryStorage();
     storage.values.set("settings", raw);
 
-    await expect(
-      readValidatedJson(storage, "settings", z.strictObject({ enabled: z.boolean() })),
-    ).resolves.toBeNull();
-    expect(storage.values.has("settings")).toBe(false);
+    const read = readValidatedJson(storage, "settings", z.strictObject({ enabled: z.boolean() }));
+    if (label === "unknown field") await expect(read).resolves.toEqual({ enabled: true });
+    else await expect(read).rejects.toThrow("original data was retained");
+    expect(storage.values.get("settings")).toBe(raw);
   });
 
-  it("clears invalid scalar values", async () => {
+  it("retains invalid scalar values", async () => {
     const storage = new MemoryStorage();
     storage.values.set("channel", "nightly");
 
     await expect(
       readValidatedString(storage, "channel", z.enum(["stable", "beta"])),
-    ).resolves.toBeNull();
-    expect(storage.values.has("channel")).toBe(false);
+    ).rejects.toThrow("original data was retained");
+    expect(storage.values.get("channel")).toBe("nightly");
   });
 
   it("returns only schema-validated values", async () => {

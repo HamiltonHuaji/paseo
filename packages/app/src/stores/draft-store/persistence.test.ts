@@ -34,7 +34,7 @@ function createDraftPersistence() {
 
   return {
     save(text: string) {
-      drafts.setItem("drafts", { state: { text } });
+      return drafts.setItem("drafts", { state: { text } });
     },
     remove() {
       drafts.removeItem("drafts");
@@ -57,10 +57,10 @@ function createDraftPersistence() {
 }
 
 describe("draft persistence", () => {
-  it("checkpoints the first change and the latest change in each interval", () => {
+  it("checkpoints the first change and the latest change in each interval", async () => {
     const drafts = createDraftPersistence();
 
-    drafts.save("a");
+    await drafts.save("a");
     drafts.save("ab");
     drafts.save("abc");
     expect(drafts.text()).toBe("a");
@@ -72,10 +72,10 @@ describe("draft persistence", () => {
     expect(drafts.text()).toBe("abc");
   });
 
-  it("does not restore a pending draft after storage is cleared", () => {
+  it("does not restore a pending draft after storage is cleared", async () => {
     const drafts = createDraftPersistence();
 
-    drafts.save("first checkpoint");
+    await drafts.save("first checkpoint");
     drafts.save("pending checkpoint");
     drafts.remove();
     drafts.advance(DRAFT_PERSIST_INTERVAL_MS);
@@ -83,15 +83,15 @@ describe("draft persistence", () => {
     expect(drafts.text()).toBeNull();
   });
 
-  it("continues checkpointing the latest change across consecutive intervals", () => {
+  it("continues checkpointing the latest change across consecutive intervals", async () => {
     const drafts = createDraftPersistence();
 
-    drafts.save("first");
+    await drafts.save("first");
     drafts.save("first interval");
-    drafts.advance(DRAFT_PERSIST_INTERVAL_MS);
+    await drafts.advance(DRAFT_PERSIST_INTERVAL_MS);
     expect(drafts.text()).toBe("first interval");
 
-    drafts.save("second");
+    await drafts.save("second");
     drafts.save("second interval");
     drafts.advance(DRAFT_PERSIST_INTERVAL_MS);
     expect(drafts.text()).toBe("second interval");

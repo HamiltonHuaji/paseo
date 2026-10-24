@@ -36,6 +36,7 @@ import { getShortcutOs } from "@/utils/shortcut-platform";
 import { getIsElectronRuntime } from "@/constants/layout";
 import { isNative } from "@/constants/platform";
 import { getDesktopHost } from "@/desktop/host";
+import { useToast } from "@/contexts/toast-api-context";
 
 const EMPTY_CAPTURED_COMBOS: string[] = [];
 
@@ -332,6 +333,10 @@ function ShortcutRow({
 
 export function KeyboardShortcutsSection() {
   const { t } = useTranslation();
+  const toast = useToast();
+  const reportSaveError = useCallback(() => {
+    toast.error(t("errors.unableToSave"));
+  }, [t, toast]);
   const [capturingBindingId, setCapturingBindingId] = useState<string | null>(null);
   const [capturedCombos, setCapturedCombos] = useState<string[]>([]);
   const [heldModifiers, setHeldModifiers] = useState<string | null>(null);
@@ -369,9 +374,10 @@ export function KeyboardShortcutsSection() {
     ) {
       return;
     }
-    void setOverride(capturingBindingId, capturedCombos.join(" "));
-    cancelCapture();
-  }, [capturingBindingId, capturedCombos, setOverride, cancelCapture]);
+    void setOverride(capturingBindingId, capturedCombos.join(" "))
+      .then(cancelCapture)
+      .catch(reportSaveError);
+  }, [capturingBindingId, capturedCombos, setOverride, cancelCapture, reportSaveError]);
 
   useEffect(() => {
     if (!isFocused && capturingBindingId !== null) {
@@ -426,14 +432,17 @@ export function KeyboardShortcutsSection() {
     };
   }, [capturing]);
 
-  const handleResetAll = useCallback(() => void resetAll(), [resetAll]);
+  const handleResetAll = useCallback(
+    () => void resetAll().catch(reportSaveError),
+    [resetAll, reportSaveError],
+  );
   const handleClearOverride = useCallback(
-    (bindingId: string) => void clearOverride(bindingId),
-    [clearOverride],
+    (bindingId: string) => void clearOverride(bindingId).catch(reportSaveError),
+    [clearOverride, reportSaveError],
   );
   const handleRemoveOverride = useCallback(
-    (bindingId: string) => void removeOverride(bindingId),
-    [removeOverride],
+    (bindingId: string) => void removeOverride(bindingId).catch(reportSaveError),
+    [removeOverride, reportSaveError],
   );
 
   if (isNative) {

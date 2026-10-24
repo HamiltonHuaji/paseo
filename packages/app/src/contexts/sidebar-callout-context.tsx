@@ -17,14 +17,13 @@ import {
   dismissSidebarCallout,
   loadDismissedCalloutKeys,
   selectActiveSidebarCallout,
-  serializeDismissedCalloutKeys,
   showSidebarCallout,
   type SidebarCalloutEntry,
   type SidebarCalloutOptions,
   type SidebarCalloutState,
   unregisterSidebarCallout,
 } from "./sidebar-callout-state";
-import { readValidatedJson } from "@/storage/validated-storage";
+import { readValidatedJson, writeValidatedJson } from "@/storage/validated-storage";
 
 export type { SidebarCalloutOptions } from "./sidebar-callout-state";
 
@@ -39,13 +38,26 @@ const DISMISSED_CALLOUTS_STORAGE_KEY = "@paseo:sidebar-callout-dismissals";
 const SidebarCalloutApiContext = createContext<SidebarCalloutsApi | null>(null);
 const SidebarCalloutStateContext = createContext<SidebarCalloutEntry | null>(null);
 
+let dismissalWrites = Promise.resolve();
 function persistDismissedCalloutKeys(keys: ReadonlySet<string>): void {
-  void AsyncStorage.setItem(
-    DISMISSED_CALLOUTS_STORAGE_KEY,
-    serializeDismissedCalloutKeys(keys),
-  ).catch((error) => {
-    console.error("[SidebarCallouts] Failed to persist dismissed callouts", error);
-  });
+  dismissalWrites = dismissalWrites
+    .then(async () => {
+      const stored = await readValidatedJson(
+        AsyncStorage,
+        DISMISSED_CALLOUTS_STORAGE_KEY,
+        DismissedCalloutKeysSchema,
+      );
+      await writeValidatedJson(
+        AsyncStorage,
+        DISMISSED_CALLOUTS_STORAGE_KEY,
+        DismissedCalloutKeysSchema,
+        [...new Set([...(stored ?? []), ...keys])],
+      );
+      return undefined;
+    })
+    .catch((error) => {
+      console.error("[SidebarCallouts] Failed to persist dismissed callouts", error);
+    });
 }
 
 export function SidebarCalloutProvider({ children }: { children: ReactNode }) {
@@ -71,11 +83,14 @@ export function SidebarCalloutProvider({ children }: { children: ReactNode }) {
         dismissedKeys = new Set(value ?? []);
       } catch (error) {
         console.error("[SidebarCallouts] Failed to load dismissed callouts", error);
-        dismissedKeys = stateRef.current.dismissedKeys;
+        return;
       }
 
       if (mounted) {
-        commitState(loadDismissedCalloutKeys(stateRef.current, dismissedKeys));
+        const pendingKeys = stateRef.current.dismissedKeys;
+        const mergedKeys = new Set([...dismissedKeys, ...pendingKeys]);
+        commitState(loadDismissedCalloutKeys(stateRef.current, mergedKeys));
+        if (pendingKeys.size) persistDismissedCalloutKeys(mergedKeys);
       }
     }
 
@@ -101,7 +116,7 @@ export function SidebarCalloutProvider({ children }: { children: ReactNode }) {
     const result = dismissSidebarCallout(stateRef.current, id);
     commitState(result.state);
 
-    if (result.dismissalKey) {
+    if (result.dismissalKey && result.state.dismissalStorageLoaded) {
       persistDismissedCalloutKeys(result.state.dismissedKeys);
     }
 

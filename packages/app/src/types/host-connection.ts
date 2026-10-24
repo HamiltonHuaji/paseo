@@ -16,7 +16,7 @@ import {
 import {
   type HostAppearance,
   defaultHostAppearance,
-  HostAppearanceSchema,
+  normalizeStoredHostAppearance,
 } from "@/hosts/appearance";
 import { z } from "zod";
 
@@ -410,32 +410,32 @@ export function createRemoteSshHostConnection(input: {
 }
 
 const StoredHostConnectionSchema = z.discriminatedUnion("type", [
-  z.strictObject({ id: z.string(), type: z.literal("routed"), originServerId: z.string().min(1) }),
-  z.strictObject({
+  z.object({ id: z.string(), type: z.literal("routed"), originServerId: z.string().min(1) }),
+  z.object({
     id: z.string().optional(),
     type: z.literal("directTcp"),
     endpoint: z.string(),
     useTls: z.boolean().optional(),
     password: z.string().optional(),
   }),
-  z.strictObject({
+  z.object({
     id: z.string().optional(),
     type: z.literal("directSocket"),
     path: z.string(),
   }),
-  z.strictObject({
+  z.object({
     id: z.string().optional(),
     type: z.literal("directPipe"),
     path: z.string(),
   }),
-  z.strictObject({
+  z.object({
     id: z.string().optional(),
     type: z.literal("remoteSsh"),
     host: z.string(),
     sshPort: z.number().optional(),
     daemonPort: z.number().optional(),
   }),
-  z.strictObject({
+  z.object({
     id: z.string().optional(),
     type: z.literal("relay"),
     relayEndpoint: z.string(),
@@ -443,19 +443,27 @@ const StoredHostConnectionSchema = z.discriminatedUnion("type", [
     daemonPublicKeyB64: z.string(),
   }),
 ]);
-const StoredHostProfileSchema = z.strictObject({
+const StoredHostProfileSchema = z.object({
   serverId: z.string().trim().min(1),
   password: z.string().optional(),
   label: z.string().optional(),
-  appearance: HostAppearanceSchema.optional(),
-  lifecycle: z.strictObject({}).optional(),
-  connections: z.array(StoredHostConnectionSchema).min(1),
+  appearance: z.unknown().optional(),
+  lifecycle: z.object({}).optional(),
+  connections: z.array(z.unknown()).min(1),
   preferredConnectionId: z.string().nullable().optional(),
   createdAt: z.string().datetime({ offset: true }).optional(),
   updatedAt: z.string().datetime({ offset: true }).optional(),
 });
 export const StoredHostRegistrySchema = z.array(StoredHostProfileSchema);
 type StoredHostConnection = z.infer<typeof StoredHostConnectionSchema>;
+
+export function normalizeStoredHostConnection(value: unknown): HostConnection | null {
+  if (typeof value !== "object" || value === null) return null;
+  // Unknown persisted fields belong to another version. Validate the fields
+  // this runtime understands; the storage owner retains the original record.
+  const parsed = StoredHostConnectionSchema.safeParse(value);
+  return parsed.success ? normalizeStoredConnection(parsed.data) : null;
+}
 
 function normalizeStoredConnection(connection: StoredHostConnection): HostConnection | null {
   if (connection.type === "routed") return connection;
@@ -520,14 +528,18 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
   }
   const record = result.data;
   const serverId = record.serverId;
+  const knownConnections = record.connections.flatMap((connection) => {
+    const parsed = StoredHostConnectionSchema.safeParse(connection);
+    return parsed.success ? [parsed.data] : [];
+  });
   // COMPAT(connectionPassword): added in v0.9.1, remove after 2027-03-24 once stored direct passwords have migrated.
-  const legacyPassword = record.connections.find(
+  const legacyPassword = knownConnections.find(
     (connection) => connection.type === "directTcp" && connection.password,
   );
   const password =
     record.password ?? (legacyPassword?.type === "directTcp" ? legacyPassword.password : undefined);
 
-  const connections = record.connections
+  const connections = knownConnections
     .map((connection) => normalizeStoredConnection(connection))
     .filter((connection): connection is HostConnection => connection !== null);
   if (connections.length === 0) {
@@ -547,7 +559,7 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
     serverId,
     ...(password ? { password } : {}),
     label,
-    appearance: record.appearance ?? defaultHostAppearance(),
+    appearance: normalizeStoredHostAppearance(record.appearance),
     lifecycle: defaultLifecycle(),
     connections,
     preferredConnectionId,

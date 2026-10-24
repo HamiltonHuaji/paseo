@@ -28,15 +28,18 @@ export async function recordClientInstall({
   ).join("");
   const key = `plugin-installs-client:${id}:${hash}`;
   if ((await cache.get(key)) !== null) return;
-  await cache.put(key, "1", { expirationTtl: 3600 });
   await recordInstall(cache, id, new Date());
+  await cache.put(key, "1", { expirationTtl: 3600 });
 }
 
 export async function recordInstall(cache: KVNamespace, id: string, now: Date): Promise<void> {
   const [total, daily] = await Promise.all([cache.get(totalKey(id)), readDaily(cache, id)]);
+  const nextTotal = parseTotal(total, id) + 1;
+  if (!Number.isSafeInteger(nextTotal)) throw new Error(`Invalid saved ${totalKey(id)}`);
+  const nextDaily = addInstall(daily, now);
   await Promise.all([
-    cache.put(totalKey(id), String(Number(total ?? 0) + 1)),
-    cache.put(dailyKey(id), JSON.stringify(addInstall(daily, now))),
+    cache.put(totalKey(id), String(nextTotal)),
+    cache.put(dailyKey(id), JSON.stringify(nextDaily)),
   ]);
 }
 
@@ -49,7 +52,7 @@ export async function readInstallCounts(
     ids.map(async (id) => {
       if (!cache) return [id, countInstalls({}, 0, now)] as const;
       const [total, daily] = await Promise.all([cache.get(totalKey(id)), readDaily(cache, id)]);
-      return [id, countInstalls(daily, Number(total ?? 0), now)] as const;
+      return [id, countInstalls(daily, parseTotal(total, id), now)] as const;
     }),
   );
   return Object.fromEntries(entries);
@@ -60,6 +63,7 @@ export function addInstall(daily: DailyInstalls, now: Date): DailyInstalls {
   const kept = Object.fromEntries(Object.entries(daily).filter(([day]) => day >= oldest));
   const today = utcDay(now, 0);
   kept[today] = (kept[today] ?? 0) + 1;
+  if (!Number.isSafeInteger(kept[today])) throw new Error("Invalid saved daily install count");
   return kept;
 }
 
@@ -83,11 +87,41 @@ function utcDay(now: Date, daysBefore: number): string {
 }
 
 async function readDaily(cache: KVNamespace, id: string): Promise<DailyInstalls> {
-  const value: unknown = await cache.get(dailyKey(id), { type: "json" });
-  if (typeof value !== "object" || value === null) return {};
-  return Object.fromEntries(
-    Object.entries(value).filter(
-      (entry): entry is [string, number] => typeof entry[1] === "number",
-    ),
+  const text = await cache.get(dailyKey(id));
+  if (text === null) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error(`Invalid saved ${dailyKey(id)}; original data was retained`);
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Invalid saved ${dailyKey(id)}; original data was retained`);
+  }
+  const entries = Object.entries(value);
+  if (!entries.every(isDailyEntry)) {
+    throw new Error(`Unsupported saved ${dailyKey(id)}; original data was retained`);
+  }
+  return Object.fromEntries(entries);
+}
+
+function isDailyEntry(entry: [string, unknown]): entry is [string, number] {
+  const [day, count] = entry;
+  return (
+    /^\d{4}-\d{2}-\d{2}$/.test(day) &&
+    Number.isFinite(Date.parse(day)) &&
+    new Date(day).toISOString().slice(0, 10) === day &&
+    typeof count === "number" &&
+    Number.isSafeInteger(count) &&
+    count >= 0
   );
+}
+
+function parseTotal(value: string | null, id: string): number {
+  if (value === null) return 0;
+  const count = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(count) || count < 0) {
+    throw new Error(`Invalid saved ${totalKey(id)}; original data was retained`);
+  }
+  return count;
 }

@@ -75,6 +75,7 @@ export function createShortcutOverrideStore({
       } catch (err) {
         cache.write(prev);
         onError(err);
+        throw err;
       }
     });
   }
@@ -92,6 +93,7 @@ export function createShortcutOverrideStore({
         } catch (err) {
           cache.write(prev);
           onError(err);
+          throw err;
         }
       }),
   };

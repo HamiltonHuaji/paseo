@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { AttachmentMetadata, WorkspaceFileComposerAttachment } from "@/attachments/types";
+import { z } from "zod";
+import type { WorkspaceFileComposerAttachment } from "@/attachments/types";
 import { appendWorkspaceFileAttachment } from "@/attachments/workspace-file";
 import {
   garbageCollectAttachments,
@@ -65,8 +66,24 @@ interface DraftStoreRuntimeState {
 type DraftStore = DraftStoreState & DraftStoreRuntimeState & DraftStoreActions;
 
 let gcScheduled = false;
+let draftsHydrated = false;
+let hydrationGeneration = 0;
+const AttachmentGcSnapshotSchema = z.strictObject({
+  state: PersistedDraftStoreSchema,
+  version: z.literal(DRAFT_STORE_VERSION).optional(),
+});
 const draftPersistStorage = createDraftPersistStorage(
-  createValidatedPersistStorage(AsyncStorage, PersistedDraftStoreSchema),
+  createValidatedPersistStorage(AsyncStorage, PersistedDraftStoreSchema, {
+    version: DRAFT_STORE_VERSION,
+    migrate: (state) =>
+      migratePersistedState(state, {
+        migrateLegacyImages,
+        nowMs: Date.now(),
+      }),
+    // This migration carries unknown fields along with renamed records and removes
+    // consumed legacy keys; overlaying the old keys would resurrect deleted drafts.
+    reconcileMigration: (_state, migrated) => migrated,
+  }),
 );
 
 export function flushDraftPersistStorage(): Promise<void> {
@@ -100,7 +117,7 @@ const migrateLegacyImages: MigrateLegacyImages = async (images) => {
         return entry;
       }
       if (!isLegacyDraftImage(entry)) {
-        return null;
+        throw new Error("Unsupported persisted draft attachment");
       }
 
       try {
@@ -116,34 +133,70 @@ const migrateLegacyImages: MigrateLegacyImages = async (images) => {
           mimeType: entry.mimeType,
         });
       } catch (error) {
-        console.warn("[DraftStore] Failed to migrate legacy draft attachment", {
-          uri: entry.uri,
-          error,
-        });
-        return null;
+        console.warn("[DraftStore] Failed to migrate legacy draft attachment", error);
+        throw error;
       }
     }),
   );
 
-  return migrated.filter((entry): entry is AttachmentMetadata => entry !== null);
+  return migrated;
 };
+
+async function collectSavedDraftAttachmentIds(referencedIds: Set<string>): Promise<void> {
+  const saved = await AsyncStorage.getItem("paseo-drafts");
+  let snapshot: unknown;
+  try {
+    snapshot = saved === null ? null : JSON.parse(saved);
+  } catch {
+    throw new Error("Cannot inspect saved paseo-drafts for attachment collection");
+  }
+  if (snapshot !== null) {
+    const parsed = AttachmentGcSnapshotSchema.safeParse(snapshot);
+    if (!parsed.success) {
+      // Unknown fields may contain references that the runtime projection omits.
+      throw new Error("Cannot collect attachments: saved paseo-drafts contain unknown data");
+    }
+    // A migration may retain older records in the original document that the
+    // current runtime no longer selects (for example scoped drafts).
+    const records = [
+      ...Object.values(parsed.data.state.drafts ?? {}),
+      parsed.data.state.createModalDraft,
+    ];
+    for (const record of records) {
+      if (!record) continue;
+      const input = "input" in record ? record.input : record;
+      for (const attachment of input.attachments ?? []) {
+        if (attachment.kind === "image") referencedIds.add(attachment.metadata.id);
+      }
+      for (const legacyImage of input.images ?? []) {
+        if ("id" in legacyImage) referencedIds.add(legacyImage.id);
+      }
+    }
+  }
+}
 
 async function runAttachmentGc(): Promise<void> {
   gcScheduled = false;
+  if (!draftsHydrated) return;
   const nowMs = Date.now();
+  const referencedIds = new Set(useDraftStore.getState().collectActiveAttachmentIds());
+  try {
+    // The saved checkpoint may still reference attachments removed in memory.
+    await flushDraftPersistStorage();
+    await collectSavedDraftAttachmentIds(referencedIds);
+    // Pruning is also destructive: do it only after the saved document is fully
+    // understood. The references above retain pruned bytes for this GC pass.
+    useDraftStore.setState((state) => {
+      const prunedDrafts = pruneFinalizedDraftRecords({ drafts: state.drafts, nowMs });
+      return prunedDrafts === state.drafts ? state : { ...state, drafts: prunedDrafts };
+    });
+    await flushDraftPersistStorage();
+  } catch (error) {
+    console.warn("[DraftStore] Attachment collection skipped: checkpoint failed", error);
+    return;
+  }
+  if (!draftsHydrated) return;
 
-  useDraftStore.setState((state) => {
-    const prunedDrafts = pruneFinalizedDraftRecords({ drafts: state.drafts, nowMs });
-    if (prunedDrafts === state.drafts) {
-      return state;
-    }
-    return {
-      ...state,
-      drafts: prunedDrafts,
-    };
-  });
-
-  const referencedIds = new Set<string>();
   for (const id of useDraftStore.getState().collectActiveAttachmentIds()) {
     referencedIds.add(id);
   }
@@ -217,7 +270,7 @@ function collectStreamUserImageIds(
 }
 
 function scheduleAttachmentGc(): void {
-  if (gcScheduled) {
+  if (!draftsHydrated || gcScheduled) {
     return;
   }
   gcScheduled = true;
@@ -239,14 +292,7 @@ async function migrateAllLegacyDrafts(): Promise<void> {
     .map(([draftKey]) => draftKey);
 
   for (const draftKey of keys) {
-    try {
-      await state.hydrateDraftInput({ draftKey });
-    } catch (error) {
-      console.warn("[DraftStore] Failed to migrate draft during startup", {
-        draftKey,
-        error,
-      });
-    }
+    await state.hydrateDraftInput({ draftKey });
   }
 }
 
@@ -436,9 +482,22 @@ export const useDraftStore = create<DraftStore>()(
           nowMs: Date.now(),
         }),
       onRehydrateStorage: () => {
-        return () => {
-          void migrateAllLegacyDrafts();
-          scheduleAttachmentGc();
+        const generation = ++hydrationGeneration;
+        draftsHydrated = false;
+        return (state, error) => {
+          // Until every stored draft is understood, absent runtime references cannot
+          // establish that the corresponding attachment bytes are unreferenced.
+          if (error || !state) return;
+          void migrateAllLegacyDrafts()
+            .then(() => {
+              if (generation !== hydrationGeneration) return;
+              draftsHydrated = true;
+              scheduleAttachmentGc();
+              return undefined;
+            })
+            .catch((migrationError) => {
+              console.warn("[DraftStore] Failed to migrate drafts during startup", migrationError);
+            });
         };
       },
     },

@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Logger } from "pino";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import { mergePersistedRecord } from "../persisted-record.js";
 import {
   AgentFeatureSchema,
   AgentForkOriginSchema,
@@ -115,6 +116,7 @@ export function parseStoredAgentRecord(value: unknown): StoredAgentRecord {
 
 export class AgentStorage {
   private cache: Map<string, StoredAgentRecord> = new Map();
+  private rawRecords = new Map<string, unknown>();
   private pathById: Map<string, string> = new Map();
   private pathsById: Map<string, Set<string>> = new Map();
   private pendingWrites: Map<string, Promise<void>> = new Map();
@@ -227,7 +229,21 @@ export class AgentStorage {
     const nextPath = this.buildRecordPath(record);
     const previousPath = this.pathById.get(agentId);
 
-    await writeJsonFileAtomic(nextPath, record);
+    let previous = this.cache.get(agentId);
+    let raw = this.rawRecords.get(agentId);
+    if (!previous) {
+      // A skipped/unreadable file is not permission to replace it with a new
+      // record at the same path.
+      try {
+        raw = JSON.parse(await fs.readFile(nextPath, "utf8"));
+        previous = parseStoredAgentRecord(raw);
+        if (previous.id !== agentId) throw new Error(`Agent record ID mismatch at ${nextPath}`);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    const value = previous ? mergePersistedRecord(raw, previous, record) : record;
+    await writeJsonFileAtomic(nextPath, value);
     this.addIndexedPath(agentId, nextPath);
 
     if (previousPath && previousPath !== nextPath) {
@@ -240,6 +256,7 @@ export class AgentStorage {
     }
 
     this.cache.set(agentId, record);
+    this.rawRecords.set(agentId, value);
     this.indexOwner(record);
     this.pathById.set(agentId, nextPath);
   }
@@ -270,6 +287,7 @@ export class AgentStorage {
     );
 
     this.cache.delete(agentId);
+    this.rawRecords.delete(agentId);
     this.removeOwnerIndex(agentId);
     this.pathById.delete(agentId);
     this.pathsById.delete(agentId);
@@ -334,6 +352,7 @@ export class AgentStorage {
 
   private async doLoad(): Promise<StoredAgentRecord[]> {
     this.cache.clear();
+    this.rawRecords.clear();
     this.pathById.clear();
     this.pathsById.clear();
     this.daemonAgentIdsByExecution.clear();
@@ -390,16 +409,17 @@ export class AgentStorage {
     const allFilePaths = [...rootRecordPaths, ...projectFileLists.flat()];
     const loaded = await Promise.all(
       allFilePaths.map(async (filePath) => {
-        const record = await this.readRecordFile(filePath);
-        return record ? { record, filePath } : null;
+        const entry = await this.readRecordFile(filePath);
+        return entry ? { record: entry.record, value: entry.value, filePath } : null;
       }),
     );
 
     for (const item of loaded) {
       if (!item) continue;
-      const { record, filePath } = item;
+      const { record, value, filePath } = item;
       records.push(record);
       this.cache.set(record.id, record);
+      this.rawRecords.set(record.id, value);
       this.indexOwner(record);
       this.pathById.set(record.id, filePath);
       this.addIndexedPath(record.id, filePath);
@@ -408,11 +428,13 @@ export class AgentStorage {
     return records;
   }
 
-  private async readRecordFile(filePath: string): Promise<StoredAgentRecord | null> {
+  private async readRecordFile(
+    filePath: string,
+  ): Promise<{ record: StoredAgentRecord; value: unknown } | null> {
     try {
       const content = await fs.readFile(filePath, "utf8");
       const parsed = JSON.parse(content);
-      return parseStoredAgentRecord(parsed);
+      return { record: parseStoredAgentRecord(parsed), value: parsed };
     } catch (error) {
       this.logger.error({ err: error, filePath }, "Skipping invalid agent record");
       return null;

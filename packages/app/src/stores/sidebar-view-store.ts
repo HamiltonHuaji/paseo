@@ -4,6 +4,7 @@ import { persist, type StateStorage } from "zustand/middleware";
 import { z } from "zod";
 import { workspaceLabelKey } from "@getpaseo/protocol/workspace-labels";
 import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
+import { parseStoredValue } from "@/storage/persisted-value";
 
 export type SidebarGroupMode = "project" | "status";
 
@@ -123,17 +124,7 @@ function readHostFilters(persistedState: SidebarViewStorageState): string[] {
 }
 
 export function migrateSidebarViewState(persistedState: unknown): SidebarViewPersistedState {
-  const result = SidebarViewPersistedStateSchema.safeParse(persistedState);
-  if (!result.success) {
-    return {
-      showBackground: false,
-      groupMode: "project",
-      hostFilters: [],
-      projectFilters: [],
-      labelFilter: emptyLabelFilter(),
-    };
-  }
-  const state = result.data;
+  const state = parseStoredValue(SidebarViewPersistedStateSchema, persistedState, "sidebar-view");
 
   const legacyGroupMode = readLegacyGroupMode(state);
   if (legacyGroupMode) {
@@ -235,6 +226,7 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
       storage: createValidatedPersistStorage(
         createSidebarViewStorage(),
         SidebarViewPersistedStateSchema,
+        { version: SIDEBAR_VIEW_STORE_VERSION, migrate: migrateSidebarViewState },
       ),
       partialize: (state) => ({
         showBackground: state.showBackground ?? false,

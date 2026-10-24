@@ -37,7 +37,9 @@ export const useSidebarCollapsedSectionsStore = create<SidebarCollapsedSectionsS
     }),
     {
       name: "sidebar-collapsed-sections",
-      storage: createValidatedPersistStorage(AsyncStorage, PersistedCollapsedProjectsSchema),
+      storage: createValidatedPersistStorage(AsyncStorage, PersistedCollapsedProjectsSchema, {
+        version: 0,
+      }),
       partialize: (state) => serializeCollapsedProjects(state),
       merge: (persistedState, currentState) =>
         mergePersistedCollapsedProjects(persistedState, currentState),

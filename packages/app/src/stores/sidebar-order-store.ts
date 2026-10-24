@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { z } from "zod";
 import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
+import { parseStoredValue } from "@/storage/persisted-value";
 
 interface SidebarOrderStoreState {
   projectOrder: string[];
@@ -111,11 +112,11 @@ export function migrateSidebarOrderState(persistedState: unknown): {
   pinnedWorkspaceOrder: string[];
   workspaceOrderByProject: Record<string, string[]>;
 } {
-  const result = SidebarOrderPersistedStateSchema.safeParse(persistedState);
-  if (!result.success) {
-    return { projectOrder: [], pinnedWorkspaceOrder: [], workspaceOrderByProject: {} };
-  }
-  const state: SidebarOrderPersistedState = result.data;
+  const state: SidebarOrderPersistedState = parseStoredValue(
+    SidebarOrderPersistedStateSchema,
+    persistedState,
+    "sidebar-order",
+  );
 
   const projectOrder = normalizeKeys(state.projectOrder ?? []);
   const seenProjects = new Set(projectOrder);
@@ -180,7 +181,10 @@ export const useSidebarOrderStore = create<SidebarOrderStoreState>()(
     }),
     {
       name: "sidebar-project-workspace-order",
-      storage: createValidatedPersistStorage(AsyncStorage, SidebarOrderPersistedStateSchema),
+      storage: createValidatedPersistStorage(AsyncStorage, SidebarOrderPersistedStateSchema, {
+        version: 1,
+        migrate: migrateSidebarOrderState,
+      }),
       partialize: (state) => ({
         projectOrder: state.projectOrder,
         pinnedWorkspaceOrder: state.pinnedWorkspaceOrder,

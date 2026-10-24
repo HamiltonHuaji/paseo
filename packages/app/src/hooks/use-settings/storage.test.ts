@@ -495,10 +495,12 @@ describe("loadAppSettingsFromStorage", () => {
       theme: "dark",
       contentFontSize: DEFAULT_UI_BASE_FONT_SIZE,
     });
-    expect(JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY) ?? "null")).toEqual({
+    expect(JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY) ?? "null")).toMatchObject({
       manageBuiltInDaemon: false,
       releaseChannel: "beta",
-      ...result,
+      theme: "dark",
+      uiBaseFontSize: result.uiBaseFontSize,
+      contentFontSize: result.contentFontSize,
     });
   });
 
@@ -966,7 +968,7 @@ describe("appearance settings", () => {
     const persisted = JSON.parse(deps.storage.entries.get(APP_SETTINGS_KEY) ?? "null");
 
     expect(result.uiBaseFontSize).toBe(15);
-    expect(persisted).toMatchObject({ uiBaseFontSize: 15, uiFontSize: 17 });
+    expect(persisted).toMatchObject({ uiBaseFontSize: "abc", uiFontSize: 17 });
   });
 
   it("clamps the UI base font size into range and rejects non-numeric values", async () => {

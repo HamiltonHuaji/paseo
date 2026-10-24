@@ -7,10 +7,11 @@ import {
   VIEWER_REQUEST_HEADERS,
   viewerPortCandidates,
   type ViewerProxyInput,
+  type ViewerProxyState,
 } from "@getpaseo/client/internal/viewer-http-proxy";
 import { createViewerClient } from "./client";
 import { createViewerTaskLifetime } from "./task-lifetime";
-import { readValidatedJson } from "@/storage/validated-storage";
+import { readValidatedJson, writeValidatedJson } from "@/storage/validated-storage";
 import { z } from "zod";
 
 const RequestSchema = z.object({
@@ -40,9 +41,16 @@ declare class ProxyModule extends NativeModule<{
 
 const native = requireNativeModule<ProxyModule>("PaseoViewerProxy");
 const STORAGE_KEY = "@paseo:viewer-proxy-ports";
-const stateReady = readValidatedJson(AsyncStorage, STORAGE_KEY, ViewerProxyStateSchema).then(
-  (state) => state ?? {},
-);
+let stateReady: Promise<ViewerProxyState> | null = null;
+function readState(): Promise<ViewerProxyState> {
+  stateReady ??= readValidatedJson(AsyncStorage, STORAGE_KEY, ViewerProxyStateSchema)
+    .then((state) => state ?? {})
+    .catch((error) => {
+      stateReady = null;
+      throw error;
+    });
+  return stateReady;
+}
 const upstreams = new Map<string, ReturnType<typeof createViewerHttpUpstream>>();
 const requests = new Map<string, AbortController>();
 let mutation = Promise.resolve();
@@ -165,9 +173,9 @@ native.addListener("onStopped", ({ disabled, serviceId }) => {
     upstreams.clear();
     await Promise.allSettled(active.map((upstream) => upstream.close()));
     if (disabled) {
-      const state = await stateReady;
+      const state = await readState();
       for (const assignment of Object.values(state)) assignment.enabled = false;
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      await writeValidatedJson(AsyncStorage, STORAGE_KEY, ViewerProxyStateSchema, state);
     }
   })
     .finally(() => tasks.stop(serviceId))
@@ -183,12 +191,12 @@ export function canProxyViewers(): boolean {
 }
 
 async function ensureListener(serverId: string): Promise<{ origin: string }> {
-  const state = await stateReady;
+  const state = await readState();
   const port = await native.ensureListener(serverId, viewerPortCandidates({ serverId, state }));
   const previous = state[serverId];
   state[serverId] = { port, enabled: true };
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    await writeValidatedJson(AsyncStorage, STORAGE_KEY, ViewerProxyStateSchema, state);
   } catch (error) {
     if (previous) state[serverId] = previous;
     else delete state[serverId];
@@ -207,7 +215,7 @@ export function ensureViewerProxy(input: ViewerProxyInput): Promise<{ origin: st
 
 export function updateViewerProxyRoute(input: ViewerProxyInput): Promise<void> {
   return mutate(async () => {
-    const state = await stateReady;
+    const state = await readState();
     if (!state[input.serverId]?.enabled) return;
     getUpstream(input.serverId).updateRoute(input.connection);
   });
@@ -215,7 +223,7 @@ export function updateViewerProxyRoute(input: ViewerProxyInput): Promise<void> {
 
 export function syncViewerProxyHosts(serverIds: string[]): Promise<void> {
   return mutate(async () => {
-    const state = await stateReady;
+    const state = await readState();
     const hosts = new Set(serverIds);
     for (const [serverId, assignment] of Object.entries(state)) {
       if (!hosts.has(serverId)) {
@@ -227,6 +235,6 @@ export function syncViewerProxyHosts(serverIds: string[]): Promise<void> {
         await ensureListener(serverId);
       }
     }
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    await writeValidatedJson(AsyncStorage, STORAGE_KEY, ViewerProxyStateSchema, state);
   });
 }

@@ -27,6 +27,7 @@ import {
   type ThemePreference,
 } from "@/styles/theme";
 import { z } from "zod";
+import { isStoredObject, mergeStoredEdits, overlayStoredValue } from "@/storage/persisted-value";
 import { APP_SETTINGS_KEY, LEGACY_SETTINGS_KEY } from "./keys";
 import { migrateAppSettings } from "./migrations";
 
@@ -357,7 +358,21 @@ export interface SettingsDeps {
   desktop: DesktopSettingsBridge;
 }
 
+const settingsWrites = new WeakMap<KeyValueStorage, Promise<void>>();
+
 export async function saveAppSettings(input: {
+  queryClient: QueryClient;
+  updates: AppSettingsUpdate;
+  deps: SettingsDeps;
+}): Promise<void> {
+  const write = (settingsWrites.get(input.deps.storage) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => saveAppSettingsNow(input));
+  settingsWrites.set(input.deps.storage, write);
+  await write;
+}
+
+async function saveAppSettingsNow(input: {
   queryClient: QueryClient;
   updates: AppSettingsUpdate;
   deps: SettingsDeps;
@@ -368,13 +383,14 @@ export async function saveAppSettings(input: {
   const current = normalizeAppSettings(storedCurrent);
   const updates = typeof input.updates === "function" ? input.updates(current) : input.updates;
   const next = { ...current, ...updates };
-  input.queryClient.setQueryData<AppSettings>(APP_SETTINGS_QUERY_KEY, next);
   await writeAppSettings(
     input.deps.storage,
     (await readSettingsObject(input.deps.storage, APP_SETTINGS_KEY)) ??
       StoredAppSettingsSchema.parse({}),
     next,
+    updates,
   );
+  input.queryClient.setQueryData<AppSettings>(APP_SETTINGS_QUERY_KEY, next);
 }
 
 export async function loadAppSettingsFromStorage(deps: SettingsDeps): Promise<AppSettings> {
@@ -588,6 +604,14 @@ async function readSettingsObject(
   storage: KeyValueStorage,
   key: string,
 ): Promise<StoredAppSettings | null> {
+  const decoded = await readSettingsJson(storage, key);
+  return decoded === null ? null : StoredAppSettingsSchema.parse(decoded);
+}
+
+async function readSettingsJson(
+  storage: KeyValueStorage,
+  key: string,
+): Promise<Record<string, unknown> | null> {
   const raw = await storage.getItem(key);
   if (raw === null) {
     return null;
@@ -597,26 +621,67 @@ async function readSettingsObject(
   try {
     decoded = JSON.parse(raw);
   } catch {
-    console.warn(`[AppSettings] Removing corrupt ${key}: invalid JSON.`);
-    await storage.removeItem(key);
-    return null;
+    throw new Error(`[AppSettings] Cannot read ${key}: invalid JSON.`);
   }
-  return StoredAppSettingsSchema.parse(decoded);
+  if (!isStoredObject(decoded)) {
+    throw new Error(`[AppSettings] Cannot read ${key}: expected a settings object.`);
+  }
+  return decoded;
 }
 
 async function writeAppSettings(
   storage: KeyValueStorage,
   stored: StoredAppSettings,
   settings: AppSettings,
+  updates?: Partial<AppSettings>,
 ): Promise<void> {
   const { needsWrite: _needsWrite, ...persistedStored } = stored;
   const storedSidebarRowItems = persistedStored.sidebarRowItems;
-  await storage.setItem(
-    APP_SETTINGS_KEY,
-    JSON.stringify({
-      ...persistedStored,
-      ...settings,
-      sidebarRowItems: { ...storedSidebarRowItems, ...settings.sidebarRowItems },
-    }),
-  );
+  const raw =
+    (await readSettingsJson(storage, APP_SETTINGS_KEY)) ??
+    (await readSettingsJson(storage, LEGACY_SETTINGS_KEY));
+  const before = raw ? normalizeAppSettings(raw) : null;
+  if (raw && before) assertEditableCollections(raw, before, settings);
+  let next = raw
+    ? mergeStoredEdits(raw, before, settings)
+    : {
+        ...persistedStored,
+        ...settings,
+        sidebarRowItems: { ...storedSidebarRowItems, ...settings.sidebarRowItems },
+      };
+  if (updates) {
+    // Nested preference callers submit their whole runtime view. Only a scalar
+    // update unambiguously means the user selected that exact fallback value.
+    const explicitScalars = Object.fromEntries(
+      Object.entries(updates).filter(([, value]) => value === null || typeof value !== "object"),
+    );
+    next = overlayStoredValue(next, explicitScalars);
+  }
+  // Materialize only the missing fields owned by the font migration. A fallback
+  // for an existing value from another version must not replace that saved value.
+  if (stored.needsWrite && isStoredObject(next)) {
+    if (!Object.hasOwn(next, "uiBaseFontSize")) next.uiBaseFontSize = settings.uiBaseFontSize;
+    if (!Object.hasOwn(next, "contentFontSize")) next.contentFontSize = settings.contentFontSize;
+  }
+  await storage.setItem(APP_SETTINGS_KEY, JSON.stringify(next));
+}
+
+function assertEditableCollections(raw: unknown, before: unknown, after: unknown): void {
+  if (JSON.stringify(before) === JSON.stringify(after) || raw === undefined) return;
+  if (Array.isArray(raw)) {
+    if (!Array.isArray(before) || before.length !== raw.length) {
+      throw new Error(
+        `[AppSettings] Cannot edit an unsupported collection in ${APP_SETTINGS_KEY}.`,
+      );
+    }
+    return;
+  }
+  if (isStoredObject(before) && isStoredObject(after)) {
+    if (!isStoredObject(raw)) {
+      throw new Error(`[AppSettings] Cannot edit an unsupported object in ${APP_SETTINGS_KEY}.`);
+    }
+    for (const key of Object.keys(after)) {
+      assertEditableCollections(raw[key], before[key], after[key]);
+    }
+  }
 }

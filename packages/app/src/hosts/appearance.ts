@@ -20,7 +20,7 @@ export interface HostAppearance {
   badgeDisplay: HostBadgeDisplay | null;
 }
 
-export const HostAppearanceSchema: z.ZodType<HostAppearance> = z.strictObject({
+export const HostAppearanceSchema: z.ZodType<HostAppearance> = z.object({
   color: z.enum(["none", ...IDENTITY_COLOR_NAMES]),
   badgeDisplay: z.enum(["name", "icon", "hidden"]).nullable(),
 });

@@ -239,7 +239,10 @@ export const usePanelStore = create<PanelState>()(
     {
       name: "panel-state",
       version: 17,
-      storage: createValidatedPersistStorage(AsyncStorage, PanelPersistedStateSchema),
+      storage: createValidatedPersistStorage(AsyncStorage, PanelPersistedStateSchema, {
+        version: 17,
+        migrate: migratePanelState,
+      }),
       migrate: (persistedState, version) => migratePanelState(persistedState, version),
       partialize: (state) => ({
         desktop: state.desktop,

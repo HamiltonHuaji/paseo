@@ -40,6 +40,10 @@ The app checks for the capability and either runs the feature or tells the user 
 
 Existing functionality keeps working across versions because of the protocol contract. Gating a new feature never substitutes for that.
 
+History request efficiency and continued support for existing reads are governed by
+[SESSION-06](contracts/sessions.md#session-06--客户端节制请求读取保持兼容).
+Verify both with the [history performance scenarios](session-history-performance.md).
+
 ## Client capability ownership
 
 The client package advertises the protocol behavior it implements. Add each new capability to

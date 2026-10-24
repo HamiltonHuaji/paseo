@@ -35,6 +35,8 @@ export const NO_ACTIVITY_MESSAGE = "No activity to display.";
 interface FetchAgentTimelineItemsOptions {
   timeoutMs?: number;
   sinceTimestampMs?: number;
+  tail?: number;
+  filter?: string;
 }
 
 interface FollowModeInput {
@@ -54,6 +56,8 @@ export async function fetchAgentTimelineItems(
     agentId,
     timeoutMs: options?.timeoutMs,
     sinceTimestampMs: options?.sinceTimestampMs,
+    tail: options?.tail,
+    matches: options?.filter ? (item) => matchesFilter(item, options.filter!) : undefined,
   });
 }
 
@@ -200,8 +204,8 @@ export function createFollowTranscriptWriter(
 
 function parseTailCount(raw: string | undefined): number | undefined {
   if (raw === undefined) return undefined;
-  const parsed = Number.parseInt(raw, 10);
-  if (Number.isNaN(parsed) || parsed < 0) {
+  const parsed = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(parsed) || parsed < 0) {
     return undefined;
   }
   return parsed;
@@ -257,6 +261,14 @@ export async function runLogsCommand(
   }
 
   const sinceTimestampMs = parseSinceTimestamp(options.since);
+  const tailCount = parseTailCount(options.tail);
+  if (options.tail !== undefined && tailCount === undefined) {
+    throw {
+      code: "INVALID_TAIL",
+      message: `Invalid --tail value: ${options.tail}`,
+      details: "Use --tail <n> with a nonnegative integer.",
+    } satisfies CommandError;
+  }
   const client = await connectToDaemon({ target: options.daemonTarget });
 
   try {
@@ -271,12 +283,6 @@ export async function runLogsCommand(
 
     // For follow mode, we stream events continuously
     if (options.follow) {
-      if (options.tail !== undefined && parseTailCount(options.tail) === undefined) {
-        console.error(`Error: Invalid --tail value: ${options.tail}`);
-        console.error("Usage: --tail <n> (where n is >= 0)");
-        await client.close().catch(() => {});
-        process.exit(1);
-      }
       await runFollowMode({
         client,
         agentId: resolvedId,
@@ -289,19 +295,13 @@ export async function runLogsCommand(
     // Fetch timeline directly via cursor RPC.
     let timelineItems = await fetchAgentTimelineItems(client, resolvedId, {
       sinceTimestampMs,
+      tail: parseTailCount(options.tail),
+      filter: options.filter,
     });
 
     // Apply filter
     if (options.filter) {
       timelineItems = timelineItems.filter((item) => matchesFilter(item, options.filter));
-    }
-
-    const tailCount = parseTailCount(options.tail);
-    if (options.tail !== undefined && tailCount === undefined) {
-      console.error(`Error: Invalid --tail value: ${options.tail}`);
-      console.error("Usage: --tail <n> (where n is >= 0)");
-      await client.close().catch(() => {});
-      process.exit(1);
     }
 
     await client.close();
@@ -314,10 +314,10 @@ export async function runLogsCommand(
     const transcript = formatAgentActivityTranscript(timelineItems, tailCount);
     console.log(transcript);
   } catch (err) {
+    await client.close().catch(() => {});
     if (err && typeof err === "object" && "code" in err) throw err;
     const message = err instanceof Error ? err.message : String(err);
     console.error(`Error: Failed to get logs: ${message}`);
-    await client.close().catch(() => {});
     process.exit(1);
   }
 }
@@ -335,15 +335,12 @@ async function runFollowMode({
   const tailCount = parseTailCount(options.tail) ?? DEFAULT_FOLLOW_TAIL;
 
   // First, get existing timeline.
-  let existingItems: AgentTimelineItem[] = [];
-  try {
-    existingItems = await fetchAgentTimelineItems(client, agentId, {
-      timeoutMs: LIVE_HISTORY_FETCH_TIMEOUT_MS,
-      sinceTimestampMs,
-    });
-  } catch (error) {
-    console.warn("Warning: failed to fetch existing timeline", error);
-  }
+  let existingItems = await fetchAgentTimelineItems(client, agentId, {
+    timeoutMs: LIVE_HISTORY_FETCH_TIMEOUT_MS,
+    sinceTimestampMs,
+    tail: tailCount,
+    filter: options.filter,
+  });
 
   // Apply filter to existing items
   if (options.filter) {

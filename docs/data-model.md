@@ -30,12 +30,18 @@ Workspace archive runs lifecycle teardown from the exact `cwd` but removes only 
 `worktreeRoot` after its last active reference disappears. Worktree recovery recreates that backing
 checkout from `mainRepoRoot`, then restores the relative path from `worktreeRoot` to `cwd`.
 
-Paseo uses **file-based JSON persistence** instead of a traditional database. All data is validated at runtime with Zod schemas. Most stores write atomically (write to temp file, then rename); a few still use plain `writeFile` — see each section. There is no schema-versioning/migration framework — schemas rely on optional fields with defaults for forward compatibility, with a small amount of inline normalization in `persisted-config.ts` for legacy provider/speech entries.
+Daemon registries primarily use JSON files; Works and experiments also use SQLite. Client stores have their own versioned migrations. Keep each store’s version and ownership boundaries explicit: parsing a value for use does not authorize replacing its persisted representation with defaults or a partial projection.
 
 Paseo's server-side stores live under `$PASEO_HOME` (defaults to `~/.paseo`). Provider-native
 history has its own storage; see [Codex project storage](custom-providers.md#codex-project-storage).
 
 ## Store Surface Rules
+
+User data must survive failed validation and version drift. A failed read is not a missing
+document, and a rejected write does not remove the previous value. Preserve information a
+reader does not understand when editing other fields. The cross-version acceptance criteria
+are [DATA-01–05](contracts/data-integrity.md); identity, migrations and dependent cleanup
+belong to the same audit boundary.
 
 Store APIs own persistence atomicity and should not make services coordinate raw reads and writes. A good store method maps cleanly to one SQL statement or one SQL transaction, even when the current implementation is JSON files. If a caller needs a queue, lock, read-merge-write loop, or uniqueness race workaround, that behavior belongs behind the store surface.
 

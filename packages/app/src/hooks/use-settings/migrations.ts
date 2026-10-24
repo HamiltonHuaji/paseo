@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { readValidatedJson } from "@/storage/validated-storage";
+import { mergeStoredEdits } from "@/storage/persisted-value";
 import { APP_SETTINGS_KEY, SETTINGS_MIGRATIONS_KEY } from "./keys";
 import type { AppSettings, KeyValueStorage, PersistedAppSettings } from "./storage";
 
@@ -56,16 +57,33 @@ export async function migrateAppSettings(
 
   if (migrated !== settings) {
     const storedSidebarRowItems = stored?.sidebarRowItems ?? {};
+    const raw = await readValidatedJson(
+      storage,
+      APP_SETTINGS_KEY,
+      z.record(z.string(), z.unknown()),
+    );
     await storage.setItem(
       APP_SETTINGS_KEY,
-      JSON.stringify({
-        ...stored,
-        ...migrated,
-        sidebarRowItems: { ...storedSidebarRowItems, ...migrated.sidebarRowItems },
-      }),
+      JSON.stringify(
+        raw
+          ? mergeStoredEdits(raw, settings, migrated)
+          : {
+              ...stored,
+              ...migrated,
+              sidebarRowItems: { ...storedSidebarRowItems, ...migrated.sidebarRowItems },
+            },
+      ),
     );
   }
 
-  await storage.setItem(SETTINGS_MIGRATIONS_KEY, JSON.stringify({ applied: [...applied] }));
+  const rawMarker = await readValidatedJson(
+    storage,
+    SETTINGS_MIGRATIONS_KEY,
+    z.record(z.string(), z.unknown()),
+  );
+  await storage.setItem(
+    SETTINGS_MIGRATIONS_KEY,
+    JSON.stringify({ ...rawMarker, applied: [...applied] }),
+  );
   return migrated;
 }

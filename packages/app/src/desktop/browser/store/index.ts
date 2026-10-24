@@ -76,7 +76,7 @@ export const useBrowserStore = create<BrowserStoreState>()(
     }),
     {
       name: "workspace-browser-store",
-      storage: createValidatedPersistStorage(AsyncStorage, BrowserIndexStateSchema),
+      storage: createValidatedPersistStorage(AsyncStorage, BrowserIndexStateSchema, { version: 0 }),
       partialize: (state) => sanitizeBrowsersForPersist(state),
       merge: (persistedState, currentState) => ({
         ...currentState,

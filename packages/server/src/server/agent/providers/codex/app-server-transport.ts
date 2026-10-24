@@ -208,6 +208,7 @@ export class CodexAppServerClient {
   private unexpectedTerminationHandler: UnexpectedTerminationHandler | null = null;
   private nextId = 1;
   private disposed = false;
+  private disposal: Promise<void> | null = null;
   private stderrBuffer = "";
 
   constructor(
@@ -238,6 +239,7 @@ export class CodexAppServerClient {
       this.logger.error({ err }, "Codex app-server child process error");
       this.handleUnexpectedTermination(err);
     });
+    child.stdin.on("error", (error) => this.handleUnexpectedTermination(error));
 
     child.on("exit", (code, signal) => {
       const message =
@@ -268,13 +270,26 @@ export class CodexAppServerClient {
     const id = this.nextId++;
     const payload: JsonRpcRequest = { id, method, params };
     const serialized = JSON.stringify(payload);
-    this.child.stdin.write(`${serialized}\n`);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const fail = (error: Error) => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
         this.pending.delete(id);
-        reject(new Error(`Codex app-server request timed out for ${method}`));
-      }, timeoutMs);
+        clearTimeout(pending.timer);
+        pending.reject(error);
+      };
+      const timer = setTimeout(
+        () => fail(new Error(`Codex app-server request timed out for ${method}`)),
+        timeoutMs,
+      );
       this.pending.set(id, { resolve, reject, timer });
+      try {
+        this.child.stdin.write(`${serialized}\n`, (error) => {
+          if (error) fail(error);
+        });
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -294,7 +309,19 @@ export class CodexAppServerClient {
     this.child.stdin.write(`${JSON.stringify(payload)}\n`);
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal;
+    const disposal = this.disposeChild();
+    this.disposal = disposal;
+    void disposal.catch(() => {
+      // A failed termination remains retryable, while concurrent cancellation
+      // and reader cleanup share the same attempt to stop the child.
+      if (this.disposal === disposal) this.disposal = null;
+    });
+    return disposal;
+  }
+
+  private async disposeChild(): Promise<void> {
     this.disposed = true;
     this.unexpectedTerminationHandler = null;
     this.stdoutLineReader.close();

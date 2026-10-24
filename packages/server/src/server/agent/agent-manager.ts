@@ -6,6 +6,7 @@ import {
   sessionOperationMetadata,
 } from "./session-lineage.js";
 import { projectTimelineRows } from "./timeline-projection.js";
+import { PagedAgentHistory } from "./paged-agent-history.js";
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import type { PluginSessionOpenRequest } from "@getpaseo/plugin/server";
@@ -32,6 +33,7 @@ import type { TerminalManager } from "../../terminal/terminal-manager.js";
 
 import {
   getAgentStreamEventTurnId,
+  AgentHistoryPaginationUnavailableError,
   type AgentCapabilityFlags,
   type AgentClient,
   type AgentCreateSessionOptions,
@@ -817,6 +819,7 @@ export class AgentManager {
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
+  private readonly registeringAgentIds = new Map<string, number>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
@@ -931,8 +934,9 @@ export class AgentManager {
     this.mcpBaseUrl = url;
   }
 
-  prepareForShutdown(): void {
+  async prepareForShutdown(): Promise<void> {
     this.acceptingAgentRegistrations = false;
+    await Promise.all([...this.pagedHistories.values()].map((history) => history.close()));
   }
 
   setPaseoToolsEnabled(enabled: boolean): void {
@@ -1321,6 +1325,8 @@ export class AgentManager {
   }
 
   async getTimelineRows(id: string): Promise<AgentTimelineRow[]> {
+    const history = this.pagedHistories.get(id);
+    if (history?.isCurrent()) await history.fetch({ limit: 0 });
     this.requireLoadedTimeline(id);
     if (this.durableTimelineStore) {
       return projectTimelineRows({
@@ -1334,6 +1340,120 @@ export class AgentManager {
   fetchTimeline(id: string, options?: AgentTimelineFetchOptions): AgentTimelineFetchResult {
     this.requireLoadedTimeline(id);
     return this.timelineStore.fetch(id, options);
+  }
+
+  private readonly pagedHistories = new Map<string, PagedAgentHistory>();
+  private readonly unpagedHistoryProviders = new Set<AgentProvider>();
+
+  private pinAgentRegistration(id: string): () => void {
+    this.registeringAgentIds.set(id, (this.registeringAgentIds.get(id) ?? 0) + 1);
+    return () => {
+      const remaining = (this.registeringAgentIds.get(id) ?? 1) - 1;
+      if (remaining > 0) this.registeringAgentIds.set(id, remaining);
+      else this.registeringAgentIds.delete(id);
+    };
+  }
+
+  private async waitForRetiringHistory(id: string): Promise<void> {
+    // An eviction already in progress owns this epoch until its reader closes.
+    // Registration must not adopt the cache that eviction is about to remove.
+    const history = this.pagedHistories.get(id);
+    if (history?.closedForReads) await this.retirePagedHistory(id, history);
+  }
+
+  private async retirePagedHistory(id: string, history: PagedAgentHistory): Promise<void> {
+    await history.close();
+    if (this.pagedHistories.get(id) !== history) return;
+    if (history.isCurrent()) this.timelineStore.delete(id);
+    this.pagedHistories.delete(id);
+  }
+
+  private async trimPagedHistories(): Promise<void> {
+    for (const [id, history] of this.pagedHistories) {
+      if (this.pagedHistories.size < 8) break;
+      if (!history.idle || this.agents.has(id) || this.registeringAgentIds.has(id)) continue;
+      try {
+        await this.retirePagedHistory(id, history);
+      } catch (error) {
+        this.logger.warn({ err: error, agentId: id }, "Failed to retire history reader");
+        continue;
+      }
+    }
+  }
+
+  async fetchPersistedTimeline(
+    record: StoredAgentRecord,
+    options: AgentTimelineFetchOptions,
+    signal?: AbortSignal,
+  ): Promise<AgentTimelineFetchResult | null> {
+    this.assertAcceptingAgentRegistrations();
+    const handle = toAgentPersistenceHandle(this.getRegisteredProviderIds(), record.persistence);
+    if (!handle) return null;
+    const client = this.requireClient(handle.provider);
+    if (!client.openHistoryReader || this.unpagedHistoryProviders.has(handle.provider)) return null;
+    let history = this.pagedHistories.get(record.id);
+    if (history && (!history.isCurrent() || history.closedForReads)) {
+      await this.retirePagedHistory(record.id, history);
+      history = this.pagedHistories.get(record.id);
+    }
+    if (!history && this.timelineStore.has(record.id))
+      return this.timelineStore.fetch(record.id, options);
+    if (!history && this.agents.has(record.id)) return null;
+    if (!history) {
+      await this.trimPagedHistories();
+      this.assertAcceptingAgentRegistrations();
+      signal?.throwIfAborted();
+      history = this.pagedHistories.get(record.id);
+      if (!history && this.timelineStore.has(record.id))
+        return this.timelineStore.fetch(record.id, options);
+      if (!history && this.agents.has(record.id)) return null;
+    }
+    if (!history) {
+      const open = async (readerSignal: AbortSignal) => {
+        const config = {
+          ...handle.metadata,
+          ...buildConfigOverrides(record),
+          provider: handle.provider,
+        } as AgentSessionConfig;
+        const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
+          config,
+          record.id,
+          { purpose: "history" },
+        );
+        const context = await this.buildLaunchContext(
+          record.id,
+          client,
+          storedConfig.cwd,
+          paseoToolPolicy,
+          undefined,
+          {
+            reason: "resume",
+            purpose: "history",
+            workspaceId: record.workspaceId ?? null,
+          },
+        );
+        readerSignal.throwIfAborted();
+        return client.openHistoryReader!(
+          handle,
+          this.resolveProviderLaunchConfig(launchConfig, context),
+          context,
+          readerSignal,
+        );
+      };
+      history = new PagedAgentHistory(record.id, this.timelineStore, open, record.createdAt);
+      this.pagedHistories.set(record.id, history);
+    }
+    // Move the accessed reader to the end of the idle eviction order.
+    this.pagedHistories.delete(record.id);
+    this.pagedHistories.set(record.id, history);
+    try {
+      return await history.fetch(options, signal);
+    } catch (error) {
+      if (!(error instanceof AgentHistoryPaginationUnavailableError)) throw error;
+      this.unpagedHistoryProviders.add(handle.provider);
+      await this.retirePagedHistory(record.id, history);
+      return null;
+    }
   }
 
   listProviderSubagents(parentAgentId: string): ProviderSubagentDescriptor[] {
@@ -4137,12 +4257,14 @@ export class AgentManager {
     },
   ): Promise<ManagedAgent> {
     let registered = false;
+    let releaseRegistration = () => {};
     try {
       this.assertAcceptingAgentRegistrations();
       const resolvedAgentId = validateAgentId(agentId, "registerSession");
       if (this.agents.has(resolvedAgentId)) {
         throw new Error(`Agent with id ${resolvedAgentId} already exists`);
       }
+      releaseRegistration = this.pinAgentRegistration(resolvedAgentId);
       const initialPersistedTitle = await this.resolveInitialPersistedTitle(
         resolvedAgentId,
         config,
@@ -4222,6 +4344,8 @@ export class AgentManager {
         await this.closeUnregisteredSession(session);
       }
       throw error;
+    } finally {
+      releaseRegistration();
     }
   }
 
@@ -4274,6 +4398,7 @@ export class AgentManager {
       | undefined;
   }): Promise<{ durableTimelineHasRows: boolean }> {
     const { agentId, now, options } = params;
+    await this.waitForRetiringHistory(agentId);
     if (options?.persistence?.metadata?.rewindPending) {
       await this.deleteCommittedTimeline(agentId);
       this.timelineStore.delete(agentId);

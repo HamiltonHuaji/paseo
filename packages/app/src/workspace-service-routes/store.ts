@@ -31,7 +31,9 @@ export function createWorkspaceServiceRoutePreferencesStore(storage: StateStorag
       {
         name: "workspace-service-route-preferences",
         version: 1,
-        storage: createValidatedPersistStorage(storage, WorkspaceServiceRoutePreferencesSchema),
+        storage: createValidatedPersistStorage(storage, WorkspaceServiceRoutePreferencesSchema, {
+          version: 1,
+        }),
         partialize: (state) => ({ byServerId: state.byServerId }),
         merge: (persistedState, currentState) => {
           const result = WorkspaceServiceRoutePreferencesSchema.safeParse(persistedState);

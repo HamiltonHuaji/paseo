@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mergeStoredEdits, parseStoredValue } from "@/storage/persisted-value";
 
 export interface ActiveWorkspaceSelection {
   serverId: string;
@@ -23,22 +24,13 @@ function normalizeWorkspaceSelection(input: unknown): ActiveWorkspaceSelection |
   return result.success ? result.data : null;
 }
 
-function parseStoredWorkspaceSelection(stored: string | null): ActiveWorkspaceSelection | null {
-  if (!stored) {
-    return null;
-  }
-  try {
-    return normalizeWorkspaceSelection(JSON.parse(stored));
-  } catch {
-    return null;
-  }
-}
-
 export function createLastWorkspaceSelectionStore(storage: LastWorkspaceSelectionStorage) {
   let selection: ActiveWorkspaceSelection | null = null;
   let hydrated = false;
   let hydrationPromise: Promise<void> | null = null;
   let revision = 0;
+  let writable = false;
+  let snapshot: { raw: unknown; view: ActiveWorkspaceSelection } | null = null;
   const listeners = new Set<() => void>();
 
   function notifyListeners() {
@@ -56,13 +48,33 @@ export function createLastWorkspaceSelectionStore(storage: LastWorkspaceSelectio
       selection?.serverId === normalized.serverId &&
       selection.workspaceId === normalized.workspaceId
     ) {
+      persistSelection();
       return;
     }
     selection = normalized;
     revision += 1;
     notifyListeners();
+    persistSelection();
+  }
+
+  function persistSelection(): void {
+    if (!selection) return;
+    if (!writable) {
+      if (hydrated) void hydrate();
+      return;
+    }
     // workspaceId is opaque; do not parse this persisted selection back into a path.
-    void storage.write(JSON.stringify(normalized)).catch(() => {});
+    const raw = snapshot ? mergeStoredEdits(snapshot.raw, snapshot.view, selection) : selection;
+    const view = selection;
+    void storage.write(JSON.stringify(raw)).then(
+      () => {
+        snapshot = { raw, view };
+        return undefined;
+      },
+      () => {
+        console.warn(`Cannot save ${LAST_WORKSPACE_SELECTION_STORAGE_KEY}; previous data retained`);
+      },
+    );
   }
 
   function hydrate(): Promise<void> {
@@ -70,23 +82,34 @@ export function createLastWorkspaceSelectionStore(storage: LastWorkspaceSelectio
       return hydrationPromise;
     }
     const hydrationRevision = revision;
+    const hasLocalSelection = revision > 0;
     hydrationPromise = storage
       .read()
       .then((stored) => {
-        if (revision === hydrationRevision) {
-          selection = parseStoredWorkspaceSelection(stored);
-          if (stored !== null && selection === null) {
-            void storage.clear().catch(() => {});
-          }
-        }
+        const raw: unknown = stored === null ? null : JSON.parse(stored);
+        const restored =
+          stored === null
+            ? null
+            : parseStoredValue(
+                ActiveWorkspaceSelectionSchema,
+                raw,
+                LAST_WORKSPACE_SELECTION_STORAGE_KEY,
+              );
+        snapshot = restored ? { raw, view: restored } : null;
+        writable = true;
+        if (revision === hydrationRevision && !hasLocalSelection) {
+          selection = restored;
+        } else persistSelection();
         return undefined;
       })
       .catch(() => {
-        if (revision === hydrationRevision) {
+        if (revision === hydrationRevision && !hasLocalSelection) {
           selection = null;
         }
+        console.warn(`Cannot read ${LAST_WORKSPACE_SELECTION_STORAGE_KEY}; previous data retained`);
       })
       .finally(() => {
+        if (!writable) hydrationPromise = null;
         hydrated = true;
         notifyListeners();
       });

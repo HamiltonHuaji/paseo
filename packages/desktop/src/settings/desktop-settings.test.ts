@@ -342,7 +342,7 @@ describe("desktop-settings", () => {
     expect(persisted.settings.releaseChannel).toBe("beta");
   });
 
-  it("replaces an unusable modelled value on the write path", async () => {
+  it("retains an unrecognized setting during an unrelated patch", async () => {
     const userDataPath = await createTempUserDataDir();
     directories.add(userDataPath);
     await writeFile(
@@ -360,7 +360,7 @@ describe("desktop-settings", () => {
       settings: { releaseChannel: string; tray: unknown };
     };
 
-    expect(persisted.settings.releaseChannel).toBe("stable");
+    expect(persisted.settings.releaseChannel).toBe("nightly");
     expect(persisted.settings.tray).toEqual({ enabled: true });
   });
 });

@@ -4,6 +4,8 @@ import {
   SkillRepositorySubscriptionSchema,
   type SkillRepositorySubscription,
 } from "@getpaseo/protocol/skill-repositories";
+import { readValidatedJson } from "@/storage/validated-storage";
+import { isStoredObject, mergeStoredEdits, parseStoredValue } from "@/storage/persisted-value";
 
 const STORAGE_KEY = "@paseo:skill-repository-plan-v1";
 
@@ -77,16 +79,63 @@ function assertRemoteUrl(remoteUrl: string): void {
 
 async function readState(): Promise<SkillRepositoryLocalState> {
   if (cache) return structuredClone(cache);
-  const raw = await AsyncStorage.getItem(STORAGE_KEY);
-  cache = raw ? SkillRepositoryLocalStateSchema.parse(JSON.parse(raw)) : emptyState();
+  cache =
+    (await readValidatedJson(AsyncStorage, STORAGE_KEY, SkillRepositoryLocalStateSchema)) ??
+    emptyState();
   return structuredClone(cache);
 }
 
 async function writeState(state: SkillRepositoryLocalState): Promise<void> {
   const next = SkillRepositoryLocalStateSchema.parse(state);
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  const raw = await readValidatedJson(AsyncStorage, STORAGE_KEY, z.record(z.string(), z.unknown()));
+  let saved: unknown = next;
+  if (raw !== null) {
+    const before = parseStoredValue(SkillRepositoryLocalStateSchema, raw, STORAGE_KEY);
+    const merged = mergeStoredEdits(raw, before, next);
+    if (!isStoredObject(merged) || !isStoredObject(merged.plan) || !isStoredObject(raw.plan)) {
+      throw new Error(`Cannot update ${STORAGE_KEY}; original data was retained`);
+    }
+    // These arrays identify rows by repository/host, not by array position.
+    merged.plan.repositories = mergeRows(
+      raw.plan.repositories,
+      before.plan.repositories,
+      next.plan.repositories,
+      (row) => row.repositoryId,
+    );
+    merged.plan.members = mergeRows(
+      raw.plan.members,
+      before.plan.members,
+      next.plan.members,
+      (row) => JSON.stringify([row.serverId, row.repositoryId]),
+    );
+    merged.executors = mergeRows(
+      raw.executors,
+      before.executors,
+      next.executors,
+      (row) => row.repositoryId,
+    );
+    merged.pending = mergeRows(raw.pending, before.pending, next.pending, (row) =>
+      JSON.stringify([row.serverId, row.repositoryId]),
+    );
+    saved = merged;
+  }
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
   cache = next;
   for (const listener of listeners) listener();
+}
+
+function mergeRows<Row>(
+  raw: unknown,
+  before: Row[],
+  after: Row[],
+  key: (row: Row) => string,
+): unknown[] {
+  return after.map((row) => {
+    const index = before.findIndex((previous) => key(previous) === key(row));
+    return index < 0 || !Array.isArray(raw)
+      ? row
+      : mergeStoredEdits(raw[index], before[index], row);
+  });
 }
 
 function mutate<T>(run: () => Promise<T>): Promise<T> {

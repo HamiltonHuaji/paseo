@@ -75,13 +75,11 @@ const MigrationsSchema = z
     daemonStopOnQuitDefaultApplied: false,
   }));
 
-const PersistedDocumentSchema = z
-  .looseObject({
-    version: z.literal(1).catch(1),
-    settings: DesktopSettingsSchema,
-    migrations: MigrationsSchema,
-  })
-  .catch(() => buildDefaultDocument());
+const PersistedDocumentSchema = z.looseObject({
+  version: z.literal(1).default(1),
+  settings: DesktopSettingsSchema,
+  migrations: MigrationsSchema,
+});
 
 type StoredDesktopSettings = z.output<typeof DesktopSettingsSchema>;
 type PersistedDesktopSettingsDocument = z.output<typeof PersistedDocumentSchema>;
@@ -206,8 +204,9 @@ function hasLegacyRendererOwnedPatch(patch: DesktopSettingsPatch): boolean {
   return patch.releaseChannel !== undefined || patch.daemon?.manageBuiltInDaemon !== undefined;
 }
 
-function coerceDocument(input: unknown): PersistedDesktopSettingsDocument {
-  const document = PersistedDocumentSchema.parse(input);
+function coerceDocument(
+  document: PersistedDesktopSettingsDocument,
+): PersistedDesktopSettingsDocument {
   if (document.migrations.daemonStopOnQuitDefaultApplied) {
     return document;
   }
@@ -225,6 +224,23 @@ function coerceDocument(input: unknown): PersistedDesktopSettingsDocument {
   };
 }
 
+function mergeDocumentEdits(raw: unknown, before: unknown, after: unknown): unknown {
+  if (Object.is(before, after)) return raw;
+  if (!isRecord(raw) || !isRecord(before) || !isRecord(after)) return after;
+  const next = { ...raw };
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (!Object.hasOwn(after, key)) delete next[key];
+    else
+      Object.defineProperty(next, key, {
+        value: mergeDocumentEdits(raw[key], before[key], after[key]),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+  }
+  return next;
+}
+
 export function createDesktopSettingsStore({
   userDataPath,
 }: {
@@ -232,15 +248,43 @@ export function createDesktopSettingsStore({
 }): DesktopSettingsStore {
   const filePath = path.join(userDataPath, DESKTOP_SETTINGS_FILENAME);
   let cachedDocument: PersistedDesktopSettingsDocument | null = null;
+  let snapshot: { raw: unknown; view: PersistedDesktopSettingsDocument } | null = null;
   let persistQueue: Promise<void> = Promise.resolve();
 
-  async function persistDocument(document: PersistedDesktopSettingsDocument): Promise<void> {
+  async function persistDocument(
+    document: PersistedDesktopSettingsDocument,
+    explicitPatch?: DesktopSettingsPatch,
+  ): Promise<void> {
     const write = async () => {
+      let raw = snapshot ? mergeDocumentEdits(snapshot.raw, snapshot.view, document) : document;
+      if (explicitPatch && isRecord(raw)) {
+        const settings = isRecord(raw.settings) ? raw.settings : {};
+        raw = {
+          ...raw,
+          settings: {
+            ...settings,
+            ...explicitPatch,
+            ...(explicitPatch.notifications && {
+              notifications: {
+                ...(isRecord(settings.notifications) ? settings.notifications : {}),
+                ...explicitPatch.notifications,
+              },
+            }),
+            ...(explicitPatch.daemon && {
+              daemon: {
+                ...(isRecord(settings.daemon) ? settings.daemon : {}),
+                ...explicitPatch.daemon,
+              },
+            }),
+          },
+        };
+      }
       await mkdir(userDataPath, { recursive: true });
       const tempFilePath = `${filePath}.tmp.${process.pid}.${randomUUID()}`;
-      await writeFile(tempFilePath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+      await writeFile(tempFilePath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
       await rename(tempFilePath, filePath);
       cachedDocument = document;
+      snapshot = { raw, view: document };
     };
     const queued = persistQueue.then(write, write);
     persistQueue = queued.catch(() => undefined);
@@ -263,19 +307,35 @@ export function createDesktopSettingsStore({
       await persistDocument(document);
       return document;
     }
-    const document = coerceDocument(JSON.parse(raw));
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        "Cannot read desktop-settings.json: invalid JSON; original data was retained",
+      );
+    }
+    if (!isRecord(decoded)) throw new Error("Invalid desktop-settings.json document");
+    for (const container of [decoded.settings, decoded.migrations]) {
+      if (container !== undefined && !isRecord(container)) {
+        throw new Error("Unsupported desktop-settings.json document; original data was retained");
+      }
+    }
+    if (isRecord(decoded.settings)) {
+      for (const container of [decoded.settings.notifications, decoded.settings.daemon]) {
+        if (container !== undefined && !isRecord(container)) {
+          throw new Error("Unsupported desktop-settings.json settings; original data was retained");
+        }
+      }
+    }
+    const parsed = PersistedDocumentSchema.safeParse(decoded);
+    if (!parsed.success) {
+      throw new Error("Unsupported desktop-settings.json version; original data was retained");
+    }
+    const document = coerceDocument(parsed.data);
+    snapshot = { raw: decoded, view: parsed.data };
     cachedDocument = document;
     return document;
-  }
-
-  async function initializeLegacyRendererMigration(): Promise<PersistedDesktopSettingsDocument> {
-    try {
-      return await loadDocument();
-    } catch {
-      const document = buildDefaultDocument();
-      await persistDocument(document);
-      return document;
-    }
   }
 
   return {
@@ -288,37 +348,41 @@ export function createDesktopSettingsStore({
       const current = await loadDocument();
       const coercedPatch = coerceDesktopSettingsPatch(patch);
       const next = mergeDesktopSettings(current.settings, coercedPatch);
-      await persistDocument({
-        ...current,
-        settings: next,
-        migrations: {
-          ...current.migrations,
-          legacyRendererSettingsImported:
-            current.migrations.legacyRendererSettingsImported ||
-            hasLegacyRendererOwnedPatch(coercedPatch),
+      await persistDocument(
+        {
+          ...current,
+          settings: next,
+          migrations: {
+            ...current.migrations,
+            legacyRendererSettingsImported:
+              current.migrations.legacyRendererSettingsImported ||
+              hasLegacyRendererOwnedPatch(coercedPatch),
+          },
         },
-      });
+        coercedPatch,
+      );
       return toDesktopSettings(next);
     },
 
     async migrateLegacyRendererSettings(legacySettings: unknown): Promise<DesktopSettings> {
-      const current = await initializeLegacyRendererMigration();
+      const current = await loadDocument();
       if (current.migrations.legacyRendererSettingsImported) {
         return toDesktopSettings(current.settings);
       }
 
-      const next = mergeDesktopSettings(
-        current.settings,
-        pickDesktopSettingsFromLegacyRendererSettings(legacySettings),
-      );
-      await persistDocument({
-        ...current,
-        settings: next,
-        migrations: {
-          ...current.migrations,
-          legacyRendererSettingsImported: true,
+      const patch = pickDesktopSettingsFromLegacyRendererSettings(legacySettings);
+      const next = mergeDesktopSettings(current.settings, patch);
+      await persistDocument(
+        {
+          ...current,
+          settings: next,
+          migrations: {
+            ...current.migrations,
+            legacyRendererSettingsImported: true,
+          },
         },
-      });
+        patch,
+      );
       return toDesktopSettings(next);
     },
   };
