@@ -8,7 +8,7 @@ Build and verify it with:
 
 ```bash
 npm run build:fork-daemon-package
-npm run verify:fork-daemon-package
+npm run check:fork-daemon-dependencies
 ```
 
 The output is `artifacts/fork-daemon/paseo-fork.tgz`. Install it with:
@@ -23,8 +23,16 @@ npm prefix cannot satisfy a missing fork dependency.
 
 The outer package owns required peer dependencies, including peers of bundled third-party
 packages. Leaving those peer declarations in a nested bundled manifest can make npm finish
-successfully with an empty dependency directory. Check an actual installed CLI and daemon when
-changing this packaging; a successful install command alone does not prove the package can load.
+successfully with an empty dependency directory. The fixed release check validates the final
+tarball's bundled dependencies and runtime module references; the packer checks peer version
+coverage before removing nested declarations. External module exports resolve against the build's
+installed dependencies only after checking the tarball explicitly declares them.
+
+This check uses static module tracing and does not launch the CLI, daemon, providers, or browsers.
+It reports dependency failures only, without package-style or unused-code suggestions. The existing
+`verify:fork-daemon-package` installation probe remains available for explicitly requested diagnosis;
+it is not part of the fixed release checks. Automatic scope belongs to
+[RELEASE-02](contracts/distribution.md#release-02--验证范围与发行解耦).
 
 Agent terminals and managed Codex tools use the CLI from the running distribution. Build the CLI
 before starting Codex from a source checkout; a missing source or bundled CLI must not resolve to an

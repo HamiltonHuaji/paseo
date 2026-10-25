@@ -101,6 +101,7 @@
     "build:fork-daemon-package": "npm run build:server && npm run build:daemon-web-ui && node scripts/pack-fork-daemon.mjs",
     "pack:fork-daemon-package": "node scripts/pack-fork-daemon.mjs",
     "verify:fork-daemon-package": "node scripts/verify-fork-daemon-package.mjs artifacts/fork-daemon/paseo-fork.tgz",
+    "check:fork-daemon-dependencies": "node scripts/check-fork-daemon-dependencies.mjs",
     "release:fork:check": "npm run format:check && npm run lint && npm run typecheck"
   },
   "devDependencies": {
@@ -110,6 +111,7 @@
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "44.2.0",
+    "esbuild": "^0.27.3",
     "get-port-cli": "^3.0.0",
     "js-yaml": "^4.1.1",
     "knip": "^5.82.1",
@@ -120,6 +122,8 @@
     "patch-package": "^8.0.1",
     "playwright": "^1.56.1",
     "react-dom": "19.2.3",
+    "semver": "^7.7.4",
+    "tar": "^7.5.22",
     "typescript": "^5.9.3",
     "ws": "^8.20.0"
   },

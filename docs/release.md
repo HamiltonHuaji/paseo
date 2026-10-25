@@ -59,6 +59,10 @@ not install browsers or run test suites. Existing fast Node unit tests may be re
 the agreed scope; do not restore upstream test matrices during a baseline bump. Broader validation
 requires a separate explicit user request, and a one-time request does not authorize a recurring job.
 
+The daemon release workflow additionally runs `npm run check:fork-daemon-dependencies` on the
+built tarball before upload. This fixed artifact check covers dependencies only; it adds no general
+lint rules or functional tests. See [daemon packaging](fork-daemon-distribution.md).
+
 Do not run `npm run release:patch`, `release:minor`, `release:promote`, or any npm publish command.
 Those commands belong to upstream Paseo and are intentionally absent from the overlay root
 package.

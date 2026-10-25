@@ -91,6 +91,9 @@ jobs:
       - name: Build daemon package
         run: npm run build:fork-daemon-package
 
+      - name: Check daemon package dependencies
+        run: npm run check:fork-daemon-dependencies
+
       - name: Upload daemon package to release
         if: env.SHOULD_PUBLISH == 'true'
         env:

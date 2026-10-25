@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { readForkBuildMetadata } from "./fork-version-utils.mjs";
+import { checkBundledPeers } from "./check-fork-daemon-dependencies.mjs";
 
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
@@ -174,8 +175,10 @@ async function copyPackedPackage(
   await copyRawPackedPackage(packageDirectory, targetDirectory);
 
   const packageJsonPath = path.join(targetDirectory, "package.json");
+  const originalManifest = await readJson(packageJsonPath);
+  const distributionManifest = await readJson(path.join(STAGE_DIRECTORY, "package.json"));
   const bundledManifest = buildBundledInternalPackageManifest(
-    await readJson(packageJsonPath),
+    originalManifest,
     distributionIdentity,
     nestedDependencies,
   );
@@ -190,15 +193,7 @@ async function copyPackedPackage(
     const nestedManifest = await readJson(nestedManifestPath);
     // A bundled external package has the same peer-resolution problem as a
     // bundled workspace. Required peers must remain owned by the distribution.
-    const distributionManifest = await readJson(path.join(STAGE_DIRECTORY, "package.json"));
-    for (const peer of Object.keys(nestedManifest.peerDependencies ?? {})) {
-      if (
-        !nestedManifest.peerDependenciesMeta?.[peer]?.optional &&
-        !distributionManifest.dependencies[peer]
-      ) {
-        throw new Error(`Bundled ${name} requires an undeclared distribution peer: ${peer}`);
-      }
-    }
+    checkBundledPeers(nestedManifest, distributionManifest.dependencies);
     delete nestedManifest.peerDependencies;
     delete nestedManifest.peerDependenciesMeta;
     await writeFile(nestedManifestPath, `${JSON.stringify(nestedManifest, null, 2)}\n`);
