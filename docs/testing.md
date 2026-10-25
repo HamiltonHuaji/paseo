@@ -114,11 +114,16 @@ The harness launches the packaged app with isolated user data and daemon state, 
 - the renderer starts a fresh desktop-managed daemon through the normal startup bootstrap;
 - the bundled CLI can query that daemon and run a terminal command.
 
-The Desktop Packages workflow runs the Linux x64 smoke under Xvfb on main pushes and on pull requests that change `packages/desktop/**`, `nix/**`, or the workflow itself. The Linux job is pinned to Ubuntu 24.04 and runs twice: with AppArmor user namespace restrictions enabled, then with user namespaces available. It installs the real `.deb`, launches the real AppImage via `--appimage-extract-and-run`, and launches the extracted tar archive. It also replaces the Debian installation with the generated RPM through `rpm --install --nodeps` and checks its sandboxed launch under restrictions. Ubuntu supplies the runtime libraries under Debian package names, so this verifies the RPM payload and postinstall rather than Fedora dependency resolution. Each launch verifies the reported sandbox decision; enabled renderers must also have `NoNewPrivs: 1` and `Seccomp: 2` in `/proc`. The desktop release matrix retains its host-native smokes. Linux release builds stay on Ubuntu 22.04 to preserve their native-library baseline; the restricted-host regression runs on Ubuntu 24.04 after merge.
+Run packaged smoke only within an explicitly requested validation scope; it is not part of fork
+release or push automation. For sandbox verification, retain both AppArmor-restricted and unrestricted
+Linux cases and verify the reported sandbox decision. Do not report installer or platform coverage
+from a source build. Automatic verification boundaries belong to
+[RELEASE-02](contracts/distribution.md#release-02--验证范围与发行解耦).
 
 Never repair `chrome-sandbox` in the smoke harness. The old unpacked smoke set its mode to 4755 and concealed a broken package installer. Run installer tests as root and launch tests as an ordinary user: a root-run namespace probe does not reproduce Ubuntu's AppArmor policy for desktop users. Preserve both restricted and unrestricted cases; either one alone permits another sandbox regression.
 
-Smoke jobs upload renderer screenshots and desktop/daemon diagnostics, including successful Linux sandbox evidence.
+Retain renderer and desktop/daemon diagnostics from an explicitly requested smoke run with that run's
+outputs, including successful Linux sandbox evidence.
 
 To exercise the smoke locally on Linux:
 
@@ -187,8 +192,8 @@ Test suites in this repo are heavy. Running them in bulk freezes the machine, es
 - Never run `npm run test` for a whole workspace unless asked.
 - For a broad sweep, redirect to a file and read it after: `npx vitest run <path> --bail=1 > /tmp/test-output.txt 2>&1`
 - Never re-run a suite another agent already reported green.
-- For full-suite confidence, push to CI and check GitHub Actions.
-- Never run the full Playwright E2E suite locally — defer whole-suite verification to CI. Targeted Playwright specs are allowed when you changed or need to prove that specific flow.
+- A push does not request a full-suite run. Run broader validation only within an explicitly requested scope; keep one-time execution materials outside the repository.
+- Never run the full Playwright E2E suite locally. Use the smallest authorized validation that covers the relevant behavior.
 - App Playwright shares one warmed Metro server per run and gives every Playwright worker its own isolated daemon and `PASEO_HOME`. Spec files run concurrently without exposing one file's projects, agents, terminals, history, or provider configuration to another worker; tests within a file remain together so file-level setup is not repeated.
 - Playwright specs that exercise only the daemon import `daemonTest` from the shared fixtures so they do not create a browser context or page.
 - Helpers that create projects or workspaces own those records until cleanup. Their clients remove the daemon project on close, and an automatic fixture fails any test that still leaks a project record. Deleting only the temporary directory is not cleanup. Agent helpers pass the intended `workspaceId` through to agent creation; they never infer ownership from `cwd`.
@@ -198,13 +203,13 @@ Test suites in this repo are heavy. Running them in bulk freezes the machine, es
 - Teardown kills the process tree, because a Windows signal reaches only the direct child and leaves forked workers holding the listening port.
 - The `asdf`-backed local Elixir relay stays POSIX-only, so the `relay-deployment` Playwright project is unavailable on Windows.
 
-## Pull-request test routing
+## Fork verification
 
-PR checks are routed by the behavior each suite proves, using `.github/ci-paths.yml`. A package does not inherit every test suite of its runtime consumers: app changes do not run CLI or Electron-wrapper tests, and protocol changes do not run every package that imports the protocol. Cross-package static compatibility belongs to `typecheck`; full integration coverage runs after merge on main and in manual CI runs.
-
-Required matrix legs are declared as statically named jobs. Their shared steps use YAML anchors, while job-level `if` conditions let GitHub report an unaffected leg as genuinely skipped without allocating a runner or losing the exact required-check name.
-
-The smallest meaningful contract wins over package ownership. Tiny structural invariants such as daemon launch supervision run unconditionally in the always-running routing job instead of maintaining a transitive file list; this check reads source entrypoints and builds no product. Routed integration contracts use stable domain directories. Browser changes select the required Playwright shards; desktop changes select the existing required desktop jobs, with renderer and real-Electron coverage together in the Ubuntu leg. Packaging runs on main in the Desktop Packages, Docker, and Nix workflows. CLI-side Hub changes select one focused test inside the existing required server jobs. The CLI source suite runs once in the third required CLI job; only the separate local E2E runner is sharded, and that runner owns its dependency build. Repository scripts and the shared Vitest configuration run every PR contract because they are cross-cutting toolchain inputs.
+Use [RELEASE-02](contracts/distribution.md#release-02--验证范围与发行解耦) for automatic checks and
+[baseline review](contracts/baseline-review.md#记录格式) when reusing upstream tests. A failing assertion
+can expose an obsolete expectation; compare the observed behavior with the owning fork contract
+before changing product behavior. Keep applicable traversal, lifecycle, and failure checks when
+correcting a conflicting assertion.
 
 ## Agent authentication in tests
 
@@ -220,7 +225,8 @@ Use the test as your debugging ground:
 4. Confirm each assumption with actual output
 5. Remove logging when done
 
-The test output is the source of truth, not your reading of the code.
+Use the output to establish what happened. Evaluate it against the fork contract; a cached assertion
+does not define the requirement.
 
 ## Design for testability
 

@@ -439,7 +439,7 @@ describe("file explorer", () => {
     }
   });
 
-  test("accepts symlinks to double-dot names inside the workspace and rejects outside targets", async () => {
+  test("lists and reads explicitly linked resources inside and outside the workspace", async () => {
     const directory = tmpCwd();
     const cwd = path.join(directory, "workspace");
     const outside = path.join(directory, "workspace-sibling");
@@ -456,18 +456,22 @@ describe("file explorer", () => {
       expect(listing.entries.map((entry) => entry.path).sort()).toEqual([
         "..drafts",
         "inside-link",
+        "outside-link",
       ]);
       const file = await ctx.client.readFile(cwd, "inside-link/notes.txt");
       expect(file.path).toBe("inside-link/notes.txt");
       expect(new TextDecoder().decode(file.bytes)).toBe("inside payload\n");
-      await expect(ctx.client.readFile(cwd, "outside-link/secret.txt")).rejects.toThrow(
-        "Access outside of workspace is not allowed",
-      );
+      const externalFile = await ctx.client.readFile(cwd, "outside-link/secret.txt");
+      expect(externalFile.path).toBe("outside-link/secret.txt");
+      expect(new TextDecoder().decode(externalFile.bytes)).toBe("outside payload\n");
       const download = await ctx.client.requestDownloadToken(cwd, "outside-link/secret.txt");
-      expect(download).toMatchObject({
-        token: null,
-        error: "Access outside of workspace is not allowed",
-      });
+      expect(download.error).toBeNull();
+      expect(download.token).toEqual(expect.any(String));
+      const response = await fetch(
+        `http://127.0.0.1:${ctx.daemon.port}/api/files/download?token=${download.token}`,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("outside payload\n");
       expect(readdirSync(outside)).toEqual(["secret.txt"]);
     } finally {
       rmSync(directory, { recursive: true, force: true });

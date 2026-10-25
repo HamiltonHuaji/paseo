@@ -149,7 +149,7 @@ and updating `next`, integrating it after a release, and releasing a hotfix from
   - Never run `npm run test` for an entire workspace unless explicitly asked.
   - If you must run a broad suite, pipe output to a file and read it afterward: `npx vitest run <file> --bail=1 > /tmp/test-output.txt 2>&1` then read the file.
   - Never re-run a test suite that another agent already ran and reported green — trust the result.
-  - For full suite verification, push to CI and check GitHub Actions instead.
+  - A push runs only fork Quick Checks. Broader validation requires an explicit task scope; follow [RELEASE-02](docs/contracts/distribution.md#release-02--验证范围与发行解耦).
 - Add tests to existing suites and reuse their npm scripts and CI jobs instead of creating feature-specific ones.
 - **Always run typecheck and lint after every change.**
 - **Build workspace packages before diagnosing cross-package type errors.** This repo consumes generated declarations across workspaces. If typecheck fails in a package that depends on another workspace, rebuild the owning stack first so `dist` declarations are current:

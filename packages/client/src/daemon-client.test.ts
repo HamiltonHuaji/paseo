@@ -1081,6 +1081,12 @@ test("advertises client capabilities in hello", async () => {
       workspace_setup_blocked: true,
       workspace_setup_observation: true,
       hello_rejection: true,
+      agent_conversation_fork: true,
+      tunnel_stream_v2: true,
+      tunnel_stream_v3: true,
+      viewer_http_flow_control: true,
+      viewer_http_framing_v2: true,
+      viewer_http_proxy: true,
       browser_host: {
         supportedCommands: ["list_tabs"],
         hostKind: "desktop app",
@@ -1659,7 +1665,7 @@ test("honors explicit fetchAgentTimeline timeout below the session RPC default",
     requestId: "req-timeline-1",
     agentId: "agent-1",
     direction: "tail",
-    limit: 0,
+    limit: 200,
     projection: "projected",
   });
 

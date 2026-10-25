@@ -14,7 +14,7 @@
 | [Skills](skills.md)                     | 用户目录所有权、仓库同步、客户端凭证与多设备订阅                    |
 | [Canvas](canvas.md)                     | 关系可读性、空间利用、布局连续性和密集图验收                        |
 | [客户端](clients.md)                    | 文件、Markdown、输入、tabs 与 heartbeat；VS Code 已退役             |
-| [发行](distribution.md)                 | fork 身份、更新、共存、版本漂移与不可变产物                         |
+| [发行](distribution.md)                 | fork 身份、更新、共存、版本漂移、不可变产物与验证范围               |
 | [数据完整性](data-integrity.md)         | 读取、编辑、迁移与清理中的用户数据保留，未知格式与失败边界          |
 | [升级验收记录](baseline-review.md)      | 每次 bump 的记录格式、初始证据与已知缺口                            |
 

@@ -53,10 +53,11 @@ artifact for testing.
 4. Show the release commit, fork version, exact official base, revision, and artifact set to the user.
 5. Wait for explicit publish authorization. Keep all preparation local until then.
 
-Do not add or run Playwright, browser, E2E, integration, packaged smoke, or other test suites while
-preparing or publishing a release. Quick Checks may run existing Node unit tests independently,
-but their status never gates a fork release. Run broader tests only after a separate explicit user
-request.
+Keep automatic verification within [RELEASE-02](contracts/distribution.md#release-02--验证范围与发行解耦).
+Quick Checks runs formatting, lint, and typecheck after building workspace declarations. It does
+not install browsers or run test suites. Existing fast Node unit tests may be retained only within
+the agreed scope; do not restore upstream test matrices during a baseline bump. Broader validation
+requires a separate explicit user request, and a one-time request does not authorize a recurring job.
 
 Do not run `npm run release:patch`, `release:minor`, `release:promote`, or any npm publish command.
 Those commands belong to upstream Paseo and are intentionally absent from the overlay root

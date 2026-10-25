@@ -25,6 +25,7 @@ const agent = {
     supportsReasoningStream: true,
     supportsToolInvocations: true,
     supportsRewindConversation: false,
+    supportsNativeConversationFork: false,
     supportsRewindFiles: false,
     supportsRewindBoth: false,
   },
