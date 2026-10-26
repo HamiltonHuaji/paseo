@@ -13,6 +13,10 @@ directories:
 files:
   - dist/**/*
   - "!**/*.map"
+  # effect exports its compiled dist tree; source copies are not runtime inputs.
+  - "!node_modules/effect/src/**"
+  # The plugin compiler uses @esbuild/<platform>, already unpacked below.
+  - "!node_modules/esbuild/bin/**"
   - "!node_modules/@getpaseo/*/src/**"
   - "!node_modules/@getpaseo/**/*.test.*"
   - "!node_modules/@getpaseo/**/*.spec.*"

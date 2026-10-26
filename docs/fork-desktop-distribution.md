@@ -39,6 +39,18 @@ Starting Desktop attaches to an already-running daemon without restarting it bec
 differs from the app. Clients and daemons update independently; feature capabilities decide what
 you can use. Restart or update the daemon through an explicit lifecycle action.
 
+Client-assisted daemon downloads and their compatibility boundary belong to
+[daemon distribution](fork-daemon-distribution.md#explicit-self-update-contract).
+
+## Desktop payload
+
+Keep Electron for this fork. Reduce duplicate application payload without changing the rendering
+engine or removing desktop capabilities; see [DIST-06](contracts/distribution.md#dist-06--桌面瘦身保持功能与运行环境).
+The local daemon and plugin compiler are runtime consumers of packaged dependencies. A dependency
+that looks like a build tool can still be required after installation. Check package exports and
+the packaged compiler before excluding files, and compare compressed installer size separately
+from installed bytes.
+
 ## Official release visibility
 
 Fork builds check `getpaseo/paseo` as read-only release metadata. Settings can download and verify
