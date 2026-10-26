@@ -351,6 +351,13 @@ function deriveResumeTailPolicy(input: {
   currentCursor: TimelineCursor | undefined;
   bootstrapReplace: boolean;
 }): ResumeTailPolicy {
+  // A reset-shaped response cannot undo newer canonical coverage in the same epoch.
+  if (
+    input.direction === "tail" &&
+    input.currentCursor?.epoch === input.epoch &&
+    input.windowMaxSeq < input.currentCursor.endSeq
+  )
+    return { kind: "discard" };
   if (input.direction !== "tail" || input.reset || input.bootstrapReplace || !input.currentCursor) {
     return { kind: "not_resume" };
   }
@@ -359,9 +366,6 @@ function deriveResumeTailPolicy(input: {
   }
   if (input.windowMaxSeq === input.currentCursor.endSeq) {
     return { kind: "discard" };
-  }
-  if (input.windowMaxSeq < input.currentCursor.endSeq) {
-    return { kind: "replace", preserveContinuity: false };
   }
   if (input.pageStartSeq !== null && input.pageStartSeq <= input.currentCursor.endSeq + 1) {
     return { kind: "append" };

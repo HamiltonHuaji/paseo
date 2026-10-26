@@ -1,8 +1,10 @@
 import {
   planTimelineCatchUpAfter,
   planTimelineResumeFetch,
+  planTimelineTailFetch,
   type ProjectedTimelineForwardFetchPlan,
 } from "./timeline-sync-plan";
+import type { TimelineRequestScope } from "./fetch-agent-timeline-once";
 import type { CachedTimeline } from "@/runtime/replica-cache";
 import {
   selectAgentTimelineState,
@@ -312,8 +314,10 @@ export interface ViewedTimelineSyncPorts {
   fetchPage(
     agentId: string,
     request: ProjectedTimelineForwardFetchPlan,
+    isCurrent: () => boolean,
   ): Promise<TimelinePageResult>;
-  fetchLatestTail(agentId: string): Promise<TimelinePageResult>;
+  fetchLatestTail(agentId: string, isCurrent: () => boolean): Promise<TimelinePageResult>;
+  invalidateRequests?(agentId: string): void;
   /**
    * The sync no longer owes this chat a catch-up: it reached current, or it left the
    * demanded set. Disconnect and backgrounding keep the obligation and do not report here.
@@ -342,6 +346,7 @@ export interface ViewedTimelineSync extends ViewedTimelineUiBridge {
   replaceOpenTabAgentIds(agentIds: string[]): void;
   setActive(active: boolean): void;
   setConnected(connected: boolean): void;
+  refreshTimeline(agentId: string): void;
   recoverGap(agentId: string, cursor: { epoch: string; endSeq: number }): void;
   dispose(): void;
 }
@@ -352,6 +357,8 @@ export type ViewedTimelineOwnerPorts = Omit<
 >;
 
 export interface ViewedTimelineOwner extends ViewedTimelineSync {
+  captureRequest(agentId: string, isCurrent?: () => boolean): TimelineRequestScope;
+  replaceTimeline(agentId: string, epoch?: string): void;
   applyTimelineResponse(payload: TimelineResponsePayload): void;
   enqueueStreamEvent(agentId: string, event: AgentStreamReducerEvent): void;
   flushStreamAgent(agentId: string): void;
@@ -365,14 +372,51 @@ export function createViewedTimelineOwner(input: {
   ports: ViewedTimelineOwnerPorts;
 }): ViewedTimelineOwner {
   const forcedTailReplacements = new Set<string>();
+  const requests = new Map<
+    string,
+    {
+      scope: object;
+      epoch?: string;
+      pending: boolean;
+      observedSeq: number;
+      retired: Set<string>;
+    }
+  >();
+  let disposed = false;
+  const stateFor = (agentId: string) => {
+    let state = requests.get(agentId);
+    if (!state) {
+      state = {
+        scope: {},
+        epoch: input.ports.readCursor(agentId)?.epoch,
+        pending: false,
+        observedSeq: 0,
+        retired: new Set(),
+      };
+      requests.set(agentId, state);
+    }
+    return state;
+  };
+  const validateResponse = (payload: TimelineResponsePayload) => {
+    if (payload.error) return;
+    const state = stateFor(payload.agentId);
+    if (state.retired.has(payload.epoch)) {
+      throw new Error(`Timeline snapshot for ${payload.agentId} predates its replacement`);
+    }
+  };
   const sync = createViewedTimelineSync({
     ...input.ports,
-    fetchLatestTail: async (agentId) => {
+    invalidateRequests: (agentId) => {
+      stateFor(agentId).scope = {};
+      useSessionStore.getState().markAgentHistoryUnsynchronized(input.serverId, agentId);
+      forcedTailReplacements.delete(agentId);
+    },
+    fetchLatestTail: async (agentId, isCurrent) => {
       forcedTailReplacements.add(agentId);
       try {
-        return await input.ports.fetchLatestTail(agentId);
+        return await input.ports.fetchLatestTail(agentId, isCurrent);
       } finally {
-        forcedTailReplacements.delete(agentId);
+        if (isCurrent()) forcedTailReplacements.delete(agentId);
       }
     },
     prepare: (agentId) => input.replica.prepare(agentId),
@@ -381,35 +425,95 @@ export function createViewedTimelineOwner(input: {
     onCatchUpEnded: (agentId) =>
       useCreateFlowStore.getState().clearByAgent({ serverId: input.serverId, agentId }),
   });
+  const recoverGap = (agentId: string, cursor: { epoch: string; endSeq: number }) => {
+    useSessionStore.getState().markAgentHistoryUnsynchronized(input.serverId, agentId);
+    sync.recoverGap(agentId, cursor);
+  };
   const streamQueue = createSessionAgentStreamReducerQueue({
     serverId: input.serverId,
     setAgentStreamState: (...args) => useSessionStore.getState().setAgentStreamState(...args),
     setAgentTimelineCursor: (...args) => useSessionStore.getState().setAgentTimelineCursor(...args),
-    recoverTimelineGap: (agentId, cursor) => sync.recoverGap(agentId, cursor),
+    recoverTimelineGap: recoverGap,
     onCommitted: (agentId) => input.replica.timelineUpdated(agentId),
   });
+  const replaceTimeline = (agentId: string, epoch?: string) => {
+    const state = stateFor(agentId);
+    if (epoch && (state.retired.has(epoch) || state.epoch === epoch)) return;
+    streamQueue.flushAgent(agentId);
+    if (epoch && state.epoch) state.retired.add(state.epoch);
+    if (epoch) {
+      state.epoch = epoch;
+      state.observedSeq = 0;
+    }
+    state.pending = true;
+    // A receipt without an epoch (older daemons) must also start after the mutation.
+    // The visible cache remains available while the owned refresh retries.
+    sync.refreshTimeline(agentId);
+  };
   return {
     ...sync,
+    replaceTimeline,
+    captureRequest(agentId, isCurrent = () => true) {
+      const { scope, epoch } = stateFor(agentId);
+      return {
+        scope,
+        isCurrent: () => !disposed && stateFor(agentId).scope === scope && isCurrent(),
+        validateResponse(payload) {
+          validateResponse(payload);
+          const currentEpoch = stateFor(agentId).epoch;
+          // A response from a concurrently installed history cannot establish an order
+          // between opaque epoch IDs. Retry against the current scope instead.
+          if (!payload.error && currentEpoch !== epoch && payload.epoch !== currentEpoch) {
+            throw new Error(`Timeline epoch changed while reading ${agentId}`);
+          }
+        },
+      };
+    },
     applyTimelineResponse(receivedPayload) {
+      validateResponse(receivedPayload);
       const payload = consumeForcedTimelineTailReplacement(receivedPayload, forcedTailReplacements);
       const accepted = applyAuthoritativeTimelineResponse({
         serverId: input.serverId,
         payload,
         cachedCursor: input.replica.readRange(payload.agentId),
-        recoverGap: (agentId, cursor) => sync.recoverGap(agentId, cursor),
+        recoverGap,
         drainQueuedAgentMessage: input.drainQueuedAgentMessage,
       });
-      if (accepted) input.replica.timelineUpdated(payload.agentId);
+      if (!accepted || payload.error) return;
+      const state = stateFor(payload.agentId);
+      if (state.epoch && state.epoch !== payload.epoch) {
+        state.retired.add(state.epoch);
+        state.observedSeq = 0;
+      }
+      state.epoch = payload.epoch;
+      state.pending = false;
+      input.replica.timelineUpdated(payload.agentId);
+      const cursor = input.ports.readCursor(payload.agentId);
+      if (cursor && cursor.epoch === state.epoch && cursor.endSeq < state.observedSeq) {
+        recoverGap(payload.agentId, cursor);
+      }
     },
     enqueueStreamEvent(agentId, event) {
+      if (event.event.type === "timeline" && event.epoch && typeof event.seq === "number") {
+        const state = stateFor(agentId);
+        if (state.retired.has(event.epoch)) return;
+        if (state.epoch && state.epoch !== event.epoch) replaceTimeline(agentId, event.epoch);
+        state.epoch = event.epoch;
+        state.observedSeq = Math.max(state.observedSeq, event.seq);
+        // Projected epochs need not start at one. Establish coverage with a bounded
+        // snapshot; the watermark recovers events newer than it without buffering.
+        if (state.pending) return;
+      }
       streamQueue.enqueue(agentId, event);
     },
     flushStreamAgent(agentId) {
       streamQueue.flushAgent(agentId);
     },
     dispose() {
+      disposed = true;
       streamQueue.dispose({ flush: true });
       sync.dispose();
+      requests.clear();
     },
   };
 }
@@ -553,10 +657,18 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
   };
 
   const cancelCatchUp = (agentId: string) => {
+    ports.invalidateRequests?.(agentId);
     catchUpGenerations.set(agentId, (catchUpGenerations.get(agentId) ?? 0) + 1);
     catchUps.get(agentId)?.cancelRetry?.();
     catchUps.delete(agentId);
     pendingCatchUps.delete(agentId);
+  };
+
+  const finishCatchUp = (agentId: string, generation: number) => {
+    catchUps.set(agentId, { generation, status: "complete" });
+    const pending = pendingCatchUps.get(agentId);
+    if (pending) startCatchUp(agentId, { request: pending, supersede: true });
+    else setVisibilityCatchUpReady(agentId);
   };
 
   const fetchUntilCurrent = async (
@@ -568,14 +680,14 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
     if (!ownsCatchUp(agentId, generation)) return;
 
     try {
-      const page = await ports.fetchPage(agentId, request);
+      const isCurrent = () => ownsCatchUp(agentId, generation);
+      const page = await ports.fetchPage(agentId, request, isCurrent);
       if (!ownsCatchUp(agentId, generation)) return;
       if (page.hasNewer && page.endCursor) {
         if (fallbackToLatestTailOnOverflow) {
-          await ports.fetchLatestTail(agentId);
+          await ports.fetchLatestTail(agentId, isCurrent);
           if (!ownsCatchUp(agentId, generation)) return;
-          catchUps.set(agentId, { generation, status: "complete" });
-          setVisibilityCatchUpReady(agentId);
+          finishCatchUp(agentId, generation);
           return;
         }
         await fetchUntilCurrent(
@@ -589,20 +701,16 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       if (page.hasNewer) {
         throw new Error(`Timeline page for ${agentId} hasNewer without an end cursor`);
       }
-      catchUps.set(agentId, { generation, status: "complete" });
-      const pendingCatchUp = pendingCatchUps.get(agentId);
-      if (pendingCatchUp) {
-        startCatchUp(agentId, { request: pendingCatchUp, supersede: true });
-        return;
-      }
-      setVisibilityCatchUpReady(agentId);
+      finishCatchUp(agentId, generation);
     } catch (error) {
       if (catchUps.get(agentId)?.generation === generation) {
         const nextRetryDelayMs = getNextRetryDelayMs(catchUps.get(agentId)?.retryDelayMs);
         const cancelRetry = ports.schedule(() => {
           const current = catchUps.get(agentId);
           if (current?.generation !== generation || current.status !== "error") return;
-          startCatchUp(agentId);
+          startCatchUp(agentId, {
+            request: current.request?.direction === "tail" ? current.request : undefined,
+          });
         }, nextRetryDelayMs);
         catchUps.set(agentId, {
           generation,
@@ -862,7 +970,11 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       for (const agentId of visibleAgentIds()) {
         visibilityCatchUpPending.add(agentId);
         visibilityCatchUpErrors.delete(agentId);
-        startCatchUp(agentId, { supersede: true });
+        const pending = pendingCatchUps.get(agentId);
+        const request =
+          catchUps.get(agentId)?.status === "running" ? catchUps.get(agentId)?.request : undefined;
+        cancelCatchUp(agentId);
+        startCatchUp(agentId, { request: pending ?? request, supersede: true });
       }
       notifyListeners();
     },
@@ -884,8 +996,19 @@ export function createViewedTimelineSync(ports: ViewedTimelineSyncPorts): Viewed
       membershipGeneration += 1;
       void reconcileMembership();
     },
+    refreshTimeline(agentId) {
+      cancelCatchUp(agentId);
+      visibilityCatchUpPending.add(agentId);
+      visibilityCatchUpErrors.delete(agentId);
+      manualRetries.delete(agentId);
+      startCatchUp(agentId, { request: planTimelineTailFetch(), supersede: true });
+      notifyListeners();
+    },
     recoverGap(agentId, cursor) {
       if (!isDesired(agentId)) return;
+      visibilityCatchUpPending.add(agentId);
+      visibilityCatchUpErrors.delete(agentId);
+      notifyListeners();
       startCatchUp(agentId, {
         request: planTimelineCatchUpAfter({ epoch: cursor.epoch, seq: cursor.endSeq }),
         supersede: true,

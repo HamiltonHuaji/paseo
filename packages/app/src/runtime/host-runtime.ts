@@ -2723,14 +2723,20 @@ export class HostRuntimeStore {
     serverId: string,
     agentId: string,
     request: Parameters<DaemonClient["fetchAgentTimeline"]>[1],
+    isCurrent: () => boolean = () => true,
   ): Promise<Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>> {
     const directory = this.directorySyncByServer.get(serverId);
     if (!directory) throw new Error(`Unknown host runtime for serverId ${serverId}`);
     const owner = useSessionStore.getState().sessions[serverId]?.viewedTimelineSync;
-    const page = await directory.fetchTimeline(agentId, request);
-    if (owner && useSessionStore.getState().sessions[serverId]?.viewedTimelineSync === owner) {
+    const guard = owner?.captureRequest(
+      agentId,
+      () =>
+        isCurrent() && useSessionStore.getState().sessions[serverId]?.viewedTimelineSync === owner,
+    );
+    const page = await directory.fetchTimeline(agentId, request, guard);
+    if (owner && guard?.isCurrent()) {
       owner.flushStreamAgent(agentId);
-      owner.applyTimelineResponse(page);
+      if (guard.isCurrent()) owner.applyTimelineResponse(page);
     }
     return page;
   }

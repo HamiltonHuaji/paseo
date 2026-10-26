@@ -4,7 +4,10 @@ import type {
   FetchAgentsEntry,
   FetchAgentsOptions,
 } from "@getpaseo/client/internal/daemon-client";
-import { fetchAgentTimelineOnce } from "@/timeline/fetch-agent-timeline-once";
+import {
+  fetchAgentTimelineOnce,
+  type TimelineRequestScope,
+} from "@/timeline/fetch-agent-timeline-once";
 import {
   normalizeProjectDescriptor,
   normalizeWorkspaceDescriptor,
@@ -466,10 +469,14 @@ export class DirectorySync {
   async fetchTimeline(
     agentId: string,
     request: Parameters<DaemonClient["fetchAgentTimeline"]>[1],
+    guard?: TimelineRequestScope,
   ): Promise<Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>> {
     const { client } = this.requireOnline();
     const token = this.agents.captureTimeline(agentId);
-    const page = await fetchAgentTimelineOnce(client, agentId, request);
+    const page = await fetchAgentTimelineOnce(client, agentId, request, guard?.scope);
+    // Metadata and its disk checkpoint belong to the same snapshot as the transcript.
+    if (guard && !guard.isCurrent()) return page;
+    guard?.validateResponse(page);
     if (page.agent && this.agents.submitTimelineAgent(token, page.agent)) {
       this.revision += 1;
       this.persistCheckpoint();

@@ -5,7 +5,7 @@ import {
   type ReplicaSqliteConnection,
   type SqliteValue,
 } from "@/runtime/replica-cache/row-store-sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DaemonClient,
   WorkspaceLabelListPayload,
@@ -1866,3 +1866,62 @@ it.each(["before", "during", "before-metadata", "damaged"] as const)(
     }
   },
 );
+
+it("invalidated timeline responses cannot update agent metadata or its disk checkpoint", async () => {
+  const serverId = "timeline-response-invalidation";
+  serverIds.add(serverId);
+  const client = new FakeDirectoryClient();
+  useSessionStore.getState().initializeSession(serverId, client as unknown as DaemonClient, 1);
+  const commit = vi.fn();
+  const directory = new DirectorySync(
+    serverId,
+    {
+      onAgentStoppedRunning: () => {},
+      markAgentLoading: () => {},
+      markAgentReady: () => {},
+      markAgentError: () => {},
+    },
+    {
+      readAgent: async () => undefined,
+      readWorkspace: async () => undefined,
+      readDirectory: async () => ({
+        agents: new Map(),
+        workspaces: new Map(),
+        projects: new Map(),
+      }),
+      commitDirectoryMutations: commit,
+    },
+  );
+  let resolve!: (value: Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>) => void;
+  Object.assign(client, {
+    fetchAgentTimeline: () =>
+      new Promise<Awaited<ReturnType<DaemonClient["fetchAgentTimeline"]>>>((done) => {
+        resolve = done;
+      }),
+  });
+  directory.connectionChanged({
+    client: client as unknown as DaemonClient,
+    status: "online",
+    source: { clientGeneration: 1, connectionEpoch: 1 },
+  });
+  let current = true;
+  const validateResponse = vi.fn();
+  try {
+    const pending = directory.fetchTimeline(
+      "a",
+      { direction: "tail", projection: "projected", limit: 40 },
+      { scope: {}, isCurrent: () => current, validateResponse },
+    );
+    current = false;
+    resolve({ agent: createAgent(serverId, "a") } as unknown as Awaited<
+      ReturnType<DaemonClient["fetchAgentTimeline"]>
+    >);
+    await pending;
+    expect(validateResponse).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().sessions[serverId].agents.has("a")).toBe(false);
+    expect(useSessionStore.getState().sessions[serverId].agentDetails.has("a")).toBe(false);
+    expect(commit).not.toHaveBeenCalled();
+  } finally {
+    directory.dispose();
+  }
+});

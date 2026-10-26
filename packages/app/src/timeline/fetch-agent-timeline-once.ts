@@ -4,17 +4,29 @@ type TimelineClient = Pick<DaemonClient, "fetchAgentTimeline">;
 type TimelineRequest = Parameters<TimelineClient["fetchAgentTimeline"]>[1];
 type TimelinePage = Awaited<ReturnType<TimelineClient["fetchAgentTimeline"]>>;
 
-const inFlightByClient = new WeakMap<object, Map<string, Promise<TimelinePage>>>();
+export interface TimelineRequestScope {
+  scope: object;
+  isCurrent(): boolean;
+  validateResponse(page: TimelinePage): void;
+}
+
+const inFlightByClient = new WeakMap<object, WeakMap<object, Map<string, Promise<TimelinePage>>>>();
 
 export function fetchAgentTimelineOnce(
   client: TimelineClient,
   agentId: string,
   request: TimelineRequest,
+  scope: object = client,
 ): Promise<TimelinePage> {
-  let inFlight = inFlightByClient.get(client);
+  let scopes = inFlightByClient.get(client);
+  if (!scopes) {
+    scopes = new WeakMap();
+    inFlightByClient.set(client, scopes);
+  }
+  let inFlight = scopes.get(scope);
   if (!inFlight) {
     inFlight = new Map();
-    inFlightByClient.set(client, inFlight);
+    scopes.set(scope, inFlight);
   }
 
   const key = `${agentId}:${JSON.stringify(request)}`;

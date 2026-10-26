@@ -528,6 +528,7 @@ interface SessionStoreActions {
   ) => void;
   bumpHistorySyncGeneration: (serverId: string) => void;
   markAgentHistorySynchronized: (serverId: string, agentId: string) => void;
+  markAgentHistoryUnsynchronized: (serverId: string, agentId: string) => void;
   setAgentAuthoritativeHistoryApplied: (
     serverId: string,
     agentId: string,
@@ -1335,6 +1336,22 @@ export const useSessionStore = create<SessionStore>()(
                 ...session,
                 historySyncGeneration: nextGeneration,
               },
+            },
+          };
+        });
+      },
+
+      markAgentHistoryUnsynchronized: (serverId, agentId) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session?.agentHistorySyncGeneration.has(agentId)) return prev;
+          const generations = new Map(session.agentHistorySyncGeneration);
+          generations.delete(agentId);
+          return {
+            ...prev,
+            sessions: {
+              ...prev.sessions,
+              [serverId]: { ...session, agentHistorySyncGeneration: generations },
             },
           };
         });

@@ -478,7 +478,7 @@ describe("processTimelineResponse", () => {
     expect(result.cursor).toEqual({ epoch: "epoch-2", startSeq: 1, endSeq: 1 });
   });
 
-  it("replaces destructively when the same epoch rewinds behind the local cursor", () => {
+  it("discards a delayed same-epoch snapshot behind the local cursor", () => {
     const result = processTimelineResponse({
       ...baseTimelineInput,
       currentTail: [makeAssistantItem("future history", "future-history")],
@@ -493,8 +493,8 @@ describe("processTimelineResponse", () => {
       },
     });
 
-    expect(getAssistantTexts(result.tail)).toEqual(["rewound history"]);
-    expect(result.cursor).toEqual({ epoch: "epoch-1", startSeq: 1, endSeq: 10 });
+    expect(getAssistantTexts(result.tail)).toEqual(["future history"]);
+    expect(result.cursor).toEqual({ epoch: "epoch-1", startSeq: 1, endSeq: 40 });
   });
 
   it("preserves the canonical end cursor on a projected assistant message", () => {

@@ -14,7 +14,6 @@ import {
 import type { StreamItem } from "@/types/stream";
 import { deriveAgentStreamTurnLiveness } from "@/timeline/session-stream-reducers";
 import { planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
-import { requestTimelineReplacement } from "@/timeline/timeline-replacement";
 import { type ViewedTimelineOwner } from "@/timeline/viewed-timeline-sync";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { parseServerInfoStatusPayload } from "@getpaseo/protocol/messages";
@@ -389,15 +388,10 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
     };
     const onReplacement = (message: SessionOutboundMessage) => {
       if (message.type !== "agent.timeline.replacement") return;
-      void requestTimelineReplacement(
-        {
-          fetchAgentTimeline: (agentId, request) =>
-            getHostRuntimeStore().fetchAgentTimeline(serverId, agentId, request),
-        },
+      viewedTimelineSyncRef.current?.replaceTimeline(
         message.payload.agentId,
-      ).catch((error: unknown) => {
-        console.warn("[Session] timeline replacement refresh failed", { serverId, error });
-      });
+        message.payload.epoch,
+      );
     };
     const sync = getHostRuntimeStore().createViewedTimelineOwner(serverId, {
       observe: (agentIds) => {
@@ -420,7 +414,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           ? { epoch: timeline.range.epoch, endSeq: timeline.range.endSeq }
           : undefined;
       },
-      fetchPage: async (agentId, request) => {
+      fetchPage: async (agentId, request, isCurrent) => {
         const session = useSessionStore.getState().sessions[serverId];
         const initKey = getInitKey(serverId, agentId);
         const shouldInitialize = selectAgentTimelineState(session, agentId).status !== "synced";
@@ -437,21 +431,31 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
           setAgentInitializing(agentId, true);
         }
         try {
-          const page = await getHostRuntimeStore().fetchAgentTimeline(serverId, agentId, request);
-          if (shouldInitialize && getInitDeferred(initKey)) {
+          const page = await getHostRuntimeStore().fetchAgentTimeline(
+            serverId,
+            agentId,
+            request,
+            isCurrent,
+          );
+          if (isCurrent() && shouldInitialize && getInitDeferred(initKey)) {
             refreshAgentInitializationTimeout({ key: initKey, agentId, setAgentInitializing });
           }
           return page;
         } catch (error) {
-          if (shouldInitialize) {
+          if (isCurrent() && shouldInitialize) {
             setAgentInitializing(agentId, false);
             rejectInitDeferred(initKey, error instanceof Error ? error : new Error(String(error)));
           }
           throw error;
         }
       },
-      fetchLatestTail: (agentId) =>
-        getHostRuntimeStore().fetchAgentTimeline(serverId, agentId, planTimelineTailFetch()),
+      fetchLatestTail: (agentId, isCurrent) =>
+        getHostRuntimeStore().fetchAgentTimeline(
+          serverId,
+          agentId,
+          planTimelineTailFetch(),
+          isCurrent,
+        ),
       reportError: (error) => {
         console.warn("[Session] viewed timeline synchronization failed", { serverId, error });
       },
