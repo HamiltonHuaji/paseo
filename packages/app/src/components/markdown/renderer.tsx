@@ -68,12 +68,15 @@ const MarkdownPart = memo(function MarkdownPart({
     (environment.client?.readFile
       ? { readFile: environment.client.readFile.bind(environment.client) }
       : undefined);
-  const { markdown, imageSources, linkRecognition, linkSource } = useMarkdownSource(text, {
-    workspaceRoot: environment.workspaceRoot,
-    serverId: environment.serverId,
-    ...imageContext,
-    client,
-  });
+  const { markdown, imageSources, mathSources, linkRecognition, linkSource } = useMarkdownSource(
+    text,
+    {
+      workspaceRoot: environment.workspaceRoot,
+      serverId: environment.serverId,
+      ...imageContext,
+      client,
+    },
+  );
   const [image, setImage] = useState<ImageLightboxSource | null>(null);
   const pressLink = useStableEvent(({ url, sourceType }: LinkPressEvent) => {
     const source = linkSource(url, sourceType);
@@ -90,7 +93,7 @@ const MarkdownPart = memo(function MarkdownPart({
     [markdown],
   );
   return (
-    <MarkdownMathCopy>
+    <MarkdownMathCopy sources={mathSources}>
       <MermaidStreamingContext.Provider value={streaming}>
         <MarkdownBlockStack imageSources={imageSources}>
           {segments.map((segment) =>

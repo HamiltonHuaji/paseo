@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import katex from "katex";
+import katex, { renderToString as renderMathToString } from "katex";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { toNativeLinkRecognition } from "react-native-enriched-markdown/src/utils/regexParser";
 import { parseMarkdown } from "react-native-enriched-markdown/src/web/parseMarkdown";
@@ -789,6 +789,68 @@ describe("math source on the shared engine", () => {
     expect(normalizeMarkdownMath("Before $x+")).toBe("Before \\$x+");
     expect(normalizeMarkdownMath("Before $x+1$ after")).toBe("Before $x+1$ after");
     expect(normalizeMarkdownMath(String.raw`\(x^2\)`)).toBe("$x^2$");
+  });
+  it("keeps blank lines, equality and addition inside one closed display formula", async () => {
+    const tex = String.raw`
+\frac{d\hat s_{j+1}}{d\omega}
+=
+
+\underbrace{\frac{\partial f_\omega}{\partial\omega}}_{\text{本次调用对参数的依赖}}
++
+\underbrace{\frac{\partial f_\omega}{\partial\hat s_j}
+\frac{d\hat s_j}{d\omega}}_{\text{经前面预测状态传来的依赖}}
+`;
+    const prepared = prepareMarkdownSource(`Before
+
+$$${tex}$$
+
+After`);
+    const tree = await parseMarkdown(prepared.render(), { latexMath: true });
+    const formulas: ASTNode[] = [];
+    const types: string[] = [];
+    const collect = (node: ASTNode) => {
+      types.push(node.type);
+      if (node.type === "LatexMathDisplay") formulas.push(node);
+      node.children?.forEach(collect);
+    };
+    collect(tree);
+    expect(formulas).toHaveLength(1);
+    expect(types).not.toContain("Heading");
+    expect(types).not.toContain("UnorderedList");
+    const content = formulas[0]!.children!.map((node) => node.content ?? "").join("");
+    expect(prepared.mathSources[content]).toBe(tex);
+    expect(() =>
+      renderMathToString(content, { displayMode: true, throwOnError: true, strict: false }),
+    ).not.toThrow();
+  });
+  it("preserves TeX row breaks, comments and escaped percent signs while protecting the block", () => {
+    const source = String.raw`$$
+\begin{aligned}
+a &= 1 \\
+b &= 2 % do not swallow the next row
+\\ c &= 50\%
+\end{aligned}
+$$`;
+    const normalized = normalizeMarkdownMath(source);
+    expect(normalized).toContain(String.raw`a &= 1 \\ b &= 2 \\ c &= 50\%`);
+    expect(() =>
+      renderMathToString(normalized.slice(2, -2), { displayMode: true, throwOnError: true }),
+    ).not.toThrow();
+    expect(normalizeMarkdownMath("```tex\n" + source + "\n```")).toBe(
+      "```tex\n" + source + "\n```",
+    );
+    expect(normalizeMarkdownMath("$$\n    x + y\n$$")).toBe("$$     x + y $$");
+  });
+  it("keeps quoted formulas inside their container and does not adapt prose entities inside TeX", async () => {
+    const prepared = prepareMarkdownSource("> $$\n> x\n> =\n>\n> y+1\n> $$");
+    const tree = await parseMarkdown(prepared.render(), { latexMath: true });
+    expect(tree.children?.[0]?.type).toBe("Blockquote");
+    expect(JSON.stringify(tree)).toContain("LatexMathDisplay");
+    expect(prepared.render()).toBe("> $$ x =  y+1 $$");
+    const mixed = String.raw`Prose &amp; $\text{A &amp; B} || x$ ends.`;
+    expect(prepareMarkdownSource(mixed).render()).toBe(
+      String.raw`Prose \& $\text{A &amp; B} || x$ ends.`,
+    );
   });
   it("renders complete inline and multiline formulas through the pinned parser", async () => {
     const source = prepareMarkdownSource("Inline $x^2$\n\n$$\n\\frac{1}{2}\n$$").render();

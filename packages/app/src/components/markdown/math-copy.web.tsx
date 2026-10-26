@@ -3,13 +3,17 @@ import { copyToClipboard } from "@/utils/copy-to-clipboard";
 import { useToast } from "@/contexts/toast-context";
 
 /** The engine renders MathML offline; retain TeX when copying or activating a formula. */
-export function MarkdownMathCopy({ children }: PropsWithChildren) {
+export function MarkdownMathCopy({
+  children,
+  sources,
+}: PropsWithChildren<{ sources: Readonly<Record<string, string>> }>) {
   const toast = useToast();
   const copy = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
       if (!(event.target instanceof Element) || !window.getSelection()?.isCollapsed) return;
       const math = event.target.closest('[role="math"]');
-      const source = math?.getAttribute("aria-label");
+      const normalized = math?.getAttribute("aria-label");
+      const source = normalized == null ? null : (sources[normalized] ?? normalized);
       if (!source) return;
       event.preventDefault();
       event.stopPropagation();
@@ -19,7 +23,11 @@ export function MarkdownMathCopy({ children }: PropsWithChildren) {
         .then(() => toast.copied())
         .catch(() => toast.error("Copy failed"));
     },
-    [toast],
+    [toast, sources],
   );
-  return <div onClick={copy}>{children}</div>;
+  return (
+    <div onClick={copy} data-paseo-math-sources={JSON.stringify(sources)}>
+      {children}
+    </div>
+  );
 }

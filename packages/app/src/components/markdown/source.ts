@@ -109,7 +109,15 @@ export function prepareMarkdownSource(
   workspaceRoot?: string,
   options: { supportsSvg?: boolean } = {},
 ) {
-  source = normalizeMarkdownMath(normalizeMarkdownHtml(source));
+  const mathSources: Record<string, string> = Object.create(null);
+  const mathRanges: { start: number; end: number }[] = [];
+  source = normalizeMarkdownMath(
+    normalizeMarkdownHtml(source),
+    (normalized, original, start, end) => {
+      mathSources[normalized] = original;
+      mathRanges.push({ start, end });
+    },
+  );
   const images: MarkdownImage[] = [];
   let tree: Root | undefined;
   const getTree = () =>
@@ -125,7 +133,7 @@ export function prepareMarkdownSource(
     !source.includes("&") &&
     !(workspaceRoot && source.includes("]("))
   ) {
-    return { images, ...metadata, render: () => source };
+    return { images, mathSources, ...metadata, render: () => source };
   }
 
   const definitions = new Map<string, { url: string; title?: string | null }>();
@@ -201,6 +209,7 @@ export function prepareMarkdownSource(
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (start !== undefined && end !== undefined) {
+      if (mathRanges.some((range) => start >= range.start && end <= range.end)) return;
       if (node.type === "paragraph") splitStandaloneImages(node, start, end);
       if (node.type === "link") {
         const title = workspaceHoverTitle(node, source.slice(start, end), workspaceRoot);
@@ -220,12 +229,13 @@ export function prepareMarkdownSource(
         return;
       }
       if (node.type === "text") {
-        const text = source
-          .slice(start, end)
-          .replace(/(?<!\\)&(?:#(?:[xX][\da-fA-F]+|\d+)|[a-zA-Z][a-zA-Z\d]+);/g, (entity) =>
-            decodeString(entity).replace(/[!-/:-@[-`{-~]/g, "\\$&"),
-          )
-          .replace(/(?<!\\)\|\|/g, "\\|\\|");
+        const text = rewriteProse(source, start, end, mathRanges, (value) =>
+          value
+            .replace(/(?<!\\)&(?:#(?:[xX][\da-fA-F]+|\d+)|[a-zA-Z][a-zA-Z\d]+);/g, (entity) =>
+              decodeString(entity).replace(/[!-/:-@[-`{-~]/g, "\\$&"),
+            )
+            .replace(/(?<!\\)\|\|/g, "\\|\\|"),
+        );
         if (text !== source.slice(start, end)) edits.push({ start, end, text });
       }
     }
@@ -234,6 +244,7 @@ export function prepareMarkdownSource(
   visit(getTree());
   return {
     images,
+    mathSources,
     ...metadata,
     render(
       urls: ReadonlyMap<string, string> = new Map(),
@@ -266,4 +277,24 @@ export function prepareMarkdownSource(
 
 function escapeMarkdownText(text: string): string {
   return text.replace(/[!-/:-@[-`{-~]/g, "\\$&");
+}
+
+function rewriteProse(
+  source: string,
+  start: number,
+  end: number,
+  formulas: { start: number; end: number }[],
+  rewrite: (text: string) => string,
+): string {
+  let result = "";
+  let cursor = start;
+  for (const formula of formulas) {
+    if (formula.end <= start) continue;
+    if (formula.start >= end) break;
+    const left = Math.max(cursor, formula.start);
+    const right = Math.min(end, formula.end);
+    result += rewrite(source.slice(cursor, left)) + source.slice(left, right);
+    cursor = right;
+  }
+  return result + rewrite(source.slice(cursor, end));
 }

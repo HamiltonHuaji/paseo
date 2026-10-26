@@ -36,6 +36,14 @@ function semanticTag(element: Element): string | null {
   );
 }
 function copySemanticAttributes(original: Element, copy: Element): void {
+  if (original.matches('[role="math"][aria-label]')) {
+    const source = original.getAttribute("aria-label")!;
+    const encoded = original
+      .closest("[data-paseo-math-sources]")
+      ?.getAttribute("data-paseo-math-sources");
+    const sources: Record<string, string> = encoded ? JSON.parse(encoded) : {};
+    copy.setAttribute("aria-label", sources[source] ?? source);
+  }
   const tag = semanticTag(original);
   if (!tag || original.hasAttribute(MARKDOWN_COPY_TAG_ATTRIBUTE)) return;
   copy.setAttribute(MARKDOWN_COPY_TAG_ATTRIBUTE, tag);
@@ -63,6 +71,15 @@ const turndown = new TurndownService({
   strongDelimiter: "**",
 });
 turndown.use(gfm);
+// Returning TeX from a rule keeps Turndown's prose escaping out of formulas.
+turndown.addRule("latexMath", {
+  filter: (node) => node.getAttribute("role") === "math" && node.hasAttribute("aria-label"),
+  replacement: (_content, node) => {
+    const source = node.getAttribute("aria-label")!;
+    const display = node.querySelector('math[display="block"]') || node.style.display === "block";
+    return display ? `\n\n$$${source}$$\n\n` : `$${source}$`;
+  },
+});
 turndown.addRule("escapedGfmTableCell", {
   filter: ["th", "td"],
   replacement: (content, node) => {
@@ -325,7 +342,7 @@ function nodeAtPath(root: Node, path: number[]): Node {
 }
 
 function removeUnselectedSemantics(range: Range, source: Element, clone: Element): void {
-  const selector = `[${MARKDOWN_COPY_TAG_ATTRIBUTE}], a, ${SEMANTIC_TAGS}`;
+  const selector = `[${MARKDOWN_COPY_TAG_ATTRIBUTE}], [role="math"][aria-label], a, ${SEMANTIC_TAGS}`;
   const originals = Array.from(source.querySelectorAll(selector));
   const copies = Array.from(clone.querySelectorAll(selector));
 
@@ -587,17 +604,7 @@ function selectedMessageParts(range: Range): SelectedMessagePart[] | null {
   });
 }
 
-function restoreMathSource(container: HTMLElement): void {
-  for (const formula of container.querySelectorAll('[role="math"][aria-label]')) {
-    const delimiter = formula.querySelector('math[display="block"]') ? "$$" : "$";
-    formula.replaceWith(
-      document.createTextNode(`${delimiter}${formula.getAttribute("aria-label")}${delimiter}`),
-    );
-  }
-}
-
 function restoreMarkdownElements(container: HTMLElement): void {
-  restoreMathSource(container);
   for (const ignored of container.querySelectorAll(`[${MARKDOWN_COPY_IGNORE_ATTRIBUTE}]`)) {
     ignored.remove();
   }
@@ -648,7 +655,9 @@ function restoreMarkdownElements(container: HTMLElement): void {
     element.replaceWith(...element.childNodes);
   }
 
-  const presentational = Array.from(container.querySelectorAll("div, span"));
+  const presentational = Array.from(
+    container.querySelectorAll(':is(div, span):not([role="math"][aria-label])'),
+  );
   for (const element of presentational.toReversed()) {
     element.replaceWith(...element.childNodes);
   }

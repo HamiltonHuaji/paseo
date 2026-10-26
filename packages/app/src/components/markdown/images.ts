@@ -126,6 +126,7 @@ export function useMarkdownSource(text: string, context: MarkdownImageContext) {
   const pendingImages = new Set(sources.filter((_source, index) => statuses[index] === "pending"));
   return {
     markdown: prepared.render(resolved, unavailableImages, pendingImages),
+    mathSources: prepared.mathSources,
     linkRecognition: prepared.linkRecognition,
     linkSource: prepared.linkSource,
     imageSources: Object.fromEntries([...resolved].map(([source, url]) => [url, source])),

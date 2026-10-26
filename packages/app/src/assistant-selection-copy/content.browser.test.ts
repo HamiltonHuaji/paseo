@@ -815,3 +815,34 @@ it("copies a workspace image path instead of its temporary display URL", () => {
     "![chart](assets/chart.png)",
   );
 });
+
+it("copies inline and multiline TeX without prose escaping or losing original newlines", () => {
+  const host = document.createElement("div");
+  host.dataset.testid = "assistant-message";
+  document.body.append(host);
+  const original = String.raw`
+\frac{d\hat s_{j+1}}{d\omega}
+=
+\frac{\partial f_\omega}{\partial\omega}
+`;
+  const normalized = original.replaceAll("\n", " ");
+  const sources = { [normalized]: original };
+  host.setAttribute("data-paseo-math-sources", JSON.stringify(sources));
+  host.innerHTML =
+    '<p>Before <span role="math"><math><mi>x</mi></math></span> after.</p><span role="math" style="display:block"><math display="block"><mi>f</mi></math></span>';
+  host
+    .querySelectorAll('[role="math"]')[0]!
+    .setAttribute("aria-label", String.raw`\hat s_7,\hat s_6,\ldots`);
+  host.querySelectorAll('[role="math"]')[1]!.setAttribute("aria-label", normalized);
+  const range = document.createRange();
+  range.selectNodeContents(host);
+  const selection = window.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  const copied = createAssistantSelectionClipboardContent(selection);
+  expect(copied?.plainText).toContain(String.raw`$\hat s_7,\hat s_6,\ldots$`);
+  expect(copied?.plainText).toContain(`$$${original}$$`);
+  expect(copied?.plainText).not.toContain(String.raw`\\hat`);
+  expect(copied?.plainText).not.toContain(String.raw`\_`);
+  host.remove();
+});
