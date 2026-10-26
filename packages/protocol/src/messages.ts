@@ -1,4 +1,12 @@
 import {
+  DaemonUpdateStatusRequestSchema,
+  DaemonUpdateCancelRequestSchema,
+  DaemonUpdateTransferRequestSchema,
+  DaemonUpdateStatusResponseSchema,
+  DaemonUpdateCancelResponseSchema,
+  DaemonUpdateTransferResponseSchema,
+} from "./daemon-updates.js";
+import {
   WorkCardListRequestSchema,
   WorkCardGetRequestSchema,
   WorkCardCreateRequestSchema,
@@ -2034,6 +2042,7 @@ export const ShutdownServerRequestMessageSchema = z.object({
 export const DaemonUpdateRequestMessageSchema = z.object({
   type: z.literal("daemon.update.request"),
   requestId: z.string(),
+  uploadId: z.string().optional(),
 });
 
 export const FetchAgentTimelineRequestMessageSchema = z.object({
@@ -3516,6 +3525,9 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ShutdownServerRequestMessageSchema,
   RestartServerRequestMessageSchema,
   DaemonUpdateRequestMessageSchema,
+  DaemonUpdateStatusRequestSchema,
+  DaemonUpdateCancelRequestSchema,
+  DaemonUpdateTransferRequestSchema,
   FetchAgentTimelineRequestMessageSchema,
   AgentTimelineSearchRequestMessageSchema,
   AgentTimelineListPromptsRequestMessageSchema,
@@ -3937,6 +3949,8 @@ export const ServerInfoStatusPayloadSchema = z
         daemonDiagnostics: z.boolean().optional(),
         // COMPAT(daemonSelfUpdate): added in v0.1.93, remove gate after 2026-12-13.
         daemonSelfUpdate: z.boolean().optional(),
+        daemonUpdateControl: z.boolean().optional(),
+        daemonUpdateUpload: z.boolean().optional(),
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: z.boolean().optional(),
         // COMPAT(agentForkContextCursor): added in v0.1.108, remove gate after 2027-01-14.
@@ -7439,6 +7453,9 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   LoopStopResponseSchema,
   DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
+  DaemonUpdateStatusResponseSchema,
+  DaemonUpdateCancelResponseSchema,
+  DaemonUpdateTransferResponseSchema,
 ]);
 
 export type SessionOutboundMessage = z.infer<typeof SessionOutboundMessageSchema>;

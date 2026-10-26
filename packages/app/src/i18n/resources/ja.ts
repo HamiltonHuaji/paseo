@@ -2814,6 +2814,18 @@ export const ja: TranslationResources = {
           confirmMessage:
             "これによりデーモンが最新バージョンに更新され、再起動されます。実行中のエージェントは一時的に中断されます。",
           updating: "更新中...",
+          clientDownloadHint:
+            "Download the latest daemon package on this computer and send it through the current connection. The daemon installs dependencies on its own host.",
+          managedHint:
+            "Updates keep running if you disconnect. You can return to inspect or cancel the current task.",
+          phaseUploading: "Sending package",
+          phaseVerifying: "Checking package",
+          clientDownloading: "Downloading on this computer",
+          cancelling: "Stopping update process…",
+          cancelled: "Update cancelled. You can retry.",
+          downloadOnHost: "Download on host",
+          downloadOnClient: "Download on this computer",
+          resumeUpload: "Resume upload",
           phaseStarting: "更新を準備中...",
           phaseDownloading: "パッケージをダウンロード中...",
           phaseInstalling: "インストール中...",

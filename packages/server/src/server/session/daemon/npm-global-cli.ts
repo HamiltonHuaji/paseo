@@ -1,3 +1,5 @@
+import { terminateWithTreeKill } from "../../../utils/tree-kill.js";
+import type { ChildProcess } from "node:child_process";
 import { lstatSync } from "node:fs";
 import { getErrorMessage } from "@getpaseo/protocol/error-utils";
 import stripAnsi from "strip-ansi";
@@ -38,6 +40,7 @@ const CommandErrorSchema = z
 
 export interface CommandOptions {
   timeout?: number;
+  signal?: AbortSignal;
   maxBuffer?: number;
   onOutput?: (output: string) => void;
 }
@@ -63,8 +66,10 @@ export interface NpmGlobalPaseoCli {
   ): Promise<CommandResult>;
 }
 
-interface NpmGlobalOptions {
+export interface NpmGlobalOptions {
   prefix?: string;
+  signal?: AbortSignal;
+  installSpec?: string;
 }
 
 export type CommandRunner = (
@@ -73,18 +78,45 @@ export type CommandRunner = (
   options?: CommandOptions,
 ) => Promise<CommandResult>;
 
+async function terminateNpmProcess(child: ChildProcess): Promise<void> {
+  if (process.platform === "win32" || !child.pid) {
+    await terminateWithTreeKill(child, { gracefulTimeoutMs: 3000 });
+    return;
+  }
+  const pid = child.pid;
+  const signalGroup = (signal: NodeJS.Signals): boolean => {
+    try {
+      process.kill(-pid, signal);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+      throw error;
+    }
+  };
+  if (!signalGroup("SIGTERM")) return;
+  // npm can exit before a lifecycle script. Keep ownership of the process group
+  // through escalation even when the parent's stdio has already closed.
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  signalGroup("SIGKILL");
+}
+
 async function runExternalCommand(
   command: string,
   args: string[],
   options?: CommandOptions,
 ): Promise<CommandResult> {
-  if (options?.onOutput) {
+  if (options?.onOutput || options?.signal) {
+    options.signal?.throwIfAborted();
     return new Promise((resolve) => {
-      const child = spawnProcess(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+      const child = spawnProcess(command, args, {
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+      });
       let stdout = "";
       let stderr = "";
       const maxBuffer = options.maxBuffer ?? NPM_MAX_BUFFER_BYTES;
       let settled = false;
+      let termination: Promise<void> | null = null;
 
       const append = (stream: "stdout" | "stderr", chunk: Buffer): void => {
         const text = chunk.toString("utf8");
@@ -95,6 +127,12 @@ async function runExternalCommand(
           stderr = `${stderr}${text}`.slice(-maxBuffer);
         }
       };
+      const abort = (): void => {
+        termination ??= terminateNpmProcess(child);
+      };
+      options.signal?.addEventListener("abort", abort, { once: true });
+      child.once("close", () => options.signal?.removeEventListener("abort", abort));
+      if (options.signal?.aborted) abort();
       child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
       child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
       child.once("error", (error) => {
@@ -102,9 +140,14 @@ async function runExternalCommand(
         settled = true;
         resolve({ exitCode: 1, stdout, stderr: stderr || getErrorMessage(error) });
       });
-      child.once("close", (code, signal) => {
+      child.once("close", async (code, signal) => {
         if (settled) return;
         settled = true;
+        try {
+          await termination;
+        } catch (error) {
+          stderr = getErrorMessage(error);
+        }
         resolve({
           exitCode: code ?? 1,
           stdout,
@@ -230,11 +273,14 @@ export class DefaultNpmGlobalPaseoCli implements NpmGlobalPaseoCli {
         "--no-fund",
         "--prefer-offline",
         "--color=false",
-        this.distribution.installSpec,
+        "--fetch-timeout=120000",
+        "--fetch-retries=1",
+        options.installSpec ?? this.distribution.installSpec,
         ...(options.prefix ? ["--prefix", options.prefix] : []),
       ],
       {
         maxBuffer: NPM_MAX_BUFFER_BYTES,
+        signal: options.signal,
         ...(onOutput ? { onOutput: queueOutput } : {}),
       },
     ).finally(flushOutput);

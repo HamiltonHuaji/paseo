@@ -1,3 +1,4 @@
+import { type DaemonUpdateJob, type DaemonUpdateTransfer } from "@getpaseo/protocol/daemon-updates";
 import {
   decodeTunnelStreamFrame,
   decodeViewerHttpFrame,
@@ -4748,11 +4749,62 @@ export class DaemonClient {
     });
   }
 
-  async updateDaemon(requestId?: string): Promise<DaemonUpdateResponse["payload"]> {
+  async getDaemonUpdateStatus(): Promise<DaemonUpdateJob | null> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: { type: "daemon.update.status.request", requestId },
+      timeout: 30_000,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "daemon.update.status.response" && msg.payload.requestId === requestId
+          ? { job: msg.payload.job }
+          : null,
+    }).then((result) => result.job);
+  }
+
+  async cancelDaemonUpdate(jobId: string): Promise<DaemonUpdateJob | null> {
+    const requestId = this.createRequestId();
+    return this.sendRequest({
+      requestId,
+      message: { type: "daemon.update.cancel.request", requestId, jobId },
+      timeout: 30_000,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "daemon.update.cancel.response" && msg.payload.requestId === requestId
+          ? { job: msg.payload.job }
+          : null,
+    }).then((result) => result.job);
+  }
+
+  async transferDaemonUpdate(transfer: DaemonUpdateTransfer): Promise<DaemonUpdateJob> {
+    const requestId = this.createRequestId();
+    const message = SessionInboundMessageSchema.parse({
+      type: "daemon.update.transfer.request",
+      requestId,
+      transfer,
+    });
+    return this.sendRequest({
+      requestId,
+      message,
+      timeout: 60_000,
+      options: { skipQueue: true },
+      select: (msg) =>
+        msg.type === "daemon.update.transfer.response" && msg.payload.requestId === requestId
+          ? msg.payload.job
+          : null,
+    });
+  }
+
+  async updateDaemon(
+    requestId?: string,
+    uploadId?: string,
+  ): Promise<DaemonUpdateResponse["payload"]> {
     const resolvedRequestId = this.createRequestId(requestId);
     const message = SessionInboundMessageSchema.parse({
       type: "daemon.update.request",
       requestId: resolvedRequestId,
+      ...(uploadId ? { uploadId } : {}),
     });
     return this.sendRequest({
       requestId: resolvedRequestId,

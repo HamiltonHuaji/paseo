@@ -2865,6 +2865,17 @@ export const zhCN: TranslationResources = {
           confirmMessage:
             "This will update the daemon to the latest version and restart it. Running agents will be briefly interrupted.",
           updating: "Updating...",
+          clientDownloadHint:
+            "在这台电脑下载最新 daemon 安装包，通过当前连接传给主机。依赖仍由目标主机安装。",
+          managedHint: "断开客户端不会丢失更新任务，可以回来查看进度或取消。",
+          phaseUploading: "正在传送安装包",
+          phaseVerifying: "正在检查安装包",
+          clientDownloading: "正在本机下载",
+          cancelling: "正在停止更新进程…",
+          cancelled: "更新已取消，可以重试。",
+          downloadOnHost: "由主机下载",
+          downloadOnClient: "由本机下载并传送",
+          resumeUpload: "继续传送",
           phaseStarting: "Preparing update...",
           phaseDownloading: "Downloading packages...",
           phaseInstalling: "Installing...",

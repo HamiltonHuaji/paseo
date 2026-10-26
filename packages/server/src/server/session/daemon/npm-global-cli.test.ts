@@ -126,6 +126,8 @@ describe("DefaultNpmGlobalPaseoCli", () => {
           "--no-fund",
           "--prefer-offline",
           "--color=false",
+          "--fetch-timeout=120000",
+          "--fetch-retries=1",
           "@getpaseo/cli@latest",
         ],
         timeout: undefined,

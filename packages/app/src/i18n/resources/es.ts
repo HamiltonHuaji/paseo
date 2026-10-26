@@ -2843,6 +2843,18 @@ export const es: TranslationResources = {
           confirmMessage:
             "This will update the daemon to the latest version and restart it. Running agents will be briefly interrupted.",
           updating: "Updating...",
+          clientDownloadHint:
+            "Download the latest daemon package on this computer and send it through the current connection. The daemon installs dependencies on its own host.",
+          managedHint:
+            "Updates keep running if you disconnect. You can return to inspect or cancel the current task.",
+          phaseUploading: "Sending package",
+          phaseVerifying: "Checking package",
+          clientDownloading: "Downloading on this computer",
+          cancelling: "Stopping update process…",
+          cancelled: "Update cancelled. You can retry.",
+          downloadOnHost: "Download on host",
+          downloadOnClient: "Download on this computer",
+          resumeUpload: "Resume upload",
           phaseStarting: "Preparing update...",
           phaseDownloading: "Downloading packages...",
           phaseInstalling: "Installing...",

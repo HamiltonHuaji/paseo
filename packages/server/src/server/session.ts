@@ -3401,6 +3401,8 @@ export class Session {
   }
 
   private dispatchAgentConfigMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    const update = this.daemonSession.dispatchUpdate(msg);
+    if (update) return update;
     switch (msg.type) {
       case "set_agent_mode_request":
         return this.agentConfigSession.handleSetAgentModeRequest(msg);
@@ -3434,8 +3436,6 @@ export class Session {
         return this.daemonSession.handleHubRelationshipRequest(msg);
       case "diagnostics.request":
         return this.daemonSession.handleDiagnosticsRequest(msg);
-      case "daemon.update.request":
-        return this.daemonSession.handleUpdateRequest(msg);
       case "set_daemon_config_request":
         this.emit({
           type: "set_daemon_config_response",

@@ -5,6 +5,17 @@ interface WorkerStatus {
 }
 interface StatusReader {
   getStatus: () => Promise<WorkerStatus>;
+  signal?: AbortSignal;
+}
+
+export function throwIfUpdateCancelled(signal?: AbortSignal): void {
+  // React Native's AbortSignal provides `aborted`, but not `throwIfAborted`.
+  if (signal?.aborted) {
+    throw (
+      signal.reason ??
+      Object.assign(new Error("Update cancelled by the user"), { name: "AbortError" })
+    );
+  }
 }
 
 export interface SettingsDaemonRestartDeps extends StatusReader {
@@ -81,8 +92,10 @@ async function observeReplacement(
 ): Promise<WorkerStatus> {
   const deadline = Date.now() + 600_000;
   while (Date.now() < deadline) {
+    throwIfUpdateCancelled(deps.signal);
     try {
       const current = await readSelectedWorker(previous.serverId, deps);
+      throwIfUpdateCancelled(deps.signal);
       if (current.pid !== previous.pid) return current;
     } catch (error) {
       if (!isReconnectFailure(error)) throw error;

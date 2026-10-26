@@ -12,6 +12,14 @@ import {
   type DaemonSelfUpdateSessionControllerOptions,
 } from "./daemon-self-update-session-controller.js";
 
+const updateControls = {
+  getStatus: () => null,
+  cancel: async () => null,
+  transfer: async () => {
+    throw new Error("Unexpected upload");
+  },
+};
+
 type TestUpdater = Pick<DaemonSelfUpdater, "update">;
 type RestartIntent = Parameters<DaemonSelfUpdateSessionControllerOptions["emitLifecycleIntent"]>[0];
 
@@ -39,7 +47,7 @@ function createController(input: {
       restartIntents.push(intent);
     },
     sessionLogger: createTestLogger(),
-    updater: input.updater,
+    updater: { ...updateControls, ...input.updater },
   });
 
   return { controller, emitted, restartIntents };
@@ -202,6 +210,7 @@ test("self-update progress is request-owned through the final delivery boundary"
       throw new Error("No restart is allowed in this test");
     },
     updater: {
+      ...updateControls,
       async update(input) {
         input.onProgress("starting");
         await Promise.resolve();

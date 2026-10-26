@@ -2833,6 +2833,18 @@ export const ru: TranslationResources = {
           confirmMessage:
             "Демон будет обновлён до последней версии и перезапущен. Работа агентов будет ненадолго прервана.",
           updating: "Обновление...",
+          clientDownloadHint:
+            "Download the latest daemon package on this computer and send it through the current connection. The daemon installs dependencies on its own host.",
+          managedHint:
+            "Updates keep running if you disconnect. You can return to inspect or cancel the current task.",
+          phaseUploading: "Sending package",
+          phaseVerifying: "Checking package",
+          clientDownloading: "Downloading on this computer",
+          cancelling: "Stopping update process…",
+          cancelled: "Update cancelled. You can retry.",
+          downloadOnHost: "Download on host",
+          downloadOnClient: "Download on this computer",
+          resumeUpload: "Resume upload",
           phaseStarting: "Подготовка обновления...",
           phaseDownloading: "Загрузка пакетов...",
           phaseInstalling: "Установка...",

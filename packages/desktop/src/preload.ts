@@ -1,3 +1,4 @@
+import type { DaemonPackageDownload, DaemonUpdatePackage } from "@getpaseo/protocol/daemon-updates";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { BrowserKeyboardPolicy } from "./features/browser-keyboard/index.js";
 import type { DesktopWindowChromeMode } from "./window/chrome.js";
@@ -30,6 +31,19 @@ interface AttachedBrowserRegistration {
 }
 
 contextBridge.exposeInMainWorld("paseoDesktop", {
+  daemonPackage: {
+    prepare: (serverId: string) =>
+      ipcRenderer.invoke("paseo:daemonPackage:prepare", serverId) as Promise<DaemonUpdatePackage>,
+    status: (serverId: string) =>
+      ipcRenderer.invoke(
+        "paseo:daemonPackage:status",
+        serverId,
+      ) as Promise<DaemonPackageDownload | null>,
+    read: (serverId: string, offset: number) =>
+      ipcRenderer.invoke("paseo:daemonPackage:read", { serverId, offset }) as Promise<string>,
+    cancel: (serverId: string) =>
+      ipcRenderer.invoke("paseo:daemonPackage:cancel", serverId) as Promise<void>,
+  },
   platform: process.platform,
   windowChromeMode: readWindowChromeMode(),
   invoke: (command: string, args?: Record<string, unknown>) =>

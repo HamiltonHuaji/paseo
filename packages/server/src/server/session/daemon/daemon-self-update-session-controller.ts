@@ -8,6 +8,18 @@ import {
 } from "./daemon-self-updater.js";
 import { getErrorMessage } from "@getpaseo/protocol/error-utils";
 
+type UpdateControls = Pick<DaemonSelfUpdater, "update" | "getStatus" | "cancel" | "transfer">;
+
+type DaemonUpdateControl = Extract<
+  SessionInboundMessage,
+  {
+    type:
+      | "daemon.update.status.request"
+      | "daemon.update.cancel.request"
+      | "daemon.update.transfer.request";
+  }
+>;
+
 type DaemonUpdateRequest = Extract<SessionInboundMessage, { type: "daemon.update.request" }>;
 
 const DAEMON_SELF_UPDATE_MESSAGE_TYPES: ReadonlySet<SessionInboundMessage["type"]> = new Set([
@@ -28,7 +40,7 @@ export interface DaemonSelfUpdateSessionControllerOptions {
   emit: (msg: SessionOutboundMessage) => void;
   emitLifecycleIntent: (intent: DaemonSelfUpdateRestartIntent) => void;
   sessionLogger: pino.Logger;
-  updater?: Pick<DaemonSelfUpdater, "update">;
+  updater?: UpdateControls;
 }
 
 function isDaemonSelfUpdateMessage(msg: SessionInboundMessage): msg is DaemonUpdateRequest {
@@ -42,7 +54,7 @@ export class DaemonSelfUpdateSessionController {
   private readonly emit: (msg: SessionOutboundMessage) => void;
   private readonly emitLifecycleIntent: (intent: DaemonSelfUpdateRestartIntent) => void;
   private readonly sessionLogger: pino.Logger;
-  private readonly updater: Pick<DaemonSelfUpdater, "update">;
+  private readonly updater: UpdateControls;
 
   constructor(options: DaemonSelfUpdateSessionControllerOptions) {
     this.clientId = options.clientId;
@@ -55,10 +67,51 @@ export class DaemonSelfUpdateSessionController {
   }
 
   dispatch(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (
+      msg.type === "daemon.update.status.request" ||
+      msg.type === "daemon.update.cancel.request" ||
+      msg.type === "daemon.update.transfer.request"
+    )
+      return this.handleControl(msg);
     if (!isDaemonSelfUpdateMessage(msg)) {
       return undefined;
     }
     return this.handleDaemonUpdateRequest(msg);
+  }
+
+  private async handleControl(msg: DaemonUpdateControl): Promise<void> {
+    try {
+      if (msg.type === "daemon.update.status.request") {
+        this.emit({
+          type: "daemon.update.status.response",
+          payload: { requestId: msg.requestId, job: this.updater.getStatus() },
+        });
+      } else if (msg.type === "daemon.update.cancel.request") {
+        const job = await this.updater.cancel(msg.jobId);
+        this.emit({
+          type: "daemon.update.cancel.response",
+          payload: { requestId: msg.requestId, job },
+        });
+      } else {
+        if (this.desktopManaged) throw new Error("This daemon is managed by Paseo Desktop");
+        const job = await this.updater.transfer(msg.transfer);
+        this.emit({
+          type: "daemon.update.transfer.response",
+          payload: { requestId: msg.requestId, job },
+        });
+      }
+    } catch (error) {
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId: msg.requestId,
+          requestType: msg.type,
+          error: getErrorMessage(error),
+          code:
+            error instanceof DaemonSelfUpdateInProgressError ? "already_updating" : "update_failed",
+        },
+      });
+    }
   }
 
   private async handleDaemonUpdateRequest(msg: DaemonUpdateRequest): Promise<void> {
@@ -66,6 +119,7 @@ export class DaemonSelfUpdateSessionController {
 
     try {
       const result = await this.updater.update({
+        ...(msg.uploadId ? { uploadId: msg.uploadId } : {}),
         daemonVersion: previousVersion,
         desktopManaged: this.desktopManaged,
         onProgress: (phase, output) => this.emitProgress(msg.requestId, phase, output),

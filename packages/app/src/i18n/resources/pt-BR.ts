@@ -2826,6 +2826,18 @@ export const ptBR: TranslationResources = {
           confirmMessage:
             "Isso vai atualizar o daemon para a versão mais recente e reiniciá-lo. Agentes em execução serão interrompidos brevemente.",
           updating: "Atualizando...",
+          clientDownloadHint:
+            "Download the latest daemon package on this computer and send it through the current connection. The daemon installs dependencies on its own host.",
+          managedHint:
+            "Updates keep running if you disconnect. You can return to inspect or cancel the current task.",
+          phaseUploading: "Sending package",
+          phaseVerifying: "Checking package",
+          clientDownloading: "Downloading on this computer",
+          cancelling: "Stopping update process…",
+          cancelled: "Update cancelled. You can retry.",
+          downloadOnHost: "Download on host",
+          downloadOnClient: "Download on this computer",
+          resumeUpload: "Resume upload",
           phaseStarting: "Preparando atualização...",
           phaseDownloading: "Baixando pacotes...",
           phaseInstalling: "Instalando...",

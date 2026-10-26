@@ -1,3 +1,4 @@
+import { ManagedDaemonUpdateCard } from "./daemon-update-card";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import {
   ArrowDown,
@@ -745,6 +746,14 @@ function DaemonUpdateFeedback({ state, t }: { state: DaemonUpdateState; t: TFunc
 }
 
 function UpdateDaemonCard({ host }: { host: HostProfile }) {
+  const managed = useSessionStore(
+    (state) => state.sessions[host.serverId]?.serverInfo?.features?.daemonUpdateControl === true,
+  );
+  // COMPAT(daemonUpdateControl): added after v0.13.3; retain the legacy update action until the host floor supports task control.
+  return managed ? <ManagedDaemonUpdateCard host={host} /> : <LegacyUpdateDaemonCard host={host} />;
+}
+
+function LegacyUpdateDaemonCard({ host }: { host: HostProfile }) {
   const { t } = useTranslation();
   const daemonClient = useHostRuntimeClient(host.serverId);
   const isConnected = useHostRuntimeIsConnected(host.serverId);

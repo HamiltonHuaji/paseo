@@ -1,3 +1,4 @@
+import type { DaemonPackageDownload, DaemonUpdatePackage } from "@getpaseo/protocol/daemon-updates";
 import { Platform } from "react-native";
 import { getElectronHost } from "@/desktop/electron/host";
 import type { BrowserKeyboardPolicy } from "@/desktop/browser/shortcuts";
@@ -220,7 +221,15 @@ export interface DesktopInvokeBridge {
   invoke?: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
+export interface DesktopDaemonPackageBridge {
+  prepare(serverId: string): Promise<DaemonUpdatePackage>;
+  status(serverId: string): Promise<DaemonPackageDownload | null>;
+  read(serverId: string, offset: number): Promise<string>;
+  cancel(serverId: string): Promise<void>;
+}
+
 export interface DesktopHostBridge {
+  daemonPackage?: DesktopDaemonPackageBridge;
   platform?: string;
   windowChromeMode?: string;
   invoke?: DesktopInvokeBridge["invoke"];

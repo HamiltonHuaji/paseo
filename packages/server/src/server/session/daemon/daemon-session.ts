@@ -347,9 +347,7 @@ export class DaemonSession {
     }
   }
 
-  async handleUpdateRequest(
-    msg: Extract<SessionInboundMessage, { type: "daemon.update.request" }>,
-  ): Promise<void> {
-    await this.selfUpdate.dispatch(msg);
+  dispatchUpdate(msg: SessionInboundMessage): Promise<void> | undefined {
+    return this.selfUpdate.dispatch(msg);
   }
 }

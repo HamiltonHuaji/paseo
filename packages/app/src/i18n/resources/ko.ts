@@ -2797,6 +2797,18 @@ export const ko: TranslationResources = {
           confirmMessage:
             "그러면 데몬이 최신 버전으로 업데이트되고 다시 시작됩니다. 실행 중인 에이전트가 잠시 중단됩니다.",
           updating: "업데이트 중...",
+          clientDownloadHint:
+            "Download the latest daemon package on this computer and send it through the current connection. The daemon installs dependencies on its own host.",
+          managedHint:
+            "Updates keep running if you disconnect. You can return to inspect or cancel the current task.",
+          phaseUploading: "Sending package",
+          phaseVerifying: "Checking package",
+          clientDownloading: "Downloading on this computer",
+          cancelling: "Stopping update process…",
+          cancelled: "Update cancelled. You can retry.",
+          downloadOnHost: "Download on host",
+          downloadOnClient: "Download on this computer",
+          resumeUpload: "Resume upload",
           phaseStarting: "업데이트 준비 중...",
           phaseDownloading: "패키지 다운로드 중...",
           phaseInstalling: "설치 중...",

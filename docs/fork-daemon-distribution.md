@@ -60,8 +60,8 @@ full external daemon restart or a host reboot after the package update.
 
 ## Explicit self-update contract
 
-After the user confirms **Update daemon** for a standalone fork daemon, execute the distribution
-manifest's install command. Do not gate the request or installation on the app version, the running
+After the user confirms **Update daemon** for a standalone fork daemon, install that distribution
+from its release URL or a complete client-supplied release archive. Do not gate the request or installation on the app version, the running
 worker version, the global npm package version, whether any two of those versions match, whether
 the target version is newer, or whether the worker still resides under the current npm package
 directory. npm may replace that directory while the old worker remains alive; same-version
@@ -81,9 +81,21 @@ already retires the old package to a hidden `.paseo-fork-*` directory before rep
 `cleanup` warning about that directory is non-fatal when npm finishes successfully; it means npm
 could not remove the retired tree, not that the active distribution is invalid.
 
-The update request streams bounded npm output to its requesting client and emits an installing
-heartbeat while npm is silent. The client keeps only a bounded tail for display; update output is not
-persisted or broadcast to other clients.
+The daemon owns the update task. A client with update-control capability can read its current phase,
+bounded output tail, and terminal result after reconnecting, and can cancel it from another connection.
+Cancellation stops npm and its child processes before releasing the installation slot; it does not
+roll back files npm already replaced. Network fetches have bounded attempts, while installation keeps
+the slow-filesystem rule above. Legacy requests still receive their progress stream.
+
+Desktop clients can download the release asset on demand and transfer it over their existing direct
+or encrypted relay connection. The daemon verifies the completed archive against its advertised
+size, checksum, package identity, and selected version before invoking npm. Host-specific native
+dependencies may still need npm downloads on the daemon. An interrupted transfer can resume from the
+acknowledged offset; abandoned transfers expire and release temporary storage. This path adds no
+pre-downloaded daemon archive to the desktop installer.
+
+Older hosts need one installation containing update-control support before clients can manage their
+updater. An upgraded client cannot retroactively cancel an old host's untracked npm process.
 
 After the one-time manual installation of a release containing this behavior, replace the old
 supervisor as well:
