@@ -176,13 +176,37 @@ describe("session chronology", () => {
           : undefined,
     }),
   );
-  it("keeps time strictly vertical with a compact gap, independently of branches and canvas width", () => {
-    const layout = arrangeSessions(sessions, "created", "oldest");
-    for (let i = 1; i < layout.length; i++) {
-      expect(layout[i].row! - layout[i - 1].row!).toBe(SESSION_CARD_SIZE.height + 0.5);
+  it("keeps interleaved trees in separate compact regions with time vertical inside each tree", () => {
+    const forest = sessions.slice(0, 8).map((session, index) =>
+      Object.assign({}, session, {
+        forkedFrom:
+          index < 2
+            ? undefined
+            : {
+                agentId: sessions[index - 2].id,
+                forkedAt: session.createdAt.toISOString(),
+              },
+      }),
+    );
+    for (const order of ["oldest", "newest"] as const) {
+      const layout = arrangeSessions(forest, "created", order);
+      expect(arrangeSessions(forest.toReversed(), "created", order)).toEqual(layout);
+      const placements = new Map(layout.map((p) => [p.id, p]));
+      const trees: BoardPlacement[][] = [[], []];
+      for (const [index, session] of forest.entries())
+        trees[index % 2].push(placements.get(session.id)!);
+      for (const tree of trees) {
+        expect(new Set(tree.map((p) => p.column)).size).toBe(1);
+        for (let i = 1; i < tree.length; i++)
+          expect(tree[i].row! - tree[i - 1].row!).toBe(
+            (order === "oldest" ? 1 : -1) * (SESSION_CARD_SIZE.height + 0.5),
+          );
+      }
+      expect(Math.abs(trees[0][0].column! - trees[1][0].column!)).toBeGreaterThan(
+        SESSION_CARD_SIZE.width,
+      );
+      expect(Math.max(...layout.map((p) => p.row! + p.height!))).toBeLessThan(50);
     }
-    expect(layout[1].column).toBeGreaterThan(layout[0].column!);
-    expect(layout[2].column).toBe(layout[0].column);
     expect(sessionNodes(sessions, "Untitled")[1].basedOn).toBe("session-0");
   });
   it("sorts each event separately and places missing events last in both directions", () => {
@@ -190,11 +214,18 @@ describe("session chronology", () => {
     expect(arrangeSessions(sessions, "created", "newest")[0].id).toBe("session-11");
     expect(
       arrangeSessions(sessions, "forked", "oldest")
-        .slice(0, 2)
+        .filter((p) => p.id === "session-1" || p.id === "session-3")
         .map((p) => p.id),
     ).toEqual(["session-1", "session-3"]);
-    for (const order of ["oldest", "newest"] as const)
-      expect(arrangeSessions(sessions, "reply", order).at(-1)?.id).toBe("session-0");
+    for (const order of ["oldest", "newest"] as const) {
+      const family = arrangeSessions(sessions.slice(0, 4), "reply", order);
+      const root = family.find((p) => p.id === "session-0")!;
+      for (const id of ["session-1", "session-3"])
+        expect(root.row).toBeGreaterThan(family.find((p) => p.id === id)!.row!);
+      const forked = arrangeSessions(sessions.slice(0, 4), "forked", order);
+      const source = forked.find((p) => p.id === "session-0")!;
+      expect(source.row).toBeLessThan(forked.find((p) => p.id === "session-1")!.row!);
+    }
   });
   it("shows an out-of-workspace source without inventing a parent node", () => {
     const orphan: CanvasSession = {
@@ -203,6 +234,40 @@ describe("session chronology", () => {
     };
     expect(sessionNodes([orphan], "Untitled")[0].basedOn).toBe("elsewhere");
     expect(arrangeSessions([orphan], "created", "oldest")[0].column).toBe(1);
+  });
+  it("stacks small independent trees beside a tall tree and keeps saved cards when a branch arrives", () => {
+    const chain = Array.from({ length: 16 }, (_, index) => ({
+      ...sessions[0],
+      id: `chain-${index}`,
+      createdAt: new Date(Date.UTC(2026, 8, index + 1)),
+      forkedFrom: index ? { agentId: `chain-${index - 1}`, forkedAt: "2026-09-01" } : undefined,
+    }));
+    const roots = sessions.filter((s) => !s.forkedFrom);
+    const forest = [...chain, ...roots];
+    const arranged = arrangeSessions(forest, "created", "oldest");
+    const bottom = arranged.find((p) => p.id === "chain-15")!;
+    for (const root of roots) {
+      const card = arranged.find((p) => p.id === root.id)!;
+      expect(card.column).toBeGreaterThan(SESSION_CARD_SIZE.width);
+      expect(card.row! + card.height!).toBeLessThanOrEqual(bottom.row! + bottom.height!);
+    }
+    const added = {
+      ...sessions[1],
+      id: "new-branch",
+      forkedFrom: { agentId: "chain-2", forkedAt: "2026-12-01" },
+    };
+    const saved = arranged.map((p) => Object.assign({}, p, { column: p.column! + 50 }));
+    const extended = addSessionPlacements({
+      sessions: [...forest, added],
+      placements: saved,
+      time: "created",
+      order: "oldest",
+    });
+    expect(extended.slice(0, saved.length)).toEqual(saved);
+    expect(extended.at(-1)!.row).toBe(
+      saved.find((p) => p.id === "chain-15")!.row! + SESSION_CARD_SIZE.height + 0.5,
+    );
+    expect(extended.at(-1)!.column).toBe(saved.find((p) => p.id === "chain-2")!.column);
   });
   it("groups a context tree while keeping a deep single branch in one column", () => {
     const tree = [
@@ -260,7 +325,12 @@ describe("session chronology", () => {
       },
       sessions[1],
     ];
-    expect(arrangeSessions(cyclic, "relationships", "oldest")).toHaveLength(2);
+    for (const mode of ["relationships", "created", "forked", "reply", "input"] as const) {
+      expect(arrangeSessions(cyclic, mode, "oldest")).toHaveLength(2);
+      expect(arrangeSessions(cyclic.toReversed(), mode, "oldest")).toEqual(
+        arrangeSessions(cyclic, mode, "oldest"),
+      );
+    }
     expect(sessionAncestors("session-0", cyclic).map((s) => s.id)).toEqual(["session-1"]);
   });
 });
