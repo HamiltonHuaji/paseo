@@ -22,6 +22,10 @@ class FakeDaemonClient {
 }
 
 class FakeTimelineRuntime {
+  readonly replacements: Array<{ serverId: string; agentId: string }> = [];
+  refreshAgentTimeline(requestedServerId: string, requestedAgentId: string) {
+    this.replacements.push({ serverId: requestedServerId, agentId: requestedAgentId });
+  }
   readonly requests: Array<{
     serverId: string;
     agentId: string;
@@ -261,7 +265,7 @@ describe("ensureAgentIsInitialized", () => {
 });
 
 describe("refreshAgent", () => {
-  it("fetches a bounded projected tail after refreshing the agent", async () => {
+  it("hands history replacement to the sync owner after refreshing the agent", async () => {
     const client = new FakeDaemonClient();
     const runtime = new FakeTimelineRuntime();
     useSessionStore.getState().initializeSession(serverId, client as never);
@@ -275,16 +279,7 @@ describe("refreshAgent", () => {
     });
 
     expect(client.refreshedAgentIds).toEqual([agentId]);
-    expect(runtime.requests).toEqual([
-      {
-        serverId,
-        agentId,
-        request: {
-          direction: "tail",
-          limit: TIMELINE_FETCH_PAGE_SIZE,
-          projection: "projected",
-        },
-      },
-    ]);
+    expect(runtime.replacements).toEqual([{ serverId, agentId }]);
+    expect(runtime.requests).toEqual([]);
   });
 });

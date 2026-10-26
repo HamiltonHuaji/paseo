@@ -2230,19 +2230,7 @@ function WorkspaceScreenContent({
       toast.show(t("workspace.tabs.toasts.reloadingAgent"), { durationMs: null });
       try {
         await client.refreshAgent(agentId);
-        // Send the existing cursor so the server detects the new epoch and
-        // returns reset:true. Without a cursor, the server returns reset:false
-        // and the client takes the incremental path, where new-epoch rows are
-        // dropped against the stale cursor.
-        const sessionState = useSessionStore.getState().sessions[normalizedServerId];
-        const currentCursor = sessionState?.agentTimelineCursor.get(agentId);
-        await getHostRuntimeStore().fetchAgentTimeline(normalizedServerId, agentId, {
-          direction: "tail",
-          projection: "projected",
-          ...(currentCursor
-            ? { cursor: { epoch: currentCursor.epoch, seq: currentCursor.endSeq } }
-            : {}),
-        });
+        getHostRuntimeStore().refreshAgentTimeline(normalizedServerId, agentId);
         toast.show(t("workspace.tabs.toasts.reloadedAgent"), { variant: "success" });
       } catch (error) {
         toast.error(

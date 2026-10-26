@@ -11,7 +11,7 @@ import {
   refreshInitTimeout,
 } from "@/utils/agent-initialization";
 import { getHostRuntimeStore, type HostRuntimeStore } from "@/runtime/host-runtime";
-import { planTimelineResumeFetch, planTimelineTailFetch } from "@/timeline/timeline-sync-plan";
+import { planTimelineResumeFetch } from "@/timeline/timeline-sync-plan";
 import { i18n } from "@/i18n/i18next";
 
 export type SetAgentInitializing = (agentId: string, initializing: boolean) => void;
@@ -82,7 +82,7 @@ export interface RefreshAgentInput {
   serverId: string;
   agentId: string;
   client: Pick<DaemonClient, "refreshAgent"> | null;
-  runtime: Pick<HostRuntimeStore, "fetchAgentTimeline">;
+  runtime: Pick<HostRuntimeStore, "refreshAgentTimeline">;
   setAgentInitializing: SetAgentInitializing;
   hostDisconnectedMessage?: string;
 }
@@ -96,7 +96,7 @@ export async function refreshAgent(input: RefreshAgentInput): Promise<void> {
 
   try {
     await client.refreshAgent(agentId);
-    await runtime.fetchAgentTimeline(serverId, agentId, planTimelineTailFetch());
+    runtime.refreshAgentTimeline(serverId, agentId);
   } catch (error) {
     setAgentInitializing(agentId, false);
     throw error;

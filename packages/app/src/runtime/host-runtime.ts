@@ -2719,6 +2719,10 @@ export class HostRuntimeStore {
     await replica.prepare(agentId);
   }
 
+  refreshAgentTimeline(serverId: string, agentId: string): void {
+    useSessionStore.getState().sessions[serverId]?.viewedTimelineSync?.replaceTimeline(agentId);
+  }
+
   async fetchAgentTimeline(
     serverId: string,
     agentId: string,
