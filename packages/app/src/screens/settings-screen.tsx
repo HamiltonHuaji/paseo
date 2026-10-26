@@ -652,7 +652,10 @@ function HostVersionRow({
   const { t } = useTranslation();
   const isConnected = useHostRuntimeIsConnected(host.serverId);
   const daemonVersion = useSessionStore(
-    (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
+    (state) =>
+      state.sessions[host.serverId]?.serverInfo?.distribution?.version ??
+      state.sessions[host.serverId]?.serverInfo?.version ??
+      null,
   );
 
   const rowStyle = useMemo(

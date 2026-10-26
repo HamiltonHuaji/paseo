@@ -23,6 +23,8 @@ import {
 } from "./experiment-canvas-layout";
 
 export function ExperimentCanvas(props: {
+  active?: boolean;
+  layoutRevision?: number;
   experiments: ExperimentRecord[];
   detailByExperiment: Map<string, ExperimentDetail>;
   storedPlacements: ExperimentBoardPlacement[];

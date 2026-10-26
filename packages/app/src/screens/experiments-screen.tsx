@@ -442,7 +442,9 @@ function ExperimentsBoard({
             ) : null}
             {arrangeError ? <Message text={arrangeError} error /> : null}
             <ExperimentCanvas
-              key={`${serverId}:${projectId}:${canvasLayoutVersion}`}
+              key={`${serverId}:${projectId}`}
+              active={active}
+              layoutRevision={canvasLayoutVersion}
               experiments={experiments}
               detailByExperiment={detailByExperiment}
               storedPlacements={boardLayoutQuery.data ?? []}

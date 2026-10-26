@@ -1,6 +1,15 @@
 import { sessionCanvas } from "./session-canvas";
 import { heartbeatSettings } from "./heartbeat-settings";
 export const en = {
+  boardCanvas: {
+    zoomOut: "Zoom out",
+    zoomIn: "Zoom in",
+    zoomLevel: "Zoom: {{value}}",
+    zoomHint: "Scroll to pan · Ctrl+scroll to zoom",
+    actualSize: "Actual size (100%)",
+    fitAll: "Fit all",
+    fitSelection: "Fit selection",
+  },
   sessionCanvas: sessionCanvas["en"],
   heartbeats: heartbeatSettings["en"],
   paneFind: {

@@ -4,6 +4,15 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ja: TranslationResources = {
+  boardCanvas: {
+    zoomOut: "縮小",
+    zoomIn: "拡大",
+    zoomLevel: "倍率：{{value}}",
+    zoomHint: "スクロールで移動 · Ctrl+スクロールでズーム",
+    actualSize: "実際のサイズ (100%)",
+    fitAll: "全体を表示",
+    fitSelection: "選択項目を表示",
+  },
   sessionCanvas: sessionCanvas["ja"],
   heartbeats: heartbeatSettings["ja"],
   paneFind: {

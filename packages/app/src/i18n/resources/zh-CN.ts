@@ -4,6 +4,15 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const zhCN: TranslationResources = {
+  boardCanvas: {
+    zoomOut: "缩小",
+    zoomIn: "放大",
+    zoomLevel: "缩放比例：{{value}}",
+    zoomHint: "滚轮平移 · Ctrl+滚轮缩放",
+    actualSize: "恢复 100%",
+    fitAll: "适应全部",
+    fitSelection: "聚焦选中项",
+  },
   sessionCanvas: sessionCanvas["zh-CN"],
   heartbeats: heartbeatSettings["zh-CN"],
   paneFind: {

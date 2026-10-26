@@ -121,3 +121,7 @@ export const Workflow = StubIcon;
 export const ZoomIn = StubIcon;
 
 export const ZoomOut = StubIcon;
+
+export const Focus = StubIcon;
+export const Minus = StubIcon;
+export const Grip = StubIcon;

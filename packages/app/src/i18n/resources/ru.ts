@@ -4,6 +4,15 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ru: TranslationResources = {
+  boardCanvas: {
+    zoomOut: "Уменьшить",
+    zoomIn: "Увеличить",
+    zoomLevel: "Масштаб: {{value}}",
+    zoomHint: "Прокрутка — перемещение · Ctrl+прокрутка — масштаб",
+    actualSize: "Исходный размер (100%)",
+    fitAll: "Показать всё",
+    fitSelection: "Показать выбранное",
+  },
   sessionCanvas: sessionCanvas["ru"],
   heartbeats: heartbeatSettings["ru"],
   paneFind: {

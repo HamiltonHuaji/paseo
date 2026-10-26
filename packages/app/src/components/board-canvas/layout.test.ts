@@ -17,6 +17,15 @@ import {
   type BoardPlacement,
 } from "./layout";
 
+import {
+  canvasDragDelta,
+  canvasWheelDelta,
+  fitCanvasCamera,
+  zoomCamera,
+  MIN_CANVAS_ZOOM,
+  MAX_CANVAS_ZOOM,
+} from "./camera";
+
 const nodes: BoardNode[] = [
   { id: "a", title: "Baseline", basedOn: null, goal: "Research", createdAt: "2026-01-01" },
   { id: "b", title: "Resume", basedOn: "a", goal: "Research", createdAt: "2026-01-02" },
@@ -329,5 +338,51 @@ describe("host-qualified session relationships", () => {
         ],
       })[1].basedOn,
     ).toBe(source.id);
+  });
+});
+
+describe("canvas view coordinates", () => {
+  it("keeps the same world point under the cursor across zoom and clamp boundaries", () => {
+    const camera = { x: -240, y: 72, zoom: 0.8 };
+    const cursor = { x: 430, y: 290 };
+    for (const target of [0.001, 0.5, 1, 2, 99]) {
+      const result = zoomCamera(camera, target, cursor);
+      expect(result.zoom).toBeGreaterThanOrEqual(MIN_CANVAS_ZOOM);
+      expect(result.zoom).toBeLessThanOrEqual(MAX_CANVAS_ZOOM);
+      expect((cursor.x - result.x) / result.zoom).toBeCloseTo((cursor.x - camera.x) / camera.zoom);
+      expect((cursor.y - result.y) / result.zoom).toBeCloseTo((cursor.y - camera.y) / camera.zoom);
+      const restored = zoomCamera(result, camera.zoom, cursor);
+      expect(restored.x).toBeCloseTo(camera.x);
+      expect(restored.y).toBeCloseTo(camera.y);
+    }
+  });
+  it("fits actual visible card bounds with room for controls without changing placements", () => {
+    const cards = [
+      { id: "a", column: 50, row: 20, width: 20, height: 12 },
+      { id: "b", column: 90, row: 60, width: 30, height: 20 },
+    ];
+    const snapshot = structuredClone(cards);
+    const camera = fitCanvasCamera(cards, { width: 900, height: 600 })!;
+    for (const card of cards) {
+      expect(camera.x + card.column * 24 * camera.zoom).toBeGreaterThanOrEqual(23.99);
+      expect(camera.y + card.row * 24 * camera.zoom).toBeGreaterThanOrEqual(23.99);
+      expect(camera.x + (card.column + card.width) * 24 * camera.zoom).toBeLessThanOrEqual(876.01);
+      expect(camera.y + (card.row + card.height) * 24 * camera.zoom).toBeLessThanOrEqual(528.01);
+    }
+    expect(cards).toEqual(snapshot);
+    expect(fitCanvasCamera([], { width: 900, height: 600 })).toBeNull();
+    expect(fitCanvasCamera(cards, { width: 0, height: 0 })).toBeNull();
+  });
+  it("converts the same pointer movement back to world coordinates at every scale", () => {
+    for (const zoom of [0.1, 0.5, 1, 2, 3]) {
+      const delta = canvasDragDelta({ dx: 72 * zoom, dy: -48 * zoom }, zoom);
+      expect(delta.dx).toBeCloseTo(72);
+      expect(delta.dy).toBeCloseTo(-48);
+    }
+  });
+  it("normalizes wheel line and page units before pan or zoom", () => {
+    expect(canvasWheelDelta({ deltaX: 1, deltaY: 2, deltaMode: 0 }, 600)).toEqual({ x: 1, y: 2 });
+    expect(canvasWheelDelta({ deltaX: 1, deltaY: 2, deltaMode: 1 }, 600)).toEqual({ x: 16, y: 32 });
+    expect(canvasWheelDelta({ deltaX: 0, deltaY: 1, deltaMode: 2 }, 600)).toEqual({ x: 0, y: 600 });
   });
 });

@@ -26,17 +26,16 @@ import {
   type BoardSize,
 } from "./layout";
 
+import { canvasDragDelta, fitCanvasCamera, zoomCamera, type CanvasCamera } from "./camera";
+import { CanvasControls } from "./controls";
+import { useCanvasInput } from "./input";
+
 const GRID_SIZE = BOARD_CANVAS_GRID_SIZE;
 const MIN_WIDTH = 9;
 const MIN_HEIGHT = 6;
 const ThemedGrip = withUnistyles(Grip);
 const ThemedMaximize2 = withUnistyles(Maximize2);
 const mutedIconMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
-
-interface CanvasCamera {
-  x: number;
-  y: number;
-}
 
 interface BoardCanvasProps {
   active?: boolean;
@@ -76,12 +75,11 @@ export function BoardCanvas({
   const [localPlacements, setLocalPlacements] = useState<Record<string, ResolvedPlacement>>({});
   // Accept an explicit layout reset without moving the user's canvas camera.
   useEffect(() => setLocalPlacements({}), [layoutRevision]);
-  const [camera, setCameraState] = useState<CanvasCamera>({ x: 0, y: 0 });
+  const [camera, setCameraState] = useState<CanvasCamera>({ x: 0, y: 0, zoom: 1 });
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const cameraRef = useRef(camera);
   const viewportRef = useRef<View>(null);
-  const pointerInsideViewportRef = useRef(false);
-  const panOriginRef = useRef({ x: 0, y: 0 });
+  const panOriginRef = useRef(camera);
   const placements = useMemo(
     () =>
       new Map(
@@ -108,9 +106,11 @@ export function BoardCanvas({
     const placement = placements.get(focusRequest.id);
     if (!placement) return;
     focusedRequest.current = focusRequest;
+    const zoom = cameraRef.current.zoom;
     updateCamera({
-      x: (viewportSize.width - placement.width * GRID_SIZE) / 2 - placement.column * GRID_SIZE,
-      y: GRID_SIZE - placement.row * GRID_SIZE,
+      x: viewportSize.width / 2 - (placement.column + placement.width / 2) * GRID_SIZE * zoom,
+      y: GRID_SIZE - placement.row * GRID_SIZE * zoom,
+      zoom,
     });
   }, [active, focusRequest, placements, updateCamera, viewportSize]);
   const previewPlacement = useCallback((placement: ResolvedPlacement) => {
@@ -129,10 +129,11 @@ export function BoardCanvas({
       geometryStyle({
         width: worldDimensions.width,
         height: worldDimensions.height,
-        transform: [{ translateX: camera.x }, { translateY: camera.y }],
+        transformOrigin: "top left",
+        transform: [{ translateX: camera.x }, { translateY: camera.y }, { scale: camera.zoom }],
       }),
     ],
-    [camera.x, camera.y, worldDimensions.height, worldDimensions.width],
+    [camera.x, camera.y, camera.zoom, worldDimensions.height, worldDimensions.width],
   );
   const handleLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -144,32 +145,40 @@ export function BoardCanvas({
     },
     [active],
   );
-  useEffect(() => {
-    if (!isWeb || !active) return;
-    const element = viewportRef.current as unknown as HTMLElement | null;
-    if (!element) return;
-    const handlePointerEnter = () => {
-      pointerInsideViewportRef.current = true;
-    };
-    const handlePointerLeave = () => {
-      pointerInsideViewportRef.current = false;
-    };
-    const handleWheel = (event: WheelEvent) => {
-      if (!pointerInsideViewportRef.current && !element.matches(":hover")) return;
-      if (event.cancelable) event.preventDefault();
-      const current = cameraRef.current;
-      updateCamera({ x: current.x - event.deltaX, y: current.y - event.deltaY });
-    };
-    element.addEventListener("pointerenter", handlePointerEnter);
-    element.addEventListener("pointerleave", handlePointerLeave);
-    element.addEventListener("wheel", handleWheel, { passive: false });
-    return () => {
-      pointerInsideViewportRef.current = false;
-      element.removeEventListener("pointerenter", handlePointerEnter);
-      element.removeEventListener("pointerleave", handlePointerLeave);
-      element.removeEventListener("wheel", handleWheel);
-    };
-  }, [active, updateCamera]);
+  const zoomViewport = useCallback(
+    (zoom: number) => {
+      updateCamera(
+        zoomCamera(cameraRef.current, zoom, {
+          x: viewportSize.width / 2,
+          y: viewportSize.height / 2,
+        }),
+      );
+    },
+    [updateCamera, viewportSize],
+  );
+  const fitAll = useCallback(() => {
+    const cards = visibleExperiments.flatMap((node) => {
+      const placement = placements.get(node.id);
+      return placement ? [placement] : [];
+    });
+    const next = fitCanvasCamera(cards, viewportSize);
+    if (next) updateCamera(next);
+  }, [visibleExperiments, placements, viewportSize, updateCamera]);
+  const focusSelection = useCallback(() => {
+    if (!selectedExperiment || (visibleIds && !visibleIds.has(selectedExperiment))) return;
+    const card = placements.get(selectedExperiment);
+    const next = fitCanvasCamera(card ? [card] : [], viewportSize);
+    if (next) updateCamera(next);
+  }, [selectedExperiment, visibleIds, placements, viewportSize, updateCamera]);
+  useCanvasInput({
+    active,
+    viewportRef,
+    cameraRef,
+    updateCamera,
+    onZoom: zoomViewport,
+    onFit: fitAll,
+    onFocus: focusSelection,
+  });
   const canvasPanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -181,6 +190,7 @@ export function BoardCanvas({
         },
         onPanResponderMove: (_, gesture) => {
           updateCamera({
+            ...panOriginRef.current,
             x: panOriginRef.current.x + gesture.dx,
             y: panOriginRef.current.y + gesture.dy,
           });
@@ -192,9 +202,12 @@ export function BoardCanvas({
     enabled: active,
     onGrant: () => {
       panOriginRef.current = { ...cameraRef.current };
+      if (isWeb)
+        (viewportRef.current as unknown as HTMLElement | null)?.focus({ preventScroll: true });
     },
     onMove: ({ dx, dy }) => {
       updateCamera({
+        ...panOriginRef.current,
         x: panOriginRef.current.x + dx,
         y: panOriginRef.current.y + dy,
       });
@@ -205,14 +218,21 @@ export function BoardCanvas({
   });
 
   return (
-    <View ref={viewportRef} style={styles.viewport} onLayout={handleLayout}>
+    <View
+      ref={viewportRef}
+      style={styles.viewport}
+      onLayout={handleLayout}
+      testID="board-canvas"
+      tabIndex={isWeb ? 0 : undefined}
+    >
       <GridLines width={viewportSize.width} height={viewportSize.height} camera={camera} />
       <View
         style={styles.panSurface}
+        testID="canvas-pan-surface"
         onPointerDown={handleCanvasPointerDown}
         {...(!isWeb ? canvasPanResponder.panHandlers : {})}
       />
-      <View pointerEvents="box-none" style={worldStyle}>
+      <View pointerEvents="box-none" style={worldStyle} testID="canvas-world">
         <ThemedLineageOverlay
           experiments={visibleExperiments}
           placements={placements}
@@ -228,6 +248,7 @@ export function BoardCanvas({
             <CanvasCard
               key={experiment.id}
               active={active}
+              zoom={camera.zoom}
               experiment={experiment}
               content={renderContent(experiment.id)}
               hoverContent={renderHover?.(experiment.id)}
@@ -240,12 +261,25 @@ export function BoardCanvas({
           );
         })}
       </View>
+      <CanvasControls
+        zoom={camera.zoom}
+        canFit={visibleExperiments.length > 0}
+        canFocus={
+          !!selectedExperiment &&
+          placements.has(selectedExperiment) &&
+          (!visibleIds || visibleIds.has(selectedExperiment))
+        }
+        onZoom={zoomViewport}
+        onFit={fitAll}
+        onFocus={focusSelection}
+      />
     </View>
   );
 }
 
 function CanvasCard({
   active,
+  zoom,
   experiment,
   content,
   hoverContent,
@@ -256,6 +290,7 @@ function CanvasCard({
   onCommitPlacement,
 }: {
   active: boolean;
+  zoom: number;
   experiment: BoardNode;
   content: ReactNode;
   hoverContent?: ReactNode;
@@ -267,6 +302,9 @@ function CanvasCard({
 }) {
   const placementRef = useRef(placement);
   const gestureOriginRef = useRef(placement);
+  const zoomRef = useRef(zoom);
+  const gestureZoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   const previewRef = useRef(onPreviewPlacement);
   const commitRef = useRef(onCommitPlacement);
   placementRef.current = placement;
@@ -281,16 +319,36 @@ function CanvasCard({
           Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
         onPanResponderGrant: () => {
           gestureOriginRef.current = placementRef.current;
+          gestureZoomRef.current = zoomRef.current;
         },
         onPanResponderMove: (_, gesture) => {
-          previewRef.current(movePlacement(gestureOriginRef.current, gesture, false));
+          previewRef.current(
+            movePlacement(
+              gestureOriginRef.current,
+              canvasDragDelta(gesture, gestureZoomRef.current),
+              false,
+            ),
+          );
         },
         onPanResponderRelease: (_, gesture) => {
           if (Math.abs(gesture.dx) < 3 && Math.abs(gesture.dy) < 3) onSelect(experiment.id);
-          else commitRef.current(movePlacement(gestureOriginRef.current, gesture, true));
+          else
+            commitRef.current(
+              movePlacement(
+                gestureOriginRef.current,
+                canvasDragDelta(gesture, gestureZoomRef.current),
+                true,
+              ),
+            );
         },
         onPanResponderTerminate: (_, gesture) => {
-          commitRef.current(movePlacement(gestureOriginRef.current, gesture, true));
+          commitRef.current(
+            movePlacement(
+              gestureOriginRef.current,
+              canvasDragDelta(gesture, gestureZoomRef.current),
+              true,
+            ),
+          );
         },
       }),
     [experiment.id, onSelect],
@@ -299,13 +357,27 @@ function CanvasCard({
     enabled: active,
     onGrant: () => {
       gestureOriginRef.current = placementRef.current;
+      gestureZoomRef.current = zoomRef.current;
     },
     onMove: (gesture) => {
-      previewRef.current(movePlacement(gestureOriginRef.current, gesture, false));
+      previewRef.current(
+        movePlacement(
+          gestureOriginRef.current,
+          canvasDragDelta(gesture, gestureZoomRef.current),
+          false,
+        ),
+      );
     },
     onRelease: (gesture) => {
       if (Math.abs(gesture.dx) < 3 && Math.abs(gesture.dy) < 3) onSelect(experiment.id);
-      else commitRef.current(movePlacement(gestureOriginRef.current, gesture, true));
+      else
+        commitRef.current(
+          movePlacement(
+            gestureOriginRef.current,
+            canvasDragDelta(gesture, gestureZoomRef.current),
+            true,
+          ),
+        );
     },
   });
   const resizeResponder = useMemo(
@@ -315,15 +387,34 @@ function CanvasCard({
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: () => {
           gestureOriginRef.current = placementRef.current;
+          gestureZoomRef.current = zoomRef.current;
         },
         onPanResponderMove: (_, gesture) => {
-          previewRef.current(resizePlacement(gestureOriginRef.current, gesture, false));
+          previewRef.current(
+            resizePlacement(
+              gestureOriginRef.current,
+              canvasDragDelta(gesture, gestureZoomRef.current),
+              false,
+            ),
+          );
         },
         onPanResponderRelease: (_, gesture) => {
-          commitRef.current(resizePlacement(gestureOriginRef.current, gesture, true));
+          commitRef.current(
+            resizePlacement(
+              gestureOriginRef.current,
+              canvasDragDelta(gesture, gestureZoomRef.current),
+              true,
+            ),
+          );
         },
         onPanResponderTerminate: (_, gesture) => {
-          commitRef.current(resizePlacement(gestureOriginRef.current, gesture, true));
+          commitRef.current(
+            resizePlacement(
+              gestureOriginRef.current,
+              canvasDragDelta(gesture, gestureZoomRef.current),
+              true,
+            ),
+          );
         },
       }),
     [],
@@ -332,12 +423,25 @@ function CanvasCard({
     enabled: active,
     onGrant: () => {
       gestureOriginRef.current = placementRef.current;
+      gestureZoomRef.current = zoomRef.current;
     },
     onMove: (gesture) => {
-      previewRef.current(resizePlacement(gestureOriginRef.current, gesture, false));
+      previewRef.current(
+        resizePlacement(
+          gestureOriginRef.current,
+          canvasDragDelta(gesture, gestureZoomRef.current),
+          false,
+        ),
+      );
     },
     onRelease: (gesture) => {
-      commitRef.current(resizePlacement(gestureOriginRef.current, gesture, true));
+      commitRef.current(
+        resizePlacement(
+          gestureOriginRef.current,
+          canvasDragDelta(gesture, gestureZoomRef.current),
+          true,
+        ),
+      );
     },
   });
   const [isHovered, setIsHovered] = useState(false);
@@ -364,6 +468,7 @@ function CanvasCard({
       <View style={cardStyle}>
         <View
           style={styles.cardHeader}
+          testID={`canvas-card-drag-${experiment.id}`}
           onPointerDown={handleDragPointerDown}
           {...(!isWeb ? dragResponder.panHandlers : {})}
         >
@@ -383,6 +488,7 @@ function CanvasCard({
         </PressHighlight>
         <View
           style={styles.resizeHandle}
+          testID={`canvas-card-resize-${experiment.id}`}
           onPointerDown={handleResizePointerDown}
           {...(!isWeb ? resizeResponder.panHandlers : {})}
         >
@@ -411,8 +517,11 @@ function GridLines({
   height: number;
   camera: CanvasCamera;
 }) {
-  const verticalLines = gridLinePositions(width, camera.x);
-  const horizontalLines = gridLinePositions(height, camera.y);
+  // Show coarser world-grid intervals at overview scales, rather than a dense grey fill.
+  const gridStep =
+    GRID_SIZE * camera.zoom * Math.max(1, 2 ** Math.ceil(Math.log2(0.5 / camera.zoom)));
+  const verticalLines = gridLinePositions(width, camera.x, gridStep);
+  const horizontalLines = gridLinePositions(height, camera.y, gridStep);
   return (
     <View style={styles.grid} pointerEvents="none">
       {verticalLines.map((left) => (
@@ -425,10 +534,10 @@ function GridLines({
   );
 }
 
-function gridLinePositions(viewportLength: number, cameraOffset: number): number[] {
-  const first = positiveModulo(cameraOffset, GRID_SIZE) - GRID_SIZE;
-  const count = Math.ceil(viewportLength / GRID_SIZE) + 2;
-  return Array.from({ length: count }, (_, index) => first + index * GRID_SIZE);
+function gridLinePositions(viewportLength: number, cameraOffset: number, step: number): number[] {
+  const first = positiveModulo(cameraOffset, step) - step;
+  const count = Math.ceil(viewportLength / step) + 2;
+  return Array.from({ length: count }, (_, index) => first + index * step);
 }
 
 function positiveModulo(value: number, divisor: number): number {

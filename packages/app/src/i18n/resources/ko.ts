@@ -4,6 +4,15 @@ import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
 export const ko: TranslationResources = {
+  boardCanvas: {
+    zoomOut: "축소",
+    zoomIn: "확대",
+    zoomLevel: "배율: {{value}}",
+    zoomHint: "스크롤로 이동 · Ctrl+스크롤로 확대/축소",
+    actualSize: "실제 크기 (100%)",
+    fitAll: "전체 보기",
+    fitSelection: "선택 항목 보기",
+  },
   sessionCanvas: sessionCanvas["ko"],
   heartbeats: heartbeatSettings["ko"],
   paneFind: {
