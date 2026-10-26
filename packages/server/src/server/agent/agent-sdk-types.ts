@@ -184,7 +184,6 @@ export interface AgentCapabilityFlags {
 
 export interface AgentConversationForkInput {
   boundaryMessageId: string;
-  isLatestCompletedTurn: boolean;
   targetConfig: AgentSessionConfig;
 }
 

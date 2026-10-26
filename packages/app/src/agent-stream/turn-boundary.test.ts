@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { StreamItem } from "@/types/stream";
 import { resolveAssistantTurnForkBoundary } from "./turn-boundary";
+import { toNativeConversationForkSource } from "./native-conversation-fork";
 
 function timestamp(seed: number): Date {
   return new Date(`2026-01-01T00:00:${seed.toString().padStart(2, "0")}.000Z`);
@@ -30,6 +31,17 @@ function assistantMessage(
 }
 
 describe("resolveAssistantTurnForkBoundary", () => {
+  it("addresses native forks by provider message identity without a display cursor", () => {
+    expect(
+      toNativeConversationForkSource({
+        serverId: "host",
+        agentId: "source",
+        boundaryMessageId: "native-reply",
+        boundaryCursor: { epoch: "cached-timeline", seq: 42 },
+      }),
+    ).toEqual({ agentId: "source", boundaryMessageId: "native-reply" });
+  });
+
   it("forks a failed assistant turn from its Paseo timeline cursor without a provider message id", () => {
     const failedTurn = {
       ...assistantMessage("assistant-error", 2),

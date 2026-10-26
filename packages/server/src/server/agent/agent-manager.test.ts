@@ -39,6 +39,7 @@ import type {
   AgentClient,
   AgentCreateSessionOptions,
   AgentFeature,
+  AgentHistoryReader,
   AgentLaunchContext,
   AgentPromptInput,
   AgentProvider,
@@ -12991,12 +12992,41 @@ test.each([false, true])(
         readers.push(reader);
         return reader;
       }
+      async openHistoryReader(): Promise<AgentHistoryReader> {
+        return {
+          readBefore: async (cursor) => ({
+            entries: cursor
+              ? [
+                  {
+                    item: { type: "user_message", text: "Original prompt", messageId: "prompt-1" },
+                  },
+                  {
+                    item: {
+                      type: "assistant_message",
+                      text: "Completed reply",
+                      messageId: "reply-1",
+                    },
+                  },
+                ]
+              : [
+                  { item: { type: "user_message", text: "Later prompt", messageId: "prompt-2" } },
+                  {
+                    item: { type: "assistant_message", text: "Later reply", messageId: "reply-2" },
+                  },
+                ],
+            nextCursor: cursor ? null : "older",
+          }),
+          close: async () => {},
+        };
+      }
       async forkSession(
         source: AgentSession,
         input: import("./agent-sdk-types.js").AgentConversationForkInput,
       ) {
         expect((source as ForkSession).closed).toBe(false);
-        expect(input.boundaryMessageId).toBe("reply-1");
+        if (input.boundaryMessageId !== "reply-1") {
+          throw new Error("Could not map native message to a completed turn");
+        }
         return new ForkSession(input.targetConfig);
       }
     })();
@@ -13065,7 +13095,60 @@ test.each([false, true])(
         expect.objectContaining({ parentAgentId: source.id }),
       );
       await manager.closeAgent(fork.id);
+      const sourcePage = manager.fetchTimeline(source.id, { limit: 0 });
+      const boundaryRow = sourcePage.rows.find((row) => row.item.type === "assistant_message")!;
+      const selected = {
+        agentId: source.id,
+        boundaryCursor: { epoch: sourcePage.epoch, seq: boundaryRow.seq },
+        boundaryMessageId: "reply-1",
+      };
+      // Closed-history caches can be evicted independently of the native branch.
+      await manager.deleteAgentState(source.id);
+      const reopenedPage = await manager.fetchPersistedTimeline(before!, { limit: 1 });
+      expect(reopenedPage?.hasOlder).toBe(true);
+      expect(reopenedPage?.rows[0]?.item).toMatchObject({ messageId: "reply-2" });
+      const repeated = await manager.forkAgentFromConversation(
+        selected,
+        { provider: "codex", cwd: workdir },
+        undefined,
+        { workspaceId: undefined },
+      );
+      expect(manager.fetchTimeline(source.id, { limit: 1 }).epoch).not.toBe(sourcePage.epoch);
+      expect(repeated.id).not.toBe(fork.id);
+      expect(repeated.forkedFrom?.boundaryMessageId).toBe("reply-1");
+      expect(manager.getAgent(source.id)).toBeNull();
+      expect(await storage.get(source.id)).toEqual(before);
+      await manager.archiveAgent(repeated.id);
+      await expect(
+        manager.forkAgentFromConversation(
+          { ...selected, boundaryMessageId: undefined },
+          { provider: "codex", cwd: workdir },
+          undefined,
+          { workspaceId: undefined },
+        ),
+      ).rejects.toThrow("stale conversation timeline");
+      await expect(
+        manager.forkAgentFromConversation(
+          { ...selected, boundaryMessageId: "removed-by-rewind" },
+          { provider: "codex", cwd: workdir },
+          undefined,
+          { workspaceId: undefined },
+        ),
+      ).rejects.toThrow("completed turn");
+      // Native identity also wins when a display cursor happens to be current.
+      const nativeBoundary = await manager.forkAgentFromConversation(
+        {
+          ...selected,
+          boundaryCursor: { epoch: reopenedPage!.epoch, seq: reopenedPage!.endSeq! },
+        },
+        { provider: "codex", cwd: workdir },
+        undefined,
+        { workspaceId: undefined },
+      );
+      expect(nativeBoundary.forkedFrom?.boundaryMessageId).toBe("reply-1");
+      await manager.archiveAgent(nativeBoundary.id);
     } finally {
+      await manager.prepareForShutdown();
       await manager.flush();
       await storage.flush();
       rmSync(workdir, { recursive: true, force: true });

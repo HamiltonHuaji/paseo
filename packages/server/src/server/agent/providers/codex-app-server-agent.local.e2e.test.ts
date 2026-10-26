@@ -583,7 +583,6 @@ throw new Error("Expected the interruption boundary to terminate the worker");
             source,
             {
               boundaryMessageId: userIds.at(-1)!,
-              isLatestCompletedTurn: true,
               targetConfig: config,
             },
             context,
@@ -592,7 +591,7 @@ throw new Error("Expected the interruption boundary to terminate the worker");
         const oldBoundaryStarted = performance.now();
         fork = await provider.forkSession(
           source,
-          { boundaryMessageId: userIds[0]!, isLatestCompletedTurn: false, targetConfig: config },
+          { boundaryMessageId: userIds[0]!, targetConfig: config },
           context,
         );
         measurements.oldBoundaryForkMs = performance.now() - oldBoundaryStarted;
@@ -1013,7 +1012,6 @@ await server.connect(new StdioServerTransport());
           session,
           {
             boundaryMessageId: userIds[0]!,
-            isLatestCompletedTurn: true,
             targetConfig: config,
           },
           { env: { CODEX_HOME: codexHome } },

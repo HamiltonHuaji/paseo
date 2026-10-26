@@ -11,10 +11,12 @@ export function toNativeConversationForkSource(
   source: NativeConversationForkHandoff | undefined,
 ): AgentConversationForkSource | undefined {
   if (!source) return undefined;
+  if (source.boundaryMessageId) {
+    return { agentId: source.agentId, boundaryMessageId: source.boundaryMessageId };
+  }
   return {
     agentId: source.agentId,
     ...(source.boundaryCursor ? { boundaryCursor: source.boundaryCursor } : {}),
-    ...(source.boundaryMessageId ? { boundaryMessageId: source.boundaryMessageId } : {}),
   };
 }
 

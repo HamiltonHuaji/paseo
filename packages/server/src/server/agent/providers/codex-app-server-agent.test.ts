@@ -7461,28 +7461,46 @@ describe("fork baseline contracts", () => {
     const request = vi
       .fn()
       .mockResolvedValueOnce({
-        data: [{ turnId: "completed", item: { id: "answer" } }],
+        data: [{ turnId: "active", item: { id: "prompt" } }],
         nextCursor: "next",
       })
-      .mockResolvedValueOnce({ data: [{ turnId: "active", item: { id: "prompt" } }] });
+      .mockResolvedValueOnce({ data: [{ turnId: "completed", item: { id: "answer" } }] })
+      .mockResolvedValueOnce({ data: [{ id: "completed", status: "completed" }] });
     expect(
       await resolveCodexForkBeforeTurnId({
         threadId: "source",
         boundaryMessageId: "answer",
-        isLatestCompletedTurn: false,
         activeTurnId: "active",
         request,
       }),
     ).toBe("active");
+    expect(request.mock.calls[0]).toEqual([
+      "thread/items/list",
+      { threadId: "source", limit: 100, sortDirection: "desc" },
+    ]);
     await expect(
       resolveCodexForkBeforeTurnId({
         threadId: "source",
         boundaryMessageId: "answer",
-        isLatestCompletedTurn: false,
         activeTurnId: "active",
         request: async () => ({ data: [{ turnId: "active", item: { id: "answer" } }] }),
       }),
     ).rejects.toThrow("finish");
+  });
+
+  test("native fork checks the final turn and rejects removed messages without display history", async () => {
+    const resolve = (status: string, boundaryMessageId = "answer") =>
+      resolveCodexForkBeforeTurnId({
+        threadId: "source",
+        boundaryMessageId,
+        request: async (method) =>
+          method === "thread/items/list"
+            ? { data: [{ turnId: "last", item: { id: "answer" } }] }
+            : { data: [{ id: "last", status }] },
+      });
+    await expect(resolve("completed")).resolves.toBeUndefined();
+    await expect(resolve("inProgress")).rejects.toThrow("finish");
+    await expect(resolve("completed", "removed-by-rewind")).rejects.toThrow("completed turn");
   });
 
   test("failed rewind history leaves the original native identity and history usable", async () => {

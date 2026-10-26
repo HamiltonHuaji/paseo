@@ -108,7 +108,7 @@ import {
   type ProviderSubagentStoreEvent,
 } from "./provider-subagents/store.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
-import { resolveConversationForkBoundary } from "./conversation-fork-boundary.js";
+import { resolveConversationForkCursor } from "./conversation-fork-boundary.js";
 
 const RELOAD_SESSION_CLOSE_TIMEOUT_MS = 3_000;
 const INTERRUPT_SESSION_TIMEOUT_MS = 2_000;
@@ -1547,13 +1547,18 @@ export class AgentManager {
     }
 
     const sourceHasRun = this.hasInFlightRun(sourceAgent.id) || isAgentBusy(sourceAgent.lifecycle);
-    const timeline = this.fetchTimeline(sourceAgent.id, { direction: "tail", limit: 0 });
-    const boundary = resolveConversationForkBoundary({
-      source,
-      epoch: timeline.epoch,
-      rows: timeline.rows,
-      sourceHasActiveTurn: sourceHasRun,
-    });
+    // Native message identity belongs to the provider; cached display positions
+    // must not decide whether that boundary still exists or which turn it ends.
+    let boundaryMessageId = source.boundaryMessageId;
+    if (!boundaryMessageId) {
+      // COMPAT(cursorOnlyNativeFork): added in v0.13.4, remove after 2027-04-26.
+      const timeline = this.fetchTimeline(sourceAgent.id, { direction: "tail", limit: 0 });
+      boundaryMessageId = resolveConversationForkCursor({
+        cursor: source.boundaryCursor,
+        epoch: timeline.epoch,
+        rows: timeline.rows,
+      });
+    }
     const sourceLock = sourceHasRun ? null : this.runs.createPendingRun(sourceAgent.id);
     try {
       const resolvedAgentId = validateAgentId(
@@ -1589,7 +1594,7 @@ export class AgentManager {
       const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
       const session = await client.forkSession(
         sourceAgent.session,
-        { ...boundary, targetConfig: providerLaunchConfig },
+        { boundaryMessageId, targetConfig: providerLaunchConfig },
         launchContext,
       );
       try {
@@ -1615,7 +1620,7 @@ export class AgentManager {
             sourceAgentId: sourceAgent.id,
             sourcePersistence: sourceAgent.persistence,
             resultPersistence: persistence,
-            boundaryMessageId: boundary.boundaryMessageId,
+            boundaryMessageId,
           }),
         ],
         forkedFrom: {
@@ -1625,7 +1630,7 @@ export class AgentManager {
           operation: "native-fork",
           sourceProviderSessionId: sourceAgent.persistence?.sessionId,
           resultProviderSessionId: persistence.sessionId,
-          boundaryMessageId: boundary.boundaryMessageId,
+          boundaryMessageId,
         },
         labels: options.labels,
         initialTitle: options.initialTitle,

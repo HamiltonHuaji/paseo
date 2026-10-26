@@ -2391,30 +2391,34 @@ function createCodexHistoryReader(
 export async function resolveCodexForkBeforeTurnId(input: {
   threadId: string;
   boundaryMessageId: string;
-  isLatestCompletedTurn: boolean;
   request: (method: string, params?: unknown) => Promise<unknown>;
   activeTurnId?: string | null;
 }): Promise<string | undefined> {
-  if (input.isLatestCompletedTurn) return undefined;
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
-  let boundaryTurnId: string | null = null;
+  let currentTurnId: string | undefined;
+  let newerTurnId: string | undefined = input.activeTurnId ?? undefined;
   while (true) {
     const response = CodexThreadItemsListResponseSchema.parse(
       await input.request("thread/items/list", {
         threadId: input.threadId,
         limit: 100,
-        sortDirection: "asc",
+        sortDirection: "desc",
         ...(cursor ? { cursor } : {}),
       }),
     );
     for (const entry of response.data) {
-      if (boundaryTurnId && entry.turnId !== boundaryTurnId) {
-        return entry.turnId;
+      if (entry.turnId !== currentTurnId) {
+        newerTurnId = currentTurnId ?? newerTurnId;
+        currentTurnId = entry.turnId;
       }
       const item = toObjectRecord(entry.item);
       if (item?.id === input.boundaryMessageId) {
-        boundaryTurnId = entry.turnId;
+        if (entry.turnId === input.activeTurnId) {
+          throw new Error("Wait for the current turn to finish before forking this conversation");
+        }
+        await requireCodexForkTurnEnded(input, entry.turnId);
+        return newerTurnId;
       }
     }
     const nextCursor = response.nextCursor ?? null;
@@ -2425,14 +2429,42 @@ export async function resolveCodexForkBeforeTurnId(input: {
     seenCursors.add(nextCursor);
     cursor = nextCursor;
   }
-  if (!boundaryTurnId) {
-    throw new Error(`Could not map Codex message '${input.boundaryMessageId}' to a completed turn`);
-  }
-  if (boundaryTurnId === input.activeTurnId) {
-    throw new Error("Wait for the current turn to finish before forking this conversation");
-  }
-  if (input.activeTurnId) return input.activeTurnId;
-  throw new Error("The selected response is no longer followed by a persisted Codex turn");
+  throw new Error(`Could not map Codex message '${input.boundaryMessageId}' to a completed turn`);
+}
+
+const CodexForkTurnsSchema = CodexHistoryTurnsSchema.extend({
+  data: z.array(CodexHistoryTurnSchema.extend({ status: z.string() })),
+});
+
+async function requireCodexForkTurnEnded(
+  input: { threadId: string; request: (method: string, params?: unknown) => Promise<unknown> },
+  turnId: string,
+): Promise<void> {
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const page = CodexForkTurnsSchema.parse(
+      await input.request("thread/turns/list", {
+        threadId: input.threadId,
+        sortDirection: "desc",
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    const turn = page.data.find((candidate) => candidate.id === turnId);
+    if (turn) {
+      if (!historicalTurnTerminalStatus(turn.status)) {
+        throw new Error("Wait for the current turn to finish before forking this conversation");
+      }
+      return;
+    }
+    cursor = page.nextCursor ?? undefined;
+    if (cursor && seenCursors.has(cursor)) {
+      throw new Error("Codex returned a repeated turn cursor while resolving fork");
+    }
+    if (cursor) seenCursors.add(cursor);
+  } while (cursor);
+  throw new Error(`Could not find Codex turn '${turnId}' while resolving fork`);
 }
 
 function settleHistoricalSubAgentItem(
@@ -5473,9 +5505,7 @@ export class CodexAppServerAgentSession implements AgentSession {
     if (!source.currentThreadId) {
       throw new Error("Codex thread is not initialized");
     }
-    if (source.activeForegroundTurnId && input.isLatestCompletedTurn) {
-      throw new Error("Wait for the current turn to finish before forking this conversation");
-    }
+    const sourceThreadId = source.currentThreadId;
 
     const targetConfig = input.targetConfig;
     const codexConfig = this.buildCodexInnerConfig();
@@ -5485,14 +5515,13 @@ export class CodexAppServerAgentSession implements AgentSession {
     );
     const serviceTier = readCodexServiceTier(targetConfig.featureValues);
     const beforeTurnId = await resolveCodexForkBeforeTurnId({
-      threadId: source.currentThreadId,
+      threadId: sourceThreadId,
       boundaryMessageId: input.boundaryMessageId,
-      isLatestCompletedTurn: input.isLatestCompletedTurn,
       request: (method, params) => this.client!.request(method, params),
       activeTurnId: source.currentTurnId,
     });
     const forked = await forkCodexThread(this.client, {
-      threadId: source.currentThreadId,
+      threadId: sourceThreadId,
       ...(beforeTurnId ? { beforeTurnId } : {}),
       cwd: targetConfig.cwd,
       model: targetConfig.model ?? null,
@@ -5504,10 +5533,10 @@ export class CodexAppServerAgentSession implements AgentSession {
     });
     this.currentThreadId = forked.thread.id;
     this.providerSessionTreeId = forked.thread.sessionId;
-    this.providerForkedFromId = forked.thread.forkedFromId ?? source.currentThreadId;
+    this.providerForkedFromId = forked.thread.forkedFromId ?? sourceThreadId;
     this.branchOperations.push({
       operation: "fork",
-      sourceThreadId: source.currentThreadId,
+      sourceThreadId,
       resultThreadId: forked.thread.id,
       boundaryMessageId: input.boundaryMessageId,
       createdAt: new Date().toISOString(),

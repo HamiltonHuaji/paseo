@@ -288,7 +288,6 @@ stream_max_retries=0
       const boundary = await turn(imported.session, "continue the imported source");
       const fork = await makeClient().forkSession(imported.session, {
         boundaryMessageId: boundary,
-        isLatestCompletedTurn: true,
         targetConfig: config,
       });
       cleanups.push(() => fork.close());
