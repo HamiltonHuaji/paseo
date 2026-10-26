@@ -3,24 +3,28 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import { BackHandler, ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
+import { useFetchQueries } from "@/data/query";
 import { useShallow } from "zustand/shallow";
 import { ArrowDown, ArrowUp, ArrowUpRight, Pencil, RotateCcw, X } from "lucide-react-native";
 import type { BoardPlacement } from "@/components/board-canvas/layout";
 import { BoardCanvas } from "@/components/board-canvas";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { EditingTextInput } from "@/components/ui/text-input";
+import { EditingTextInput, type EditingTextInputHandle } from "@/components/ui/text-input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { getHostRuntimeStore, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useHostFeature } from "@/runtime/host-features";
 import { useAppVisible } from "@/hooks/use-app-visible";
 import { useSessionStore } from "@/stores/session-store";
+import { normalizeAgentSnapshot } from "@/utils/agent-snapshots";
+import { navigateToAgent } from "@/utils/navigate-to-agent";
 import {
   WorkspacePaneContent,
   type WorkspacePaneContentModel,
@@ -30,8 +34,10 @@ import {
   SESSION_CARD_SIZE,
   sessionNodes,
   sessionsForCanvas,
+  sessionSource,
+  sessionAncestors,
   type CanvasSession,
-  type SessionTime,
+  type SessionArrangement,
 } from "./model";
 import { styles } from "./styles";
 
@@ -57,13 +63,15 @@ export function SessionCanvasScreen({
   const appVisible = useAppVisible();
   const interactive = active && appVisible;
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{ id: string; revision: number }>();
   const [search, setSearch] = useState("");
-  const sessions = useSessionStore(
-    useShallow((state) =>
-      [...(state.sessions[serverId]?.agents.values() ?? [])].filter(
-        (agent) => agent.workspaceId === workspaceId && !agent.archivedAt,
-      ),
-    ),
+  const searchInput = useRef<EditingTextInputHandle>(null);
+  const hostSessions = useSessionStore(
+    useShallow((state) => [...(state.sessions[serverId]?.agents.values() ?? [])]),
+  );
+  const sessions = useMemo(
+    () => hostSessions.filter((agent) => agent.workspaceId === workspaceId && !agent.archivedAt),
+    [hostSessions, workspaceId],
   );
   const connected = useHostRuntimeIsConnected(serverId);
   const supportsLineage = useHostFeature(serverId, "sessionLineage");
@@ -71,6 +79,47 @@ export function SessionCanvasScreen({
     () => sessionsForCanvas(sessions, supportsLineage ? serverId : ""),
     [sessions, serverId, supportsLineage],
   );
+  const hostById = useMemo(
+    () => new Map(hostSessions.map((session) => [session.id, session])),
+    [hostSessions],
+  );
+  const sources = useMemo(() => {
+    const references = new Map<string, { hostId: string; agentId: string }>();
+    for (const session of sessions) {
+      const reference = sessionSource(
+        session.sessionLineage?.find((entry) => entry.operation !== "rewind"),
+      );
+      if (reference)
+        references.set(JSON.stringify([reference.hostId, reference.agentId]), reference);
+    }
+    return [...references.values()];
+  }, [sessions]);
+  const sourceQueries = useFetchQueries(
+    sources.map((reference) => ({
+      queryKey: ["session-canvas-source", reference.hostId, reference.agentId],
+      enabled:
+        interactive &&
+        connected &&
+        !(reference.hostId === serverId && hostById.has(reference.agentId)),
+      staleTimeMs: 60_000,
+      dataShape: "value",
+      queryFn: async () => {
+        const client = getHostRuntimeStore().getClient(reference.hostId);
+        if (!client) throw new Error(t("sessionCanvas.offline"));
+        const result = await client.fetchAgent(reference.agentId);
+        return result ? normalizeAgentSnapshot(result.agent, reference.hostId) : null;
+      },
+    })),
+  );
+  const sourceById = useMemo(() => {
+    const result = new Map<string, CanvasSession>();
+    sources.forEach((reference, index) => {
+      const source = reference.hostId === serverId ? hostById.get(reference.agentId) : undefined;
+      const resolved = source ?? sourceQueries[index].data;
+      if (resolved) result.set(JSON.stringify([reference.hostId, reference.agentId]), resolved);
+    });
+    return result;
+  }, [sources, hostById, sourceQueries, serverId]);
   const key = JSON.stringify([serverId, workspaceId]);
   const layout = useSessionCanvasLayout((state) => state.workspaces[key] ?? DEFAULT_SESSION_LAYOUT);
   const hydrated = useSyncExternalStore(
@@ -81,6 +130,7 @@ export function SessionCanvasScreen({
   const sync = useSessionCanvasLayout((state) => state.sync);
   const arrange = useSessionCanvasLayout((state) => state.arrange);
   const move = useSessionCanvasLayout((state) => state.move);
+  const layoutError = useSessionCanvasLayout((state) => state.error);
   useEffect(() => {
     if (interactive && hydrated) sync(key, canvasSessions);
   }, [interactive, hydrated, key, canvasSessions, sync]);
@@ -151,7 +201,7 @@ export function SessionCanvasScreen({
     [i18n.language],
   );
   const changeTime = useCallback(
-    (time: SessionTime) => arrange(key, canvasSessions, time, layout.order),
+    (time: SessionArrangement) => arrange(key, canvasSessions, time, layout.order),
     [arrange, key, canvasSessions, layout.order],
   );
   const changeOrder = useCallback(
@@ -164,21 +214,66 @@ export function SessionCanvasScreen({
     [arrange, key, canvasSessions, layout.time, layout.order],
   );
   const moveCard = useCallback((placement: BoardPlacement) => move(key, placement), [move, key]);
+  const focusSession = useCallback((id: string) => {
+    searchInput.current?.replaceText("");
+    setSearch("");
+    setSelectedId(id);
+    setFocusRequest((current) => ({ id, revision: (current?.revision ?? 0) + 1 }));
+  }, []);
+  const openSource = useCallback(
+    (id: string) => {
+      const origin = byId.get(id)?.sessionLineage?.find((entry) => entry.operation !== "rewind");
+      const reference = sessionSource(origin);
+      if (!reference) return;
+      if (reference.hostId === serverId && byId.has(reference.agentId)) {
+        focusSession(reference.agentId);
+        return;
+      }
+      const source = sourceById.get(JSON.stringify([reference.hostId, reference.agentId]));
+      if (reference.hostId === serverId && source?.workspaceId === workspaceId) {
+        onOpen(reference.agentId);
+        return;
+      }
+      navigateToAgent({
+        serverId: reference.hostId,
+        agentId: reference.agentId,
+        workspaceId: source?.workspaceId,
+      });
+    },
+    [byId, focusSession, onOpen, serverId, sourceById, workspaceId],
+  );
+  const ancestors = selectedId ? sessionAncestors(selectedId, canvasSessions) : [];
   const renderPreview = useCallback(
     (id: string) => {
       const session = byId.get(id);
+      const origin = session?.sessionLineage?.find((entry) => entry.operation !== "rewind");
+      const reference = sessionSource(origin);
+      const source = reference
+        ? sourceById.get(JSON.stringify([reference.hostId, reference.agentId]))
+        : undefined;
+      let sourceLocation:
+        | "archivedSource"
+        | "outsideView"
+        | "otherWorkspace"
+        | "otherHost"
+        | undefined;
+      if (reference && reference.hostId !== serverId) sourceLocation = "otherHost";
+      else if (source?.archivedAt) sourceLocation = "archivedSource";
+      else if (source?.workspaceId && source.workspaceId !== workspaceId)
+        sourceLocation = "otherWorkspace";
+      else if (reference && !visibleIds.has(reference.agentId)) sourceLocation = "outsideView";
       return session ? (
         <SessionPreview
           session={session}
-          source={byId.get(
-            canvasSessions.find((candidate) => candidate.id === id)?.forkedFrom?.agentId ?? "",
-          )}
+          source={source}
+          sourceLocation={sourceLocation}
+          onOpenSource={openSource}
           supportsLineage={supportsLineage}
           format={format}
         />
       ) : null;
     },
-    [byId, canvasSessions, format, supportsLineage],
+    [byId, sourceById, visibleIds, openSource, serverId, workspaceId, format, supportsLineage],
   );
   const rename = useCallback(() => {
     if (selectedId) onRename(selectedId);
@@ -191,6 +286,7 @@ export function SessionCanvasScreen({
       <View style={styles.toolbar}>
         <Text style={styles.title}>{t("sessionCanvas.title")}</Text>
         <EditingTextInput
+          ref={searchInput}
           style={styles.search}
           initialValue={search}
           onChangeText={setSearch}
@@ -202,6 +298,11 @@ export function SessionCanvasScreen({
           value={layout.time}
           onValueChange={changeTime}
           options={[
+            {
+              value: "relationships",
+              label: t("sessionCanvas.byRelationship"),
+              testID: "session-sort-relationships",
+            },
             { value: "created", label: t("sessionCanvas.created"), testID: "session-sort-created" },
             { value: "forked", label: t("sessionCanvas.forked"), testID: "session-sort-forked" },
             { value: "reply", label: t("sessionCanvas.reply"), testID: "session-sort-reply" },
@@ -228,31 +329,30 @@ export function SessionCanvasScreen({
         </Button>
       </View>
       <View style={styles.split}>
-        {!compact || !selected ? (
-          <View style={styles.canvas}>
-            {sessions.length && visibleIds.size ? (
-              <BoardCanvas
-                active={interactive}
-                layoutRevision={layout.revision}
-                experiments={nodes}
-                sizes={sizes}
-                storedPlacements={layout.placements}
-                visibleIds={visibleIds}
-                selectedExperiment={selected?.id ?? null}
-                onSelectExperiment={setSelectedId}
-                onClearSelection={close}
-                onPersistPlacement={moveCard}
-                renderContent={renderPreview}
-              />
-            ) : (
-              <View style={styles.empty}>
-                <Text style={styles.muted}>
-                  {t(search ? "sessionCanvas.noMatches" : "sessionCanvas.empty")}
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : null}
+        <View style={[styles.canvas, compact && selected && styles.hidden]}>
+          {sessions.length && visibleIds.size ? (
+            <BoardCanvas
+              active={interactive && !(compact && selected)}
+              layoutRevision={layout.revision}
+              experiments={nodes}
+              sizes={sizes}
+              storedPlacements={layout.placements}
+              visibleIds={visibleIds}
+              selectedExperiment={selected?.id ?? null}
+              focusRequest={focusRequest}
+              onSelectExperiment={setSelectedId}
+              onClearSelection={close}
+              onPersistPlacement={moveCard}
+              renderContent={renderPreview}
+            />
+          ) : (
+            <View style={styles.empty}>
+              <Text style={styles.muted}>
+                {t(search ? "sessionCanvas.noMatches" : "sessionCanvas.empty")}
+              </Text>
+            </View>
+          )}
+        </View>
         {selected && conversation ? (
           <View style={styles.detail} testID="session-canvas-detail">
             <View style={styles.detailHeader}>
@@ -286,8 +386,9 @@ export function SessionCanvasScreen({
                 accessibilityLabel={t("common.actions.close")}
               />
             </View>
+            <AncestorTrail ancestors={ancestors} onSelect={focusSession} />
             {supportsLineage ? (
-              <SessionLineageDetails session={selected} />
+              <SessionLineageDetails session={selected} onOpenSource={openSource} />
             ) : (
               <Text style={styles.muted}>{t("sessionCanvas.lineageUpgrade")}</Text>
             )}
@@ -299,14 +400,12 @@ export function SessionCanvasScreen({
           </View>
         ) : null}
       </View>
-      <View style={styles.caption}>
-        <Text style={styles.muted}>
-          {t("sessionCanvas.caption", { count: sessions.length })}
-          {" · "}
-          {t("sessionCanvas.historyNote")}
-          {!connected ? ` · ${t("sessionCanvas.offline")}` : ""}
-        </Text>
-      </View>
+      <CanvasCaption
+        error={layoutError}
+        time={layout.time}
+        count={sessions.length}
+        connected={connected}
+      />
     </View>
   );
 }
@@ -314,22 +413,57 @@ export function SessionCanvasScreen({
 function SessionPreview({
   session,
   source,
+  sourceLocation,
+  onOpenSource,
   supportsLineage,
   format,
 }: {
   session: CanvasSession;
   source?: CanvasSession;
+  sourceLocation?: "archivedSource" | "outsideView" | "otherWorkspace" | "otherHost";
+  onOpenSource: (id: string) => void;
   supportsLineage: boolean;
   format: Intl.DateTimeFormat;
 }) {
   const { t } = useTranslation();
   const origin = session.sessionLineage?.find((entry) => entry.operation !== "rewind");
+  const reference = sessionSource(origin);
+  const openSource = useCallback(
+    (event: import("react-native").GestureResponderEvent) => {
+      event.stopPropagation();
+      onOpenSource(session.id);
+    },
+    [onOpenSource, session.id],
+  );
   const times = [
     [t("sessionCanvas.created"), session.createdAt],
-    [t("sessionCanvas.forked"), session.forkedFrom ? new Date(session.forkedFrom.forkedAt) : null],
+    [t("sessionCanvas.forked"), origin ? new Date(origin.createdAt) : null],
     [t("sessionCanvas.reply"), session.lastAssistantMessageAt],
     [t("sessionCanvas.input"), session.lastUserMessageAt],
   ] as const;
+  let sourceContent = null;
+  if (supportsLineage && origin) {
+    sourceContent = (
+      <Text style={styles.muted} numberOfLines={2}>
+        {t(`sessionCanvas.resolutions.${origin.sourceResolution}`)} ·{" "}
+        {origin.sourceAgentId || origin.sourceProviderSessionId || "—"}
+      </Text>
+    );
+    if (reference)
+      sourceContent = (
+        <Button
+          size="xs"
+          variant="ghost"
+          style={styles.sourceButton}
+          textStyle={styles.sourceText}
+          onPress={openSource}
+          testID={`session-source-${session.id}`}
+        >
+          {t("sessionCanvas.from", { title: source?.title || reference.agentId.slice(0, 8) })}
+          {sourceLocation ? ` · ${t(`sessionCanvas.${sourceLocation}`)}` : ""}
+        </Button>
+      );
+  }
   return (
     <View style={styles.preview} testID={`session-card-${session.id}`}>
       <View style={styles.row}>
@@ -349,14 +483,7 @@ function SessionPreview({
           </View>
         ))}
       </View>
-      {supportsLineage && origin ? (
-        <Text style={styles.muted} numberOfLines={2}>
-          {t(`sessionCanvas.operations.${origin.operation}`)} ·{" "}
-          {t(`sessionCanvas.resolutions.${origin.sourceResolution}`)}
-          {" · "}
-          {source?.title || origin.sourceAgentId || origin.sourceProviderSessionId || "—"}
-        </Text>
-      ) : null}
+      {sourceContent}
     </View>
   );
 }
@@ -367,14 +494,27 @@ function sessionStatusVariant(status: CanvasSession["status"]) {
   return "muted";
 }
 
-function SessionLineageDetails({ session }: { session: CanvasSession }) {
+function SessionLineageDetails({
+  session,
+  onOpenSource,
+}: {
+  session: CanvasSession;
+  onOpenSource: (id: string) => void;
+}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const openSource = useCallback(() => onOpenSource(session.id), [onOpenSource, session.id]);
   const entries = session.sessionLineage ?? [];
+  const reference = sessionSource(entries.find((entry) => entry.operation !== "rewind"));
   if (!entries.length) return null;
   return (
     <View style={styles.relationships}>
+      {reference ? (
+        <Button size="xs" variant="ghost" onPress={openSource} testID="session-detail-source">
+          {t("sessionCanvas.openSource")}
+        </Button>
+      ) : null}
       <Button size="sm" variant="ghost" onPress={toggleExpanded} testID="session-lineage-toggle">
         {t("sessionCanvas.relationships", { count: entries.length })}
       </Button>
@@ -412,5 +552,70 @@ function SessionLineageDetails({ session }: { session: CanvasSession }) {
         </ScrollView>
       ) : null}
     </View>
+  );
+}
+
+function CanvasCaption({
+  error,
+  time,
+  count,
+  connected,
+}: {
+  error: Error | null;
+  time: SessionArrangement;
+  count: number;
+  connected: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.caption}>
+      {error ? <Text style={styles.error}>{error.message}</Text> : null}
+      <Text style={styles.muted}>
+        {t(time === "relationships" ? "sessionCanvas.familyCaption" : "sessionCanvas.caption", {
+          count: count,
+        })}
+        {" · "}
+        {t("sessionCanvas.historyNote")}
+        {!connected ? ` · ${t("sessionCanvas.offline")}` : ""}
+      </Text>
+    </View>
+  );
+}
+
+function AncestorTrail({
+  ancestors,
+  onSelect,
+}: {
+  ancestors: CanvasSession[];
+  onSelect: (id: string) => void;
+}) {
+  if (!ancestors.length) return null;
+  return (
+    <ScrollView
+      horizontal
+      style={styles.ancestorTrail}
+      contentContainerStyle={styles.ancestorContent}
+      testID="session-ancestor-trail"
+    >
+      {ancestors.map((session) => (
+        <AncestorButton key={session.id} session={session} onSelect={onSelect} />
+      ))}
+    </ScrollView>
+  );
+}
+
+function AncestorButton({
+  session,
+  onSelect,
+}: {
+  session: CanvasSession;
+  onSelect: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const select = useCallback(() => onSelect(session.id), [onSelect, session.id]);
+  return (
+    <Button size="xs" variant="ghost" onPress={select} testID={`session-ancestor-${session.id}`}>
+      {session.title || t("sessionCanvas.untitled")}
+    </Button>
   );
 }

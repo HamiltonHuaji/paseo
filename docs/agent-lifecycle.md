@@ -91,21 +91,20 @@ Keep conversation origins separate from management labels. Forking, copying, and
 not create a managed parent or an archive cascade. Paseo IDs remain stable across rewind;
 native branch IDs remain aliases, and each operation retains its source and result identity.
 
-Resolve an origin using its source host and stable Paseo ID. Native headers alone do not prove
-the source host: imported files may come from another machine. Keep their host unknown, retain
-missing and ambiguous owners, and draw no local parent edge for them. Multiple imports of one
-native ID remain candidates; a saved explicit Paseo source ID is authoritative. Text copies carry
-the original host with their attachment, including when the destination host changes.
+Native headers alone do not prove the historical source host: imported files may come from
+another machine. Resolving a source session and recovering every historical operation detail
+are separate questions. The positive recovery and ambiguity requirements belong to
+[SESSION-03](contracts/sessions.md#session-03--可追溯且独立的会话关系); do not turn absent
+new metadata into a blanket rule that legacy relationships must disappear.
 
-Legacy records with only `forkedFrom.agentId` cannot distinguish an explicit operation from old
-provider inference. Preserve that ID but leave its host and operation unknown. Only recorded
-local native-fork/import-copy operations can supply the local host; saved rewind receipts retain
-their stable session owner. Recovery reads native headers and saved receipts without resuming a
-provider writer. Missing boundaries and native tree IDs stay unknown.
+Keep the current addressable source separate from the historical operation host. A recovered
+local owner can supply a navigation target without claiming where the original fork happened.
+The legacy recovery failure and its repair are recorded in the
+[0.13.4 review](contracts/reviews/0.13.4.md). Recovery remains read-only with respect to provider writers.
 
 The Sessions relationship details require `server_info.features.sessionLineage`. Older snapshots
-still parse; they do not establish host-qualified parentage. The older `forkedFrom` field remains
-available for wire compatibility.
+still parse; the older `forkedFrom` field remains available for wire compatibility. Wire acceptance
+does not by itself verify the relationship continuity required by SESSION-03.
 
 ## Provider-managed child agents
 

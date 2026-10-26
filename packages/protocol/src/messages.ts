@@ -933,6 +933,8 @@ export const AgentSessionLineageSchema = z.object({
   createdAt: z.string(),
   sourceHostId: z.string().optional(),
   sourceAgentId: z.string().optional(),
+  // A currently addressable owner may be known even when the historical host is not.
+  resolvedSource: z.object({ hostId: z.string(), agentId: z.string() }).optional(),
   sourceProviderSessionId: z.string().optional(),
   resultProviderSessionId: z.string().optional(),
   sourceProviderSessionTreeId: z.string().optional(),

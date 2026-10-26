@@ -1,5 +1,7 @@
 import {
   arrangeSessions,
+  addSessionPlacements,
+  sessionAncestors,
   sessionNodes,
   sessionsForCanvas,
   SESSION_CARD_SIZE,
@@ -193,6 +195,65 @@ describe("session chronology", () => {
     expect(sessionNodes([orphan], "Untitled")[0].basedOn).toBe("elsewhere");
     expect(arrangeSessions([orphan], "created", "oldest")[0].column).toBe(1);
   });
+  it("groups a context tree while keeping a deep single branch in one column", () => {
+    const tree = [
+      sessions[0],
+      sessions[1],
+      sessions[3],
+      {
+        ...sessions[2],
+        forkedFrom: { agentId: "session-1", forkedAt: sessions[2].createdAt.toISOString() },
+      },
+      {
+        ...sessions[4],
+        forkedFrom: { agentId: "session-2", forkedAt: sessions[4].createdAt.toISOString() },
+      },
+      sessions[5],
+    ];
+    const arranged = arrangeSessions(tree, "relationships", "oldest");
+    const map = new Map(arranged.map((p) => [p.id, p]));
+    expect(map.get("session-1")?.row).toBe(map.get("session-3")?.row);
+    expect(map.get("session-1")?.column).not.toBe(map.get("session-3")?.column);
+    expect(map.get("session-2")?.column).toBe(map.get("session-1")?.column);
+    expect(map.get("session-4")?.column).toBe(map.get("session-1")?.column);
+    expect(sessionAncestors("session-4", tree).map((s) => s.id)).toEqual([
+      "session-0",
+      "session-1",
+      "session-2",
+    ]);
+    expect(arrangeSessions(tree.toReversed(), "relationships", "oldest")).toEqual(arranged);
+    const saved = arranged.map((p) =>
+      Object.assign({}, p, { column: p.column! + 20, row: p.row! + 15 }),
+    );
+    const added = {
+      ...sessions[6],
+      forkedFrom: { agentId: "session-4", forkedAt: sessions[6].createdAt.toISOString() },
+    };
+    const extended = addSessionPlacements({
+      sessions: [...tree, added],
+      placements: saved,
+      time: "relationships",
+      order: "oldest",
+    });
+    expect(extended.slice(0, saved.length)).toEqual(saved);
+    expect(
+      extended.at(-1)!.column! - saved.find((p) => p.id === "session-4")!.column!,
+    ).toBeLessThanOrEqual(SESSION_CARD_SIZE.width * 2);
+    expect(extended.at(-1)?.row).toBe(
+      saved.find((p) => p.id === "session-4")!.row! + SESSION_CARD_SIZE.height + 1,
+    );
+  });
+  it("terminates relationship arrangement and ancestry navigation for malformed cycles", () => {
+    const cyclic = [
+      {
+        ...sessions[0],
+        forkedFrom: { agentId: "session-1", forkedAt: sessions[0].createdAt.toISOString() },
+      },
+      sessions[1],
+    ];
+    expect(arrangeSessions(cyclic, "relationships", "oldest")).toHaveLength(2);
+    expect(sessionAncestors("session-0", cyclic).map((s) => s.id)).toEqual(["session-1"]);
+  });
 });
 
 function expectRouteClear(points: { x: number; y: number }[], cards: ResolvedPlacement[]) {
@@ -255,5 +316,18 @@ describe("host-qualified session relationships", () => {
       ).toBeNull();
     }
     expect(relatedNodes({ ...fork, sessionLineage: undefined })[1].basedOn).toBeNull();
+    expect(
+      relatedNodes({
+        ...fork,
+        sessionLineage: [
+          {
+            ...origin,
+            sourceHostId: undefined,
+            resolvedSource: { hostId: "local", agentId: source.id },
+            sourceEvidence: "provider-history",
+          },
+        ],
+      })[1].basedOn,
+    ).toBe(source.id);
   });
 });

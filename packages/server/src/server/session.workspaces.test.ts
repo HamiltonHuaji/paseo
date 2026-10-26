@@ -803,6 +803,46 @@ test("project.list.request catches up by sequence on the existing RPC", async ()
   });
 });
 
+test("renaming a closed session publishes its stored snapshot to the active canvas subscription", async () => {
+  let record = makeStoredAgent({
+    id: "closed-canvas-session",
+    cwd: REPO_CWD,
+    workspaceId: "ws-repo-running",
+    updatedAt: "2026-10-01T10:00:00.000Z",
+  });
+  const emitted: SessionOutboundMessage[] = [];
+  const session = createSessionForWorkspaceTests({
+    onMessage: (message) => emitted.push(message),
+    agentManager: {
+      updateAgentMetadata: async (_id: string, patch: { title: string }) => {
+        record = { ...record, title: patch.title, updatedAt: "2026-10-01T10:01:00.000Z" };
+      },
+    },
+    agentStorage: { list: async () => [record], get: async () => record },
+  });
+  session.projectRegistry.get = async () =>
+    createPersistedProjectRecord({
+      projectId: "proj-repo-running",
+      rootPath: REPO_CWD,
+      kind: "non_git",
+      displayName: "repo",
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    });
+  await activateAgentUpdatesSubscription(session, "canvas-subscription");
+  await session.handleMessage({
+    type: "update_agent_request",
+    requestId: "rename-closed",
+    agentId: record.id,
+    name: "Renamed context",
+  });
+  expect(findByType(emitted, "update_agent_response")?.payload.accepted).toBe(true);
+  expect(findByType(emitted, "agent_update")?.payload).toMatchObject({
+    kind: "upsert",
+    agent: { id: record.id, title: "Renamed context", status: "closed" },
+  });
+});
+
 test("agent updates preserve queued live transitions across stored metadata reads", async () => {
   const running = makeManagedAgent({
     id: "agent-coherent",

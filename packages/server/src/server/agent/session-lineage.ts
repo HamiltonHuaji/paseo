@@ -87,21 +87,20 @@ export function recoverSessionLineage({
   // Collapse provider forks used for rewind into the stable Paseo identity first.
   // Receipts and retained aliases establish known segments. Never infer ownership
   // from relative creation timestamps when those records are missing.
+  const rewindSegments = new Map<string, ProviderSessionLineage[]>();
   for (const record of records) {
     const chain = ancestry({ id: record.persistence?.sessionId ?? "", nodes: nodes });
     const ids = idsByAgent.get(record.id)!;
     const knownBoundary = chain.findLastIndex((node) => ids.has(node.sessionId));
-    for (let index = 0; index < chain.length; index++) {
-      const node = chain[index]!;
+    const segment = chain.slice(0, knownBoundary + 1);
+    const conflict = segment.some((node) => {
       const owned = owners.get(node.sessionId);
-      if (owned && (owned.size !== 1 || !owned.has(record.id))) break;
-      claim(record.id, node.sessionId);
-      if (index < knownBoundary) continue;
-      // Dates cannot prove ownership: separately imported forks can have the same
-      // creation time. Only receipts and saved aliases establish rewind segments.
-      break;
-    }
+      return owned && (owned.size !== 1 || !owned.has(record.id));
+    });
+    if (!conflict) rewindSegments.set(record.id, segment);
   }
+  for (const [agentId, segment] of rewindSegments)
+    for (const node of segment) claim(agentId, node.sessionId);
   const result = new Map<
     string,
     Pick<
@@ -113,6 +112,7 @@ export function recoverSessionLineage({
     const ids = idsByAgent.get(record.id);
     if (!ids?.size) continue;
     const chain = ancestry({ id: record.persistence?.sessionId ?? "", nodes: nodes });
+    const inferredOrigin = findForkOrigin({ chain, ids, agentId: record.id, owners });
     const { forkedFrom, sessionLineage } = recoverRecordOperations({
       record,
       chain,
@@ -124,7 +124,14 @@ export function recoverSessionLineage({
       providerSessionIds: [...ids],
       forkedFrom,
       sessionLineage: sessionLineage.map((entry) =>
-        resolveSavedOrigin(entry, sourceRecords, owners, sourceHostId),
+        resolveSavedOrigin({
+          entry,
+          records: sourceRecords,
+          owners,
+          localHostId: sourceHostId,
+          inferredOrigin,
+          ambiguousIdentity: [...ids].some((id) => owners.get(id)?.size !== 1),
+        }),
       ),
       lastAssistantMessageAt: recoveredReplyTime({
         record: record,
@@ -262,6 +269,7 @@ function findForkOrigin({
 }): AgentSessionLineage | undefined {
   for (const node of chain) {
     if (!ids.has(node.sessionId)) break;
+    if (owners.get(node.sessionId)?.size !== 1) return undefined;
     if (!node.parentSessionId || ids.has(node.parentSessionId)) continue;
     const candidates = [...(owners.get(node.parentSessionId) ?? [])]
       .filter((id) => id !== agentId)
@@ -279,31 +287,98 @@ function findForkOrigin({
   return undefined;
 }
 
-function resolveSavedOrigin(
-  entry: AgentSessionLineage,
-  records: StoredAgentRecord[],
-  owners: Map<string, Set<string>>,
-  localHostId?: string,
-): AgentSessionLineage {
-  if (entry.sourceHostId && entry.sourceHostId !== localHostId) return entry;
-  if (entry.sourceAgentId && entry.operation !== "import-copy") {
-    let sourceResolution: AgentSessionLineage["sourceResolution"] = "unknown-host";
-    if (entry.sourceHostId) {
-      sourceResolution = records.some((record) => record.id === entry.sourceAgentId)
-        ? "resolved"
-        : "missing";
-    }
-    return { ...entry, sourceResolution };
+interface ResolveOriginInput {
+  entry: AgentSessionLineage;
+  records: StoredAgentRecord[];
+  owners: Map<string, Set<string>>;
+  localHostId?: string;
+  inferredOrigin?: AgentSessionLineage;
+  ambiguousIdentity?: boolean;
+}
+
+function resolveSavedOrigin({
+  entry,
+  records,
+  owners,
+  localHostId,
+  inferredOrigin,
+  ambiguousIdentity,
+}: ResolveOriginInput): AgentSessionLineage {
+  const explicit = entry.sourceEvidence === "paseo-operation" && entry.operation !== "import-copy";
+  if (entry.sourceHostId && entry.sourceHostId !== localHostId) {
+    const resolvedSource =
+      entry.sourceResolution === "resolved" && entry.sourceAgentId
+        ? { hostId: entry.sourceHostId, agentId: entry.sourceAgentId }
+        : undefined;
+    return { ...entry, resolvedSource };
   }
-  const candidates = [...(owners.get(entry.sourceProviderSessionId ?? "") ?? [])].sort();
-  // Import-copy is selected by native ID, so an additional import can make its
-  // managed owner ambiguous even after an earlier unique match.
+  if (explicit && entry.sourceHostId && entry.sourceAgentId) {
+    const present = records.some((record) => record.id === entry.sourceAgentId);
+    const resolvedSource =
+      present && entry.sourceAgentId && entry.sourceHostId
+        ? { hostId: entry.sourceHostId, agentId: entry.sourceAgentId }
+        : undefined;
+    return { ...entry, resolvedSource, sourceResolution: present ? "resolved" : "missing" };
+  }
+  if (entry.operation === "rewind") return entry;
+  if (ambiguousIdentity)
+    return { ...entry, resolvedSource: undefined, sourceResolution: "ambiguous" };
+  return resolveNativeOrigin({ entry, records, owners, localHostId, inferredOrigin });
+}
+
+function resolveNativeOrigin({
+  entry,
+  owners,
+  localHostId,
+  inferredOrigin,
+}: ResolveOriginInput): AgentSessionLineage {
+  const native = inferredOrigin ?? entry;
+  const parentId = native.sourceProviderSessionId;
+  const candidates = [...(owners.get(parentId ?? "") ?? [])].sort();
+  const disagrees = inferredOrigin && originConflicts({ entry, parentId, candidates });
+  if (disagrees) {
+    const candidateAgentIds = [
+      ...new Set([...candidates, ...(entry.sourceAgentId ? [entry.sourceAgentId] : [])]),
+    ].sort();
+    return {
+      ...entry,
+      resolvedSource: undefined,
+      sourceResolution: "ambiguous",
+      candidateAgentIds,
+    };
+  }
+  // A temporarily unreadable rollout must not erase the evidence already saved.
+  if (!parentId) return entry;
+  const sourceAgentId = candidates.length === 1 ? candidates[0] : undefined;
+  const resolvedSource =
+    sourceAgentId && localHostId ? { hostId: localHostId, agentId: sourceAgentId } : undefined;
+  const sourceResolution = candidateResolution(candidates, localHostId);
   return {
     ...entry,
-    candidateAgentIds: candidates.length > 1 || !entry.sourceHostId ? candidates : undefined,
-    sourceResolution: candidateResolution(candidates, entry.sourceHostId),
-    sourceAgentId: entry.sourceHostId && candidates.length === 1 ? candidates[0] : undefined,
+    operation:
+      entry.operation === "unknown" && inferredOrigin ? inferredOrigin.operation : entry.operation,
+    sourceProviderSessionId: parentId,
+    resultProviderSessionId: native.resultProviderSessionId,
+    resolvedSource,
+    sourceResolution,
+    sourceAgentId: sourceAgentId ?? entry.sourceAgentId,
+    candidateAgentIds: candidates.length > 1 ? candidates : undefined,
   };
+}
+
+function originConflicts({
+  entry,
+  parentId,
+  candidates,
+}: {
+  entry: AgentSessionLineage;
+  parentId: string | undefined;
+  candidates: string[];
+}): boolean {
+  if (entry.sourceProviderSessionId && entry.sourceProviderSessionId !== parentId) return true;
+  return (
+    !!entry.sourceAgentId && candidates.length > 0 && !candidates.includes(entry.sourceAgentId)
+  );
 }
 
 export function candidateResolution(
@@ -334,6 +409,10 @@ export function recordSessionOperation(input: {
     createdAt: input.createdAt ?? new Date().toISOString(),
     sourceHostId: input.sourceHostId,
     sourceAgentId: input.sourceAgentId,
+    resolvedSource:
+      input.sourceAgentId && input.sourceHostId
+        ? { hostId: input.sourceHostId, agentId: input.sourceAgentId }
+        : undefined,
     sourceProviderSessionId: input.sourcePersistence?.sessionId,
     resultProviderSessionId: input.resultPersistence?.sessionId,
     sourceProviderSessionTreeId: typeof sourceTree === "string" ? sourceTree : undefined,

@@ -17,6 +17,7 @@ export const styles = StyleSheet.create((theme) => ({
   },
   text: { color: theme.colors.foreground, fontSize: theme.fontSize.sm },
   muted: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
   grow: { flex: 1, minWidth: 0 },
   search: {
     minWidth: 150,
@@ -31,6 +32,11 @@ export const styles = StyleSheet.create((theme) => ({
   },
   split: { flex: 1, minHeight: 0, flexDirection: "row" },
   canvas: { flex: 2, minWidth: 0, overflow: "hidden" },
+  hidden: { display: "none" },
+  ancestorTrail: { flexGrow: 0, maxHeight: 40 },
+  ancestorContent: { alignItems: "center", paddingHorizontal: theme.spacing[2] },
+  sourceButton: { alignSelf: "flex-start", maxWidth: "100%" },
+  sourceText: { flexShrink: 1 },
   detail: {
     flex: 3,
     minWidth: 0,

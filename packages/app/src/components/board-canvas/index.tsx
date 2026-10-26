@@ -48,6 +48,7 @@ interface BoardCanvasProps {
   renderHover?: (id: string) => ReactNode;
   storedPlacements: BoardPlacement[];
   selectedExperiment: string | null;
+  focusRequest?: { id: string; revision: number };
   onSelectExperiment: (experiment: string) => void;
   onClearSelection: () => void;
   onPersistPlacement: (placement: BoardPlacement) => void;
@@ -63,6 +64,7 @@ export function BoardCanvas({
   renderHover,
   storedPlacements,
   selectedExperiment,
+  focusRequest,
   onSelectExperiment,
   onClearSelection,
   onPersistPlacement,
@@ -99,6 +101,18 @@ export function BoardCanvas({
     cameraRef.current = next;
     setCameraState(next);
   }, []);
+  const focusedRequest = useRef<typeof focusRequest>(undefined);
+  useEffect(() => {
+    if (!active || !focusRequest || focusedRequest.current === focusRequest) return;
+    if (viewportSize.width <= 0 || viewportSize.height <= 0) return;
+    const placement = placements.get(focusRequest.id);
+    if (!placement) return;
+    focusedRequest.current = focusRequest;
+    updateCamera({
+      x: (viewportSize.width - placement.width * GRID_SIZE) / 2 - placement.column * GRID_SIZE,
+      y: GRID_SIZE - placement.row * GRID_SIZE,
+    });
+  }, [active, focusRequest, placements, updateCamera, viewportSize]);
   const previewPlacement = useCallback((placement: ResolvedPlacement) => {
     setLocalPlacements((current) => ({ ...current, [placement.id]: placement }));
   }, []);

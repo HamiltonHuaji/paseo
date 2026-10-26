@@ -4064,6 +4064,11 @@ export class Session {
         return;
       }
 
+      if (!this.agentManager.getAgent(agentId)) {
+        const record = await this.agentStorage.get(agentId);
+        if (record) await this.agentUpdates.emitStoredRecord(record);
+      }
+
       this.emit({
         type: "update_agent_response",
         payload: { requestId, agentId, accepted: true, error: null },

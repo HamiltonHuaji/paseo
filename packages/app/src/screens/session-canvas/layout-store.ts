@@ -4,16 +4,22 @@ import { z } from "zod";
 import { persist } from "zustand/middleware";
 import { createValidatedPersistStorage } from "@/storage/validated-persist-storage";
 import type { BoardPlacement } from "@/components/board-canvas/layout";
-import { arrangeSessions, type CanvasSession, type SessionOrder, type SessionTime } from "./model";
+import {
+  addSessionPlacements,
+  arrangeSessions,
+  type CanvasSession,
+  type SessionOrder,
+  type SessionArrangement,
+} from "./model";
 
 interface CanvasLayout {
-  time: SessionTime;
+  time: SessionArrangement;
   order: SessionOrder;
   placements: BoardPlacement[];
   revision: number;
 }
 export const DEFAULT_SESSION_LAYOUT: CanvasLayout = {
-  time: "created",
+  time: "relationships",
   order: "oldest",
   placements: [],
   revision: 0,
@@ -24,7 +30,7 @@ interface LayoutStore {
   arrange: (
     key: string,
     sessions: CanvasSession[],
-    time: SessionTime,
+    time: SessionArrangement,
     order: SessionOrder,
   ) => Promise<boolean>;
   sync: (key: string, sessions: CanvasSession[]) => Promise<boolean>;
@@ -32,7 +38,7 @@ interface LayoutStore {
 }
 const STORAGE_KEY = "session-canvas-layouts";
 const LayoutSchema = z.object({
-  time: z.enum(["created", "forked", "reply", "input"]),
+  time: z.enum(["relationships", "created", "forked", "reply", "input"]),
   order: z.enum(["oldest", "newest"]),
   placements: z.array(
     z.object({
@@ -119,19 +125,12 @@ export const useSessionCanvasLayout = create<LayoutStore>()(
             const known = new Set(current.placements.map((placement) => placement.id));
             const added = sessions.filter((session) => !known.has(session.id));
             if (!added.length) return null;
-            let placements: BoardPlacement[];
-            if (!known.size) placements = arrangeSessions(sessions, current.time, current.order);
-            else {
-              const bottom =
-                Math.max(...current.placements.map((p) => (p.row ?? 0) + (p.height ?? 9))) + 0.5;
-              const arranged = arrangeSessions(sessions, current.time, current.order).filter(
-                (p) => !known.has(p.id),
-              );
-              placements = [
-                ...current.placements,
-                ...arranged.map((p, i) => Object.assign({}, p, { row: bottom + i * 9.5 })),
-              ];
-            }
+            const placements = addSessionPlacements({
+              sessions,
+              placements: current.placements,
+              time: current.time,
+              order: current.order,
+            });
             return { workspaces: { ...state.workspaces, [key]: { ...current, placements } } };
           }),
         move: (key, placement) =>

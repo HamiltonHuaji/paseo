@@ -12512,7 +12512,10 @@ test("session lineage reads native fixtures without a writer and retains missing
       sourceResolution: "missing",
       sourceProviderSessionId: "absent-parent",
     });
-    expect((await storage.get("foreign"))?.sessionLineage).toEqual(records[4].sessionLineage);
+    expect((await storage.get("foreign"))?.sessionLineage?.[0]).toMatchObject({
+      ...records[4].sessionLineage![0],
+      resolvedSource: { hostId: "foreign-host", agentId: "parent-a" },
+    });
     expect(
       nativeRows.map((row) => readFileSync(join(nativeDir, `${row.id}.jsonl`), "utf8")),
     ).toEqual(originals);
@@ -12523,11 +12526,11 @@ test("session lineage reads native fixtures without a writer and retains missing
       sourceHostId: "local-host",
     });
     expect(unique.get("duplicate")?.sessionLineage?.[0]).toMatchObject({
-      sourceResolution: "unknown-host",
-      candidateAgentIds: ["parent-a"],
+      sourceResolution: "resolved",
+      sourceAgentId: "parent-a",
+      resolvedSource: { hostId: "local-host", agentId: "parent-a" },
     });
     expect(unique.get("duplicate")?.sessionLineage?.[0].sourceHostId).toBeUndefined();
-    expect(unique.get("duplicate")?.sessionLineage?.[0].sourceAgentId).toBeUndefined();
     const legacyRewind = {
       ...record("rewound", "latest-native"),
       persistence: {
@@ -12575,6 +12578,116 @@ test("session lineage reads native fixtures without a writer and retains missing
     await storage.flush();
     rmSync(workdir, { recursive: true, force: true });
   }
+});
+
+test("session lineage restores legacy and unsaved forks across both owners' rewinds", () => {
+  const createdAt = "2026-10-01T10:00:00.000Z";
+  const record = (id: string, sessionId: string): StoredAgentRecord => ({
+    id,
+    provider: "codex",
+    cwd: "/project",
+    createdAt,
+    updatedAt: createdAt,
+    labels: {},
+    lastStatus: "closed",
+    persistence: { provider: "codex", sessionId },
+  });
+  const a = { ...record("A", "a2"), workspaceId: "elsewhere", archivedAt: createdAt };
+  const b = {
+    ...record("B", "b2"),
+    forkedFrom: { agentId: "A", forkedAt: createdAt },
+    sessionLineage: [
+      {
+        operation: "unknown" as const,
+        createdAt,
+        sourceAgentId: "A",
+        sourceResolution: "unknown-host" as const,
+        sourceEvidence: "provider-history" as const,
+      },
+    ],
+  };
+  const c = record("C", "c0");
+  const d = record("D", "d0");
+  const records = [b, c, d, a];
+  const history = [
+    ["a2", "a1"],
+    ["a1", "a0"],
+    ["a0", undefined],
+    ["b2", "b1"],
+    ["b1", "b0"],
+    ["b0", "a1"],
+    ["c0", "a0"],
+    ["d0", "b1"],
+  ].map(([sessionId, parentSessionId]) => ({ sessionId: sessionId!, parentSessionId, createdAt }));
+  const initialIds = new Map([
+    ["A", "a0"],
+    ["B", "b0"],
+  ]);
+  const recovered = recoverSessionLineage({ records, history, initialIds, sourceHostId: "host" });
+  for (const [child, parent] of [
+    ["B", "A"],
+    ["C", "A"],
+    ["D", "B"],
+  ]) {
+    expect(recovered.get(child)?.sessionLineage?.[0]).toMatchObject({
+      sourceResolution: "resolved",
+      resolvedSource: { hostId: "host", agentId: parent },
+    });
+    expect(recovered.get(child)?.sessionLineage?.[0].sourceHostId).toBeUndefined();
+  }
+  expect(recovered.get("A")?.sessionLineage).toEqual([]);
+  expect(new Set(recovered.get("A")?.providerSessionIds)).toEqual(new Set(["a0", "a1", "a2"]));
+  expect(new Set(recovered.get("B")?.providerSessionIds)).toEqual(new Set(["b0", "b1", "b2"]));
+  const saved = records.map((entry) => ({ ...entry, ...recovered.get(entry.id) }));
+  expect(
+    recoverSessionLineage({ records: saved, history, initialIds, sourceHostId: "host" }),
+  ).toEqual(recovered);
+  expect(
+    recoverSessionLineage({
+      records: records.toReversed(),
+      history,
+      initialIds,
+      sourceHostId: "host",
+    }),
+  ).toEqual(recovered);
+  const conflict = {
+    ...b,
+    forkedFrom: { agentId: "C", forkedAt: createdAt },
+    sessionLineage: [{ ...b.sessionLineage[0], sourceAgentId: "C" }],
+  };
+  const conflicted = recoverSessionLineage({
+    records: [a, conflict, c],
+    history,
+    initialIds,
+    sourceHostId: "host",
+  });
+  expect(conflicted.get("B")?.sessionLineage?.[0]).toMatchObject({
+    sourceResolution: "ambiguous",
+    candidateAgentIds: ["A", "C"],
+  });
+  expect(conflicted.get("B")?.sessionLineage?.[0].resolvedSource).toBeUndefined();
+  const duplicated = recoverSessionLineage({
+    records: [...saved, record("B-copy", "b2")],
+    history,
+    initialIds,
+    sourceHostId: "host",
+  });
+  expect(duplicated.get("B")?.sessionLineage?.[0].sourceResolution).toBe("ambiguous");
+  expect(duplicated.get("B")?.sessionLineage?.[0].resolvedSource).toBeUndefined();
+  const missingDirectParent = recoverSessionLineage({
+    records: [a, c],
+    history: [
+      ...history.filter((node) => node.sessionId !== "c0"),
+      { sessionId: "c0", parentSessionId: "unowned", createdAt },
+      { sessionId: "unowned", parentSessionId: "a0", createdAt },
+    ],
+    initialIds,
+    sourceHostId: "host",
+  });
+  expect(missingDirectParent.get("C")?.sessionLineage?.[0]).toMatchObject({
+    sourceResolution: "missing",
+    sourceProviderSessionId: "unowned",
+  });
 });
 
 test("history readers stay outside runtime metrics, retain metadata and retry a failed replay", async () => {

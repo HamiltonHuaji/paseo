@@ -38,6 +38,7 @@ The pinned `docs/refactors/experiment-viewer-transport-spec.md` must not be chan
 | [Viewer contracts](docs/contracts/viewers.md)                             | Result viewer, host identity and transport requirements                                                                        |
 | [Skill contracts](docs/contracts/skills.md)                               | User skill ownership and repository sync requirements                                                                          |
 | [0.13 preview review](docs/contracts/reviews/0.13.0-beta.1.md)            | All migration contracts, evidence and remaining gaps                                                                           |
+| [Session Canvas recovery review](docs/contracts/reviews/0.13.4.md)        | Real-session copy verification, legacy fork recovery and context tree navigation                                               |
 | [Native 0.13 acceptance](docs/qa-evidence/native-contracts-2026-10-23.md) | Android composer/viewer compilation, browser host routing and device verification limits                                       |
 | [Baseline review format](docs/contracts/baseline-review.md)               | Per-version evidence and known gaps                                                                                            |
 | [docs/product.md](docs/product.md)                                        | What Paseo is, who it's for, where it's going                                                                                  |
