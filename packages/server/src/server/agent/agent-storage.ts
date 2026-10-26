@@ -10,6 +10,7 @@ import {
   AgentFeatureSchema,
   AgentForkOriginSchema,
   AgentSessionLineageSchema,
+  AgentSnapshotPayloadSchema,
   AgentStatusSchema,
 } from "../messages.js";
 import { toStoredAgentRecord } from "./agent-projections.js";
@@ -78,6 +79,8 @@ const STORED_AGENT_SCHEMA = z.object({
     })
     .optional(),
   features: z.array(AgentFeatureSchema).optional(),
+  availableModes: AgentSnapshotPayloadSchema.shape.availableModes.optional(),
+  capabilities: AgentSnapshotPayloadSchema.shape.capabilities.optional(),
   persistence: PERSISTENCE_HANDLE_SCHEMA,
   lastError: z.string().nullable().optional(),
   requiresAttention: z.boolean().optional(),

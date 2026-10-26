@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { AgentMode } from "@getpaseo/protocol/agent-types";
-import { resolveAgentControlsMode, resolveNextAgentModeId } from "./mode";
+import type { AgentMode, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
+import { resolveAgentControlsMode, resolveAgentModeOptions, resolveNextAgentModeId } from "./mode";
 
 const PLAN_MODE = { id: "plan", label: "Plan" } satisfies AgentMode;
 
@@ -9,6 +9,58 @@ const MODES = [
   { id: "build", label: "Build" },
   { id: "full-access", label: "Full Access" },
 ] satisfies AgentMode[];
+
+describe("dormant agent modes", () => {
+  const entry: ProviderSnapshotEntry = {
+    provider: "codex",
+    status: "ready",
+    enabled: true,
+    modes: MODES,
+  };
+  const input = { provider: "codex", availableModes: [], snapshotEntries: [entry] };
+
+  it("shows modes for an old stored conversation without waiting for a new turn", () => {
+    expect(resolveAgentModeOptions({ ...input, status: "closed" })).toEqual(MODES);
+    expect(resolveAgentModeOptions({ ...input, status: "initializing" })).toEqual(MODES);
+    expect(
+      resolveAgentModeOptions({ ...input, status: "closed", provider: "custom-codex" }),
+    ).toEqual([]);
+  });
+
+  it("keeps known modes while discovery loads and respects a ready catalog removing them", () => {
+    expect(
+      resolveAgentModeOptions({
+        ...input,
+        status: "closed",
+        availableModes: MODES,
+        snapshotEntries: undefined,
+      }),
+    ).toEqual(MODES);
+    expect(
+      resolveAgentModeOptions({
+        ...input,
+        status: "closed",
+        availableModes: MODES,
+        snapshotEntries: [{ ...entry, status: "loading", modes: undefined }],
+      }),
+    ).toEqual(MODES);
+    expect(
+      resolveAgentModeOptions({
+        ...input,
+        status: "closed",
+        availableModes: MODES,
+        snapshotEntries: [{ ...entry, modes: [] }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("leaves live runtime modes authoritative, including an empty list", () => {
+    expect(resolveAgentModeOptions({ ...input, status: "idle" })).toEqual([]);
+    expect(
+      resolveAgentModeOptions({ ...input, status: "running", availableModes: [PLAN_MODE] }),
+    ).toEqual([PLAN_MODE]);
+  });
+});
 
 describe("resolveAgentControlsMode", () => {
   it("uses ready mode when no controlled agent controls are provided", () => {

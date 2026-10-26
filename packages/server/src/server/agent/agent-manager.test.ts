@@ -12690,6 +12690,70 @@ test("session lineage restores legacy and unsaved forks across both owners' rewi
   });
 });
 
+test("restoring a session preserves known controls until runtime discovery completes", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-controls-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const modesRequested = deferred<void>();
+  const modesAllowed = deferred<void>();
+  const features = [createFeature({ id: "plan_mode", label: "Plan", value: false })];
+  const modes = [{ id: "full-access", label: "Full Access" }];
+  class ControlSession extends TestAgentSession {
+    features = features;
+    waitForModes = false;
+    override async getAvailableModes() {
+      if (this.waitForModes) {
+        modesRequested.resolve();
+        await modesAllowed.promise;
+      }
+      return modes;
+    }
+  }
+  const client = new (class extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig) {
+      return new ControlSession(config);
+    }
+    override async resumeSession() {
+      const session = new ControlSession({ provider: "codex", cwd: workdir });
+      session.waitForModes = true;
+      return session;
+    }
+  })();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  let agentId: string | undefined;
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    agentId = agent.id;
+    await manager.closeAgent(agent.id);
+    const emitted: ReturnType<typeof toAgentPayload>[] = [];
+    manager.subscribe(
+      (event) => {
+        if (event.type === "agent_state") emitted.push(toAgentPayload(event.agent));
+      },
+      { replayState: false },
+    );
+    const resuming = ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    await modesRequested.promise;
+    expect(manager.getAgent(agent.id)).toMatchObject({ features, availableModes: modes });
+    modesAllowed.resolve();
+    await resuming;
+    expect(emitted.length).toBeGreaterThan(0);
+    for (const snapshot of emitted)
+      expect(snapshot).toMatchObject({ features, availableModes: modes });
+  } finally {
+    modesAllowed.resolve();
+    if (agentId) await manager.closeAgent(agentId);
+    await manager.flush();
+    await storage.flush();
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("history readers stay outside runtime metrics, retain metadata and retry a failed replay", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-reader-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
@@ -12733,6 +12797,7 @@ test("history readers stay outside runtime metrics, retain metadata and retry a 
       lastModeId: "plan",
       lastError: "Previous failure",
       features: [createFeature({ id: "fast", label: "Fast", value: true })],
+      availableModes: [{ id: "plan", label: "Plan" }],
     });
     const before = await storage.get(agent.id);
     const events: AgentManagerEvent[] = [];
@@ -12762,6 +12827,7 @@ test("history readers stay outside runtime metrics, retain metadata and retry a 
       currentModeId: "plan",
       lastError: "Previous failure",
       features: before!.features,
+      availableModes: before!.availableModes,
     });
     expect(manager.fetchTimeline(agent.id, { limit: 0 }).rows).toHaveLength(2);
     expect(await manager.getTimelineRows(agent.id)).toHaveLength(2);
@@ -12776,7 +12842,13 @@ test("history readers stay outside runtime metrics, retain metadata and retry a 
     expect((await storage.get(agent.id))?.requiresAttention).toBe(false);
     expect(manager.listAgents()).toEqual([]);
     expect(events.findLast((event) => event.type === "agent_state")).toMatchObject({
-      agent: { lifecycle: "closed", runtimeInfo: before!.runtimeInfo },
+      agent: {
+        lifecycle: "closed",
+        runtimeInfo: before!.runtimeInfo,
+        features: before!.features,
+        availableModes: before!.availableModes,
+        capabilities: before!.capabilities,
+      },
     });
   } finally {
     await manager.flush();

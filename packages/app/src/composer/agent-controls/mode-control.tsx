@@ -13,7 +13,7 @@ import { getAgentControlHintKey } from "@/composer/agent-controls/utils";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
-import { resolveNextAgentModeId } from "@/composer/agent-controls/mode";
+import { resolveAgentModeOptions, resolveNextAgentModeId } from "@/composer/agent-controls/mode";
 import { useComposerKeyboardScope } from "@/composer/keyboard-scope";
 import { useComposerControlLayout } from "@/composer/agent-controls/layout-context";
 import { AgentControlTrigger } from "@/composer/agent-controls/control";
@@ -254,6 +254,7 @@ export function useLiveAgentModeControl(
         provider: agent.provider,
         cwd: agent.cwd,
         currentModeId: agent.currentModeId,
+        status: agent.status,
       };
     }),
   );
@@ -266,6 +267,12 @@ export function useLiveAgentModeControl(
   const { updatePreferences } = useFormPreferences();
   const toast = useToast();
   const { entries: snapshotEntries } = useProvidersSnapshot(serverId, { cwd: slice?.cwd });
+  const modeOptions = resolveAgentModeOptions({
+    status: slice?.status,
+    availableModes,
+    provider: slice?.provider,
+    snapshotEntries,
+  });
 
   const providerDefinitions = useMemo<AgentProviderDefinition[]>(() => {
     if (!slice?.provider) return [];
@@ -297,16 +304,16 @@ export function useLiveAgentModeControl(
   );
 
   return useMemo(() => {
-    if (!slice || availableModes.length === 0) return null;
+    if (!slice || modeOptions.length === 0) return null;
     return {
       provider: slice.provider,
       providerDefinitions,
-      modeOptions: availableModes,
+      modeOptions,
       selectedModeId: slice.currentModeId,
       onSelectMode: handleSelectMode,
       disabled: !client,
     };
-  }, [availableModes, client, handleSelectMode, providerDefinitions, slice]);
+  }, [modeOptions, client, handleSelectMode, providerDefinitions, slice]);
 }
 
 const styles = StyleSheet.create((theme) => ({

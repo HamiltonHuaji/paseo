@@ -1913,6 +1913,7 @@ export class AgentManager {
         session.getPendingPermissions().map((request) => [request.id, request]),
       );
       reader.currentModeId = record?.lastModeId ?? config.modeId ?? null;
+      reader.availableModes = record?.availableModes ?? [];
       reader.features = record?.features;
       reader.runtimeInfo = record?.runtimeInfo ?? undefined;
       reader.lastError = record?.lastError ?? undefined;
@@ -2562,13 +2563,13 @@ export class AgentManager {
         workspaceId: record.workspaceId,
         owner: record.owner,
         session: null,
-        capabilities: STORED_AGENT_CAPABILITIES,
+        capabilities: record.capabilities ?? STORED_AGENT_CAPABILITIES,
         config: buildStoredAgentConfig(record),
         runtimeInfo: record.runtimeInfo,
         lifecycle: "closed",
         createdAt: new Date(record.createdAt),
         updatedAt,
-        availableModes: [],
+        availableModes: record.availableModes ?? [],
         features: record.features,
         currentModeId: record.lastModeId ?? null,
         pendingPermissions: new Map(),
@@ -4286,6 +4287,7 @@ export class AgentManager {
         durableTimelineHasRows,
         options,
       });
+      await this.restoreStoredAgentControls(managed);
 
       // Read history before publishing the agent: a provider failure must leave the
       // session unregistered so the registration catch closes it.
@@ -4313,7 +4315,9 @@ export class AgentManager {
         }
         this.refreshSessionPersistence(managed);
       }
-      await this.refreshRuntimeInfo(managed, { emit: false });
+      // Publish configuration together: an initializing snapshot must not erase
+      // the controls the client already showed for this stored conversation.
+      await this.refreshSessionState(managed, { emit: false });
       this.assertAgentRegistrationActive(managed);
       await this.persistSnapshot(managed, {
         title: initialPersistedTitle,
@@ -4323,8 +4327,6 @@ export class AgentManager {
         this.emitState(managed, { persist: false });
       }
 
-      await this.refreshSessionState(managed, { emit: false });
-      this.assertAgentRegistrationActive(managed);
       managed.lifecycle = "idle";
       // Stamping now over a restored timestamp rewrote the workspace's "last used" in the
       // sidebar every time a chat was reopened, because workspace `statusEnteredAt` is
@@ -4347,6 +4349,13 @@ export class AgentManager {
     } finally {
       releaseRegistration();
     }
+  }
+
+  private async restoreStoredAgentControls(agent: ActiveManagedAgent): Promise<void> {
+    const stored = await this.registry?.get(agent.id);
+    agent.features = stored?.features;
+    agent.availableModes = stored?.availableModes ?? [];
+    agent.currentModeId = stored?.lastModeId ?? agent.config.modeId ?? null;
   }
 
   private assertAcceptingAgentRegistrations(): void {

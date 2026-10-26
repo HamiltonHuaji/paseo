@@ -106,6 +106,8 @@ export function toStoredAgentRecord(
     config: config ?? null,
     runtimeInfo,
     features: normalizeFeatures(agent.features),
+    availableModes: cloneAvailableModes(agent.availableModes),
+    capabilities: cloneCapabilities(agent.capabilities),
     persistence,
     lastError: agent.lastError ?? undefined,
     requiresAttention: agent.attention.requiresAttention,
@@ -217,10 +219,7 @@ function buildStoredPersistenceHandle(
   return toAgentPersistenceHandle(validProviders, record.persistence);
 }
 
-export function buildStoredAgentPayload(
-  record: StoredAgentRecord,
-  validProviders: Iterable<AgentProvider>,
-): AgentSnapshotPayload {
+function projectStoredControls(record: StoredAgentRecord) {
   const defaultCapabilities = {
     supportsStreaming: false,
     supportsSessionPersistence: true,
@@ -233,6 +232,18 @@ export function buildStoredAgentPayload(
     supportsRewindBoth: false,
   } as const;
 
+  return {
+    capabilities: cloneCapabilities(record.capabilities ?? defaultCapabilities),
+    currentModeId: record.lastModeId ?? null,
+    availableModes: cloneAvailableModes(record.availableModes ?? []),
+    features: normalizeFeatures(record.features),
+  };
+}
+
+export function buildStoredAgentPayload(
+  record: StoredAgentRecord,
+  validProviders: Iterable<AgentProvider>,
+): AgentSnapshotPayload {
   const createdAt = new Date(record.createdAt);
   const updatedAt = new Date(resolveStoredAgentUpdatedAt(record));
   const lastUserMessageAt = record.lastUserMessageAt ? new Date(record.lastUserMessageAt) : null;
@@ -262,9 +273,7 @@ export function buildStoredAgentPayload(
     forkedFrom: record.forkedFrom,
     sessionLineage: record.sessionLineage,
     status: record.lastStatus,
-    capabilities: defaultCapabilities,
-    currentModeId: record.lastModeId ?? null,
-    availableModes: [],
+    ...projectStoredControls(record),
     pendingPermissions: [],
     persistence,
     title: record.title ?? null,

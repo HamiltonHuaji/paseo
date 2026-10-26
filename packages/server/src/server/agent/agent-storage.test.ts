@@ -6,6 +6,7 @@ import { promises as fs } from "node:fs";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentStorage } from "./agent-storage.js";
+import { buildStoredAgentPayload, toAgentPayload } from "./agent-projections.js";
 import { buildConfigOverrides, buildSessionConfig } from "../persistence-hooks.js";
 import type { ManagedAgent } from "./agent-manager.js";
 import type {
@@ -110,6 +111,7 @@ function createManagedAgent(overrides: ManagedAgentOverrides = {}): ManagedAgent
     createdAt: overrides.createdAt ?? core.now,
     updatedAt: overrides.updatedAt ?? core.now,
     availableModes: overrides.availableModes ?? [],
+    features: overrides.features,
     currentModeId: overrides.currentModeId ?? core.config.modeId ?? null,
     pendingPermissions: overrides.pendingPermissions ?? new Map<string, AgentPermissionRequest>(),
     activeForegroundTurnId: core.activeForegroundTurnId,
@@ -214,6 +216,50 @@ describe("AgentStorage", () => {
     const persisted = await reloaded.get("agent-feature-values");
     expect(persisted?.config?.featureValues).toEqual({ fast_mode: true });
     expect(buildSessionConfig(persisted!).featureValues).toEqual({ fast_mode: true });
+  });
+
+  test("cold stored snapshots retain controls and selections before the agent runs again", async () => {
+    const agent = createManagedAgent({
+      id: "dormant-controls",
+      provider: "codex",
+      currentModeId: "full-access",
+      availableModes: [
+        { id: "auto", label: "Default Permissions" },
+        { id: "full-access", label: "Full Access" },
+      ],
+      capabilities: { ...buildDefaultCapabilities(), supportsNativeConversationFork: true },
+      features: [
+        {
+          type: "select",
+          id: "service_tier",
+          label: "Speed",
+          value: "priority",
+          options: [
+            { id: "default", label: "Normal" },
+            { id: "priority", label: "Fast" },
+          ],
+        },
+        { type: "toggle", id: "plan_mode", label: "Plan", value: false },
+      ],
+    });
+    await storage.applySnapshot(agent);
+
+    const reloaded = new AgentStorage(storagePath, logger);
+    const record = (await reloaded.get(agent.id))!;
+    const cold = buildStoredAgentPayload(record, ["codex"]);
+    const live = toAgentPayload(agent);
+    expect(live.features?.map((feature) => feature.id)).toEqual(["service_tier", "plan_mode"]);
+    expect(cold).toMatchObject({
+      features: live.features,
+      availableModes: live.availableModes,
+      capabilities: live.capabilities,
+      currentModeId: live.currentModeId,
+      model: live.model,
+    });
+
+    // Existing releases already wrote features, but not modes or capabilities.
+    const { availableModes: _modes, capabilities: _capabilities, ...legacy } = record;
+    expect(buildStoredAgentPayload(legacy, ["codex"]).features).toEqual(live.features);
   });
 
   test("applySnapshot keeps featureValues absent when they were never set", async () => {
