@@ -55,14 +55,12 @@ export function arrangeSessions(
 ): BoardPlacement[] {
   if (time === "relationships") return arrangeSessionFamilies(sessions, order);
   const groups = sessionForest(sessions, order).map((tree) => {
-    const lanes = new Map<string, number>();
+    const depths = new Map<string, number>();
     const members: CanvasSession[] = [];
-    const visit = (branch: SessionBranch, lane: number): number => {
+    const visit = (branch: SessionBranch, depth: number): void => {
       members.push(branch.session);
-      lanes.set(branch.session.id, lane);
-      let next = lane;
-      for (const child of branch.children) next = visit(child, next) + 1;
-      return Math.max(lane, next - 1);
+      depths.set(branch.session.id, depth);
+      for (const child of branch.children) visit(child, depth + 1);
     };
     visit(tree, 0);
     const sorted = members.sort((a, b) => compareSessionTimes(a, b, time, order));
@@ -75,9 +73,10 @@ export function arrangeSessions(
     }
     const placements = sorted.map((session, index) => ({
       id: session.id,
-      // Rows never overlap in time mode, so branch indentation need not consume
-      // a whole card width. An unbranched continuation stays in the same lane.
-      column: lanes.get(session.id)! * 4,
+      // Keep each generation and its connecting channel visible. Compressing
+      // generations into overlapping columns turns the tree into a jagged list
+      // and sends long source edges around unrelated rows.
+      column: depths.get(session.id)! * (SESSION_CARD_SIZE.width + 1),
       row: index * (SESSION_CARD_SIZE.height + 0.5),
       width: SESSION_CARD_SIZE.width,
       height: SESSION_CARD_SIZE.height,
@@ -219,16 +218,28 @@ function arrangeSessionFamilies(sessions: CanvasSession[], order: SessionOrder):
 }
 
 function packSessionFamilies(families: SessionFamily[]): BoardPlacement[] {
+  // Standalone sessions have no lineage to follow. Give them a small grid rather
+  // than a column that visually suggests another long source tree.
+  const standalone = families.filter((group) => group.placements.length === 1);
+  if (standalone.length > 1) {
+    const columns = Math.ceil(Math.sqrt(standalone.length));
+    const grid: SessionFamily = {
+      placements: standalone.map((group, index) => ({
+        ...group.placements[0],
+        column: (index % columns) * (SESSION_CARD_SIZE.width + 3),
+        row: Math.floor(index / columns) * (SESSION_CARD_SIZE.height + 2),
+      })),
+      width: columns * (SESSION_CARD_SIZE.width + 3) - 3,
+      height: Math.ceil(standalone.length / columns) * (SESSION_CARD_SIZE.height + 2) - 2,
+    };
+    families = families.flatMap((group) => {
+      if (group === standalone[0]) return [grid];
+      return group.placements.length === 1 ? [] : [group];
+    });
+  }
   const area = families.reduce((sum, group) => sum + (group.width + 3) * (group.height + 2), 0);
   const widest = Math.max(SESSION_CARD_SIZE.width, ...families.map((group) => group.width));
-  const tallest = Math.max(SESSION_CARD_SIZE.height, ...families.map((group) => group.height));
-  const narrowest = Math.min(SESSION_CARD_SIZE.width, ...families.map((group) => group.width));
-  // A tall time tree fixes the total height already. Stack its smaller neighbors
-  // beside it instead of making a wide shelf with empty space underneath.
-  const targetWidth = Math.max(
-    widest,
-    Math.min(Math.sqrt(area * 1.5), Math.max(widest + 3 + narrowest, area / tallest)),
-  );
+  const targetWidth = Math.max(widest, Math.sqrt(area * 1.5));
   const occupied: { column: number; row: number; width: number; height: number }[] = [];
   const result: BoardPlacement[] = [];
   for (const group of families) {
@@ -295,13 +306,13 @@ export function addSessionPlacements(input: {
       const relatives = result.filter((p) => ids.has(p.id));
       candidate = {
         ...candidate,
-        column: parent.column,
+        column: (parent.column ?? 0) + (parent.width ?? SESSION_CARD_SIZE.width) + 1,
         row:
           Math.max(...relatives.map((p) => (p.row ?? 0) + (p.height ?? SESSION_CARD_SIZE.height))) +
           0.5,
       };
-      // Append inside the source family's column without shifting existing cards
-      // or dropping the new branch into a different family's empty interior.
+      // Preserve the source's generation offset without shifting existing cards.
+      // Saved manual layouts may require moving down to find a free slot.
       for (;;) {
         const blockers = result.filter(
           (p) =>

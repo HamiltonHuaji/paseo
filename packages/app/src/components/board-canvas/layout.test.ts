@@ -196,16 +196,18 @@ describe("session chronology", () => {
       for (const [index, session] of forest.entries())
         trees[index % 2].push(placements.get(session.id)!);
       for (const tree of trees) {
-        expect(new Set(tree.map((p) => p.column)).size).toBe(1);
-        for (let i = 1; i < tree.length; i++)
+        for (let i = 1; i < tree.length; i++) {
+          expect(tree[i].column!).toBeGreaterThan(tree[i - 1].column! + tree[i - 1].width!);
           expect(tree[i].row! - tree[i - 1].row!).toBe(
             (order === "oldest" ? 1 : -1) * (SESSION_CARD_SIZE.height + 0.5),
           );
+        }
       }
-      expect(Math.abs(trees[0][0].column! - trees[1][0].column!)).toBeGreaterThan(
-        SESSION_CARD_SIZE.width,
+      const bounds = trees.map(placementBounds);
+      const [a, b] = bounds;
+      expect(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top).toBe(
+        true,
       );
-      expect(Math.max(...layout.map((p) => p.row! + p.height!))).toBeLessThan(50);
     }
     expect(sessionNodes(sessions, "Untitled")[1].basedOn).toBe("session-0");
   });
@@ -235,7 +237,7 @@ describe("session chronology", () => {
     expect(sessionNodes([orphan], "Untitled")[0].basedOn).toBe("elsewhere");
     expect(arrangeSessions([orphan], "created", "oldest")[0].column).toBe(1);
   });
-  it("stacks small independent trees beside a tall tree and keeps saved cards when a branch arrives", () => {
+  it("packs unrelated sessions into a grid and keeps saved cards when a branch arrives", () => {
     const chain = Array.from({ length: 16 }, (_, index) => ({
       ...sessions[0],
       id: `chain-${index}`,
@@ -245,12 +247,10 @@ describe("session chronology", () => {
     const roots = sessions.filter((s) => !s.forkedFrom);
     const forest = [...chain, ...roots];
     const arranged = arrangeSessions(forest, "created", "oldest");
-    const bottom = arranged.find((p) => p.id === "chain-15")!;
-    for (const root of roots) {
-      const card = arranged.find((p) => p.id === root.id)!;
-      expect(card.column).toBeGreaterThan(SESSION_CARD_SIZE.width);
-      expect(card.row! + card.height!).toBeLessThanOrEqual(bottom.row! + bottom.height!);
-    }
+    const rootIds = new Set(roots.map((root) => root.id));
+    const standalone = arranged.filter((p) => rootIds.has(p.id));
+    expect(new Set(standalone.map((p) => p.column)).size).toBeGreaterThan(1);
+    expect(new Set(standalone.map((p) => p.row)).size).toBeLessThan(roots.length);
     const added = {
       ...sessions[1],
       id: "new-branch",
@@ -264,10 +264,19 @@ describe("session chronology", () => {
       order: "oldest",
     });
     expect(extended.slice(0, saved.length)).toEqual(saved);
-    expect(extended.at(-1)!.row).toBe(
+    expect(extended.at(-1)!.row).toBeGreaterThanOrEqual(
       saved.find((p) => p.id === "chain-15")!.row! + SESSION_CARD_SIZE.height + 0.5,
     );
-    expect(extended.at(-1)!.column).toBe(saved.find((p) => p.id === "chain-2")!.column);
+    const parent = saved.find((p) => p.id === "chain-2")!;
+    const child = extended.at(-1)!;
+    expect(child.column!).toBeGreaterThan(parent.column! + parent.width!);
+    for (const other of saved) {
+      const a = placementBounds([child]),
+        b = placementBounds([other]);
+      expect(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top).toBe(
+        true,
+      );
+    }
   });
   it("groups a context tree while keeping a deep single branch in one column", () => {
     const tree = [
@@ -334,6 +343,15 @@ describe("session chronology", () => {
     expect(sessionAncestors("session-0", cyclic).map((s) => s.id)).toEqual(["session-1"]);
   });
 });
+
+function placementBounds(placements: BoardPlacement[]) {
+  return {
+    left: Math.min(...placements.map((p) => p.column!)),
+    right: Math.max(...placements.map((p) => p.column! + p.width!)),
+    top: Math.min(...placements.map((p) => p.row!)),
+    bottom: Math.max(...placements.map((p) => p.row! + p.height!)),
+  };
+}
 
 function expectRouteClear(points: { x: number; y: number }[], cards: ResolvedPlacement[]) {
   for (let index = 1; index < points.length; index++) {
