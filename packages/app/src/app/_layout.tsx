@@ -89,6 +89,7 @@ import { listenToDesktopEvent } from "@/desktop/electron/events";
 import { updateDesktopWindowChrome } from "@/desktop/electron/window";
 import { getDesktopHost } from "@/desktop/host";
 import { syncViewerProxyHosts, updateViewerProxyRoute } from "@/viewers/proxy";
+import { resolveViewerConnection } from "@/viewers/connection";
 import { loadDesktopSettings } from "@/desktop/settings/desktop-settings";
 import { RosettaCalloutSource } from "@/desktop/updates/rosetta-callout-source";
 import { UpdateCalloutSource } from "@/desktop/updates/update-callout-source";
@@ -342,13 +343,20 @@ function ViewerHttpRouteSync({ host }: { host: HostProfile }) {
   );
 
   useEffect(() => {
-    if (activeConnection?.type !== "relay" && activeConnection?.type !== "directTcp") return;
+    const connection = resolveViewerConnection(activeConnection, host.password);
+    if (!connection) return;
     void updateViewerProxyRoute({
       serverId: host.serverId,
-      connection: activeConnection,
+      connection,
       routeGeneration: snapshot?.clientGeneration,
     }).catch((error) => console.warn("[viewer-http] Failed to update viewer route", error));
-  }, [activeConnection, host.serverId, snapshot?.clientGeneration, snapshot?.connectionStatus]);
+  }, [
+    activeConnection,
+    host.serverId,
+    host.password,
+    snapshot?.clientGeneration,
+    snapshot?.connectionStatus,
+  ]);
 
   return null;
 }

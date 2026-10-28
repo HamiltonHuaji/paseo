@@ -76,6 +76,7 @@ export type DesktopTunnelConnection =
       relayEndpoint: string;
       useTls?: boolean;
       daemonPublicKeyB64: string;
+      password?: string;
     }
   | {
       type: "directTcp";

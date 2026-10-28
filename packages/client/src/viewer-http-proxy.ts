@@ -6,6 +6,7 @@ export const ViewerConnectionSchema = z.discriminatedUnion("type", [
     relayEndpoint: z.string().min(1),
     useTls: z.boolean().optional(),
     daemonPublicKeyB64: z.string().min(1),
+    password: z.string().optional(),
   }),
   z.object({
     type: z.literal("directTcp"),

@@ -254,7 +254,7 @@ function createTunnelClient(serverId: string, connection: TunnelConnection): Dae
       : buildDaemonWebSocketUrl(connection.endpoint, { useTls }),
     clientId: `desktop-tunnel-${randomUUID()}`,
     clientType: "cli",
-    password: isRelay ? undefined : connection.password,
+    password: connection.password,
     webSocketFactory: (url, options) =>
       new WebSocket(url, options?.protocols, {
         headers: options?.headers,

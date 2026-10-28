@@ -23,7 +23,7 @@ export function createViewerClient(serverId: string, connection: ViewerConnectio
     clientId: `viewer-${globalThis.crypto.randomUUID()}`,
     clientType: "mobile",
     webSocketFactory: createAppWebSocketFactory(),
-    password: connection.type === "directTcp" ? connection.password : undefined,
+    password: connection.password,
     e2ee:
       connection.type === "relay"
         ? {

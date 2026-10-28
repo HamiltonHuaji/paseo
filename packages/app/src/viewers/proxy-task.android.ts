@@ -1,5 +1,6 @@
 import { AppRegistry } from "react-native";
 import { runViewerProxyTask, syncViewerProxyHosts, updateViewerProxyRoute } from "./proxy.android";
+import { resolveViewerConnection } from "./connection";
 
 async function runTask({ serviceId }: { serviceId: string }): Promise<void> {
   let stopped = false;
@@ -16,8 +17,11 @@ async function runTask({ serviceId }: { serviceId: string }): Promise<void> {
     for (const host of store.getHosts()) {
       const snapshot = store.getSnapshot(host.serverId);
       const id = snapshot?.activeConnectionId;
-      const connection = host.connections.find((candidate) => candidate.id === id);
-      if (connection?.type !== "directTcp" && connection?.type !== "relay") continue;
+      const connection = resolveViewerConnection(
+        host.connections.find((candidate) => candidate.id === id),
+        host.password,
+      );
+      if (!connection) continue;
       const key = JSON.stringify([
         connection,
         snapshot?.clientGeneration,

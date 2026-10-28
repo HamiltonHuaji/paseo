@@ -2,6 +2,7 @@ import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { openExternalUrl } from "@/utils/open-external-url";
 import { openViewer } from "./open";
 import { canProxyViewers, ensureViewerProxy } from "./proxy";
+import { resolveViewerConnection } from "./connection";
 
 export function openHostViewer(serverId: string, path: string): Promise<void> {
   const runtime = getHostRuntimeStore();
@@ -9,7 +10,7 @@ export function openHostViewer(serverId: string, path: string): Promise<void> {
   const activeConnectionId = runtime.getSnapshot(serverId)?.activeConnectionId;
   const host = runtime.getHosts().find((candidate) => candidate.serverId === serverId);
   const route = host?.connections.find((connection) => connection.id === activeConnectionId);
-  const connection = route?.type === "directTcp" || route?.type === "relay" ? route : null;
+  const connection = resolveViewerConnection(route, host?.password);
   return openViewer(
     {
       serverId,

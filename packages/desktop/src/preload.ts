@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
             relayEndpoint: string;
             useTls?: boolean;
             daemonPublicKeyB64: string;
+            password?: string;
           }
         | {
             type: "directTcp";
@@ -134,6 +135,7 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
             relayEndpoint: string;
             useTls?: boolean;
             daemonPublicKeyB64: string;
+            password?: string;
           }
         | {
             type: "directTcp";
@@ -159,6 +161,7 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
             relayEndpoint: string;
             useTls?: boolean;
             daemonPublicKeyB64: string;
+            password?: string;
           }
         | {
             type: "directTcp";
@@ -176,6 +179,7 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
             relayEndpoint: string;
             useTls?: boolean;
             daemonPublicKeyB64: string;
+            password?: string;
           }
         | {
             type: "directTcp";

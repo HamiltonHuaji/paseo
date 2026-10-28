@@ -345,13 +345,15 @@ export function buildStandardContextMenuItems(
     items.push({ type: "separator" });
   }
 
-  if (params.linkURL && /^https?:/i.test(params.linkURL)) {
-    items.push({
-      label: "Open Link in Browser",
-      click: () => {
-        void shell.openExternal(params.linkURL);
-      },
-    });
+  if (params.linkURL) {
+    if (/^https?:/i.test(params.linkURL)) {
+      items.push({
+        label: "Open Link in Browser",
+        click: () => {
+          void shell.openExternal(params.linkURL);
+        },
+      });
+    }
     items.push({
       label: "Copy Link Address",
       click: () => clipboard.writeText(params.linkURL),
