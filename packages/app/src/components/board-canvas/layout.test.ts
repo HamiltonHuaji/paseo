@@ -198,9 +198,9 @@ describe("session chronology", () => {
       for (const tree of trees) {
         for (let i = 1; i < tree.length; i++) {
           expect(tree[i].column!).toBeGreaterThan(tree[i - 1].column! + tree[i - 1].width!);
-          expect(tree[i].row! - tree[i - 1].row!).toBe(
-            (order === "oldest" ? 1 : -1) * (SESSION_CARD_SIZE.height + 0.5),
-          );
+          const step = (tree[i].row! - tree[i - 1].row!) * (order === "oldest" ? 1 : -1);
+          expect(step).toBeGreaterThan(0);
+          expect(step).toBeLessThan(SESSION_CARD_SIZE.height);
         }
       }
       const bounds = trees.map(placementBounds);
@@ -210,6 +210,48 @@ describe("session chronology", () => {
       );
     }
     expect(sessionNodes(sessions, "Untitled")[1].basedOn).toBe("session-0");
+  });
+  it("shares vertical space across generations while keeping interleaved siblings clear", () => {
+    const parents = [null, 0, 1, 0, 3, 1, 3];
+    const family = sessions.slice(0, parents.length).map((session, index) => {
+      const parent = parents[index];
+      return Object.assign({}, session, {
+        forkedFrom:
+          parent === null
+            ? undefined
+            : { agentId: sessions[parent].id, forkedAt: session.createdAt.toISOString() },
+      });
+    });
+    for (const order of ["oldest", "newest"] as const) {
+      const arranged = arrangeSessions(family, "created", order);
+      const byId = new Map(arranged.map((card) => [card.id, card]));
+      for (let i = 1; i < arranged.length; i++)
+        expect(arranged[i].row!).toBeGreaterThan(arranged[i - 1].row!);
+      expect(placementBounds(arranged).bottom - placementBounds(arranged).top).toBeLessThan(
+        family.length * SESSION_CARD_SIZE.height,
+      );
+      for (let i = 0; i < arranged.length; i++) {
+        const a = placementBounds([arranged[i]]);
+        for (let j = i + 1; j < arranged.length; j++) {
+          const b = placementBounds([arranged[j]]);
+          expect(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top).toBe(
+            true,
+          );
+        }
+      }
+      const resolved = [
+        ...resolveBoardPlacements(sessionNodes(family, "Untitled"), new Map(), arranged).values(),
+      ];
+      for (const session of family) {
+        if (!session.forkedFrom) continue;
+        const source = resolved.find((card) => card.id === session.forkedFrom!.agentId)!;
+        const target = resolved.find((card) => card.id === session.id)!;
+        expectRouteClear(orthogonalRoute(source, target, resolved).points, resolved);
+      }
+      const rows = family.map((session) => byId.get(session.id)!.row!);
+      for (let i = 1; i < rows.length; i++)
+        expect((rows[i] - rows[i - 1]) * (order === "oldest" ? 1 : -1)).toBeGreaterThan(0);
+    }
   });
   it("sorts each event separately and places missing events last in both directions", () => {
     expect(arrangeSessions(sessions, "input", "oldest")[0].id).toBe("session-11");
@@ -264,9 +306,7 @@ describe("session chronology", () => {
       order: "oldest",
     });
     expect(extended.slice(0, saved.length)).toEqual(saved);
-    expect(extended.at(-1)!.row).toBeGreaterThanOrEqual(
-      saved.find((p) => p.id === "chain-15")!.row! + SESSION_CARD_SIZE.height + 0.5,
-    );
+    expect(extended.at(-1)!.row).toBeGreaterThan(saved.find((p) => p.id === "chain-15")!.row!);
     const parent = saved.find((p) => p.id === "chain-2")!;
     const child = extended.at(-1)!;
     expect(child.column!).toBeGreaterThan(parent.column! + parent.width!);

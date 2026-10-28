@@ -20,6 +20,9 @@ export type CanvasSession = Pick<
   | "archivedAt"
 >;
 export const SESSION_CARD_SIZE = { width: 16, height: 9 };
+// Keep consecutive event headers visibly staggered while different generations
+// share vertical space. Same-column cards still reserve their full height.
+const TIME_ROW_STEP = 2;
 
 export function sessionTime(session: CanvasSession, time: SessionTime): number | null {
   switch (time) {
@@ -71,21 +74,27 @@ export function arrangeSessions(
       sorted.splice(sorted.indexOf(tree.session), 1);
       sorted.unshift(tree.session);
     }
-    const placements = sorted.map((session, index) => ({
-      id: session.id,
-      // Keep each generation and its connecting channel visible. Compressing
-      // generations into overlapping columns turns the tree into a jagged list
-      // and sends long source edges around unrelated rows.
-      column: depths.get(session.id)! * (SESSION_CARD_SIZE.width + 1),
-      row: index * (SESSION_CARD_SIZE.height + 0.5),
-      width: SESSION_CARD_SIZE.width,
-      height: SESSION_CARD_SIZE.height,
-    }));
+    const columnBottoms = new Map<number, number>();
+    let previousRow = -TIME_ROW_STEP;
+    const placements = sorted.map((session) => {
+      const depth = depths.get(session.id)!;
+      const row = Math.max(previousRow + TIME_ROW_STEP, columnBottoms.get(depth) ?? 0);
+      previousRow = row;
+      columnBottoms.set(depth, row + SESSION_CARD_SIZE.height + 0.5);
+      return {
+        id: session.id,
+        // A full horizontal channel keeps generations and long source edges distinct.
+        column: depth * (SESSION_CARD_SIZE.width + 1),
+        row,
+        width: SESSION_CARD_SIZE.width,
+        height: SESSION_CARD_SIZE.height,
+      };
+    });
     return {
       first: firstTimed ?? tree.session,
       placements,
       width: Math.max(...placements.map((p) => p.column + p.width)),
-      height: placements.length * (SESSION_CARD_SIZE.height + 0.5) - 0.5,
+      height: Math.max(...placements.map((p) => p.row + p.height)),
     };
   });
   groups.sort((a, b) => compareSessionTimes(a.first, b.first, time, order));
@@ -307,9 +316,7 @@ export function addSessionPlacements(input: {
       candidate = {
         ...candidate,
         column: (parent.column ?? 0) + (parent.width ?? SESSION_CARD_SIZE.width) + 1,
-        row:
-          Math.max(...relatives.map((p) => (p.row ?? 0) + (p.height ?? SESSION_CARD_SIZE.height))) +
-          0.5,
+        row: Math.max(...relatives.map((p) => p.row ?? 0)) + TIME_ROW_STEP,
       };
       // Preserve the source's generation offset without shifting existing cards.
       // Saved manual layouts may require moving down to find a free slot.
