@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import { EventEmitter } from "node:events";
 import type pino from "pino";
 import { OpenAI } from "openai";
@@ -56,6 +57,7 @@ export class OpenAISTT implements SpeechToTextProvider {
     this.config = sttConfig;
     this.logger = parentLogger.child({ module: "agent", provider: "openai", component: "stt" });
     this.openaiClient = new OpenAI({
+      fetch: providerFetch,
       apiKey: sttConfig.apiKey,
       ...(sttConfig.baseUrl ? { baseURL: sttConfig.baseUrl } : {}),
     });

@@ -53,6 +53,11 @@
       "types": "./dist/client/index.d.ts",
       "source": "./src/client/index.ts",
       "default": "./dist/client/index.js"
+    },
+    "./server/provider-network": {
+      "types": "./dist/server/provider-network.d.ts",
+      "source": "./src/server/provider-network.ts",
+      "default": "./dist/server/provider-network.js"
     }
   },
   "publishConfig": {
@@ -70,6 +75,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0",
     "i18next": "^26.3.0",
+    "undici": "^7.30.1",
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {

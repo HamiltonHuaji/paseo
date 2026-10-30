@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -52,7 +53,7 @@ export async function discover(path = authPath()): Promise<UsageAccount[]> {
 
 export async function fetchUsage(
   input: Input,
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
 ): Promise<UsageReport> {
   const apiKey = await readDefaultKey(input.path);
   if (!apiKey) throw new Error("OpenCode Go login store no longer exists");

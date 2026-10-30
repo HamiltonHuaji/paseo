@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import type { UsageInput } from "../shared/input.js";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -254,7 +255,7 @@ type KimiCredentials = KimiAuth & { access_token: string };
 
 export async function fetchUsage(
   input: UsageInput,
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
 ): Promise<UsageReport> {
   async function callUsageApi(token: string): Promise<Response> {
     return fetchApi(KIMI_USAGE_URL, {

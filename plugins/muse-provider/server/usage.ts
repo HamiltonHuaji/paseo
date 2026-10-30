@@ -1,3 +1,5 @@
+import { providerNetworkKey } from "@getpaseo/plugin/server/provider-network";
+import { launchKey } from "./catalog.js";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
@@ -14,7 +16,7 @@ import {
 import { MspConnection } from "./connection.js";
 import { usageSchema } from "./wire.js";
 
-const inputSchema = z.object({ account: z.string() }).strict();
+const inputSchema = z.object({ account: z.string(), route: z.string() }).strict();
 type Observation = z.infer<typeof usageSchema>;
 
 function accountKey(env: ProviderLaunch["env"]): string {
@@ -24,15 +26,16 @@ function accountKey(env: ProviderLaunch["env"]): string {
 }
 
 export class Usage {
-  private readonly launches = new Map<string, ProviderLaunch>();
+  private readonly launches = new Map<string, { account: string; launch: ProviderLaunch }>();
   private readonly sessions = new Map<
     string,
-    { account: string; read: () => Promise<Observation> }
+    { account: string; route: string; read: () => Promise<Observation> }
   >();
-  remember(launch: ProviderLaunch): { account: string } {
-    const key = accountKey(launch.env);
-    this.launches.set(key, launch);
-    return { account: key };
+  remember(launch: ProviderLaunch): { account: string; route: string } {
+    const account = accountKey(launch.env);
+    const route = launchKey(launch);
+    this.launches.set(route, { account, launch });
+    return { account, route };
   }
   attach(id: string, launch: ProviderLaunch, read: () => Promise<Observation>): void {
     this.sessions.set(id, { ...this.remember(launch), read });
@@ -40,8 +43,8 @@ export class Usage {
   detach(id: string): void {
     this.sessions.delete(id);
   }
-  private async read(account: string, launch: ProviderLaunch): Promise<Observation> {
-    const readers = [...this.sessions.values()].filter((session) => session.account === account);
+  private async read(route: string, launch: ProviderLaunch): Promise<Observation> {
+    const readers = [...this.sessions.values()].filter((session) => session.route === route);
     if (readers.length > 0) {
       const observations = await Promise.all(readers.map((session) => session.read()));
       const usages = observations.flatMap((observation) =>
@@ -65,26 +68,23 @@ export class Usage {
       icon: "icon.svg",
       input: inputSchema,
       discover: async (scope) => {
-        let accounts: string[];
-        if (scope.kind === "global") {
-          accounts = [...this.launches.keys()];
-        } else {
-          if (scope.provider !== "muse") return [];
-          const account = accountKey(scope.env);
-          accounts = this.launches.has(account) ? [account] : [];
-        }
-        return accounts.map((account) => ({
-          key: account,
-          label: "Muse Code",
-          input: { account },
-        }));
+        if (scope.kind === "session" && scope.provider !== "muse") return [];
+        return [...this.launches].flatMap(([route, { account, launch }]) => {
+          if (
+            scope.kind === "session" &&
+            (account !== accountKey(scope.env) ||
+              providerNetworkKey(launch.env) !== providerNetworkKey(scope.env))
+          )
+            return [];
+          return [{ key: account, label: "Muse Code", input: { account, route } }];
+        });
       },
       fetch: async (input) => {
-        const { account } = inputSchema.parse(input);
-        const launch = this.launches.get(account);
-        if (!launch) throw new Error("Muse login no longer exists");
+        const { account, route } = inputSchema.parse(input);
+        const saved = this.launches.get(route);
+        if (!saved || saved.account !== account) throw new Error("Muse login no longer exists");
         try {
-          const { usage } = await this.read(account, launch);
+          const { usage } = await this.read(route, saved.launch);
           if (!usage) return unavailable({ kind: "no_quota", detail: "No usage quota reported" });
           return {
             status: "available",

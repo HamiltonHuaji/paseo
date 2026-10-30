@@ -583,7 +583,15 @@ test("concurrent host and agent requests never share a different login's pending
 test("duplicate logins across scopes appear only once in the host's errors", async () => {
   const registry = new UsageSourceRegistry(Date.now, 300_000, undefined, {
     hasAgent: () => true,
-    usageSession: () => ({ provider: "codex", env: {}, sessionKey: "launch" }),
+    usageSession: () => ({
+      provider: "codex",
+      env: Object.fromEntries(
+        Object.entries(process.env).flatMap(([key, value]) =>
+          value === undefined ? [] : [[key, value]],
+        ),
+      ),
+      sessionKey: "launch",
+    }),
   });
   registry.register({
     id: "codex",

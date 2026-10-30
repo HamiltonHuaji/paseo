@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import type { UsageInput } from "../shared/input.js";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -46,7 +47,7 @@ export async function discover(): Promise<UsageAccount[]> {
 
 export async function fetchUsage(
   input: UsageInput,
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
 ): Promise<UsageReport> {
   const token = await readToken(input);
   if (!token) throw new Error("Copilot login store no longer exists");

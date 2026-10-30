@@ -590,8 +590,8 @@ export class PluginService {
               throw new Error(`Invalid usage discovery from ${source.id}`);
             return result;
           },
-          fetch: (input) => {
-            return this.runtime.fetchUsage(pluginId, source.id, input);
+          fetch: (input, networkEnv) => {
+            return this.runtime.fetchUsage(pluginId, source.id, input, networkEnv);
           },
         });
         registered.push(source.id);

@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import type pino from "pino";
 import { OpenAI } from "openai";
 import { Readable } from "node:stream";
@@ -27,6 +28,7 @@ export class OpenAITTS implements TextToSpeechProvider {
     };
     this.logger = parentLogger.child({ module: "agent", provider: "openai", component: "tts" });
     this.openaiClient = new OpenAI({
+      fetch: providerFetch,
       apiKey: ttsConfig.apiKey,
       ...(ttsConfig.baseUrl ? { baseURL: ttsConfig.baseUrl } : {}),
     });

@@ -1436,7 +1436,7 @@ for (const usage of [
     expect(account).toEqual({
       key: expect.stringMatching(/^[a-f0-9]{64}$/),
       label: "Muse Code",
-      input: { account: account.key },
+      input: { account: account.key, route: expect.stringMatching(/^[a-f0-9]{64}$/) },
     });
     const report = await h.usageSource.fetch(account.input);
     if ("usage" in usage)

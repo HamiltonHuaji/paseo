@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import type { UsageInput } from "../shared/input.js";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -147,7 +148,7 @@ function toWeeklyWindow(modelName: string, model: MiniMaxModelRemain): UsageWind
 
 export async function fetchUsage(
   input: UsageInput,
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
 ): Promise<UsageReport> {
   const auth = await readAuth(input);
   if (!auth) throw new Error("MiniMax login store no longer exists");

@@ -1,3 +1,4 @@
+import { providerProxyEnvironment } from "@getpaseo/plugin/server/provider-network";
 import type { UsageScope } from "@getpaseo/plugin/server/usage";
 import {
   ProviderStatusSchema,
@@ -397,10 +398,21 @@ export class PluginRuntime {
     return this.plugins.get(pluginId)?.usageSources ?? [];
   }
 
-  fetchUsage(pluginId: string, sourceId: string, input: unknown): Promise<unknown> {
+  fetchUsage(
+    pluginId: string,
+    sourceId: string,
+    input: unknown,
+    networkEnv: Record<string, string> = providerProxyEnvironment(process.env),
+  ): Promise<unknown> {
     const loaded = this.plugins.get(pluginId);
     if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
-    return this.request(loaded, { type: "usage.fetch", requestId: randomUUID(), sourceId, input });
+    return this.request(loaded, {
+      type: "usage.fetch",
+      requestId: randomUUID(),
+      sourceId,
+      input,
+      networkEnv,
+    });
   }
 
   discoverUsage(pluginId: string, sourceId: string, scope: UsageScope): Promise<unknown> {
@@ -408,6 +420,7 @@ export class PluginRuntime {
     if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
     return this.request(loaded, {
       type: "usage.discover",
+      networkEnv: providerProxyEnvironment(scope.kind === "session" ? scope.env : process.env),
       requestId: randomUUID(),
       sourceId,
       scope,

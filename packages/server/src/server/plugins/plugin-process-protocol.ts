@@ -53,8 +53,20 @@ export type PluginProcessRequest =
     }
   | { type: "hook"; requestId: string; kind: "event" | "before"; name: string; input: unknown }
   | { type: "hook.cancel"; requestId: string }
-  | { type: "usage.fetch"; requestId: string; sourceId: string; input: unknown }
-  | { type: "usage.discover"; requestId: string; sourceId: string; scope: UsageScope }
+  | {
+      type: "usage.fetch";
+      requestId: string;
+      sourceId: string;
+      input: unknown;
+      networkEnv?: Record<string, string>;
+    }
+  | {
+      type: "usage.discover";
+      requestId: string;
+      sourceId: string;
+      scope: UsageScope;
+      networkEnv?: Record<string, string>;
+    }
   | { type: "invoke"; requestId: string; method: string; input: unknown }
   | {
       type: "provider.connect";
@@ -196,6 +208,7 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
     z
       .object({
         type: z.literal("usage.fetch"),
+        networkEnv: z.record(z.string(), z.string()).optional(),
         requestId: z.string(),
         sourceId: z.string(),
         input: z.unknown(),
@@ -204,6 +217,7 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
     z
       .object({
         type: z.literal("usage.discover"),
+        networkEnv: z.record(z.string(), z.string()).optional(),
         requestId: z.string(),
         sourceId: z.string(),
         scope: UsageScopeSchema,

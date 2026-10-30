@@ -1,3 +1,4 @@
+import { providerFetch, providerNetworkKey } from "@getpaseo/plugin/server/provider-network";
 import { discoverOmp, piAuthPath, readHarness, type StoreLookup } from "./stores.js";
 import type { UsageInput } from "../shared/input.js";
 import { execFile } from "node:child_process";
@@ -366,7 +367,7 @@ async function keychainCredentialRecord(
 export async function discover(
   scope: UsageScope,
   lookup: ClaudeCredentialLookup = {},
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
 ): Promise<UsageAccount[]> {
   if (scope.kind === "session")
     lookup = {
@@ -493,7 +494,7 @@ function toCredentialRecord(credentials: ClaudeCredentials): ClaudeCredentialRec
 
 export async function fetchUsage(
   input: UsageInput,
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
   credentialLookup: ClaudeCredentialLookup = {},
 ): Promise<UsageReport> {
   /**
@@ -528,7 +529,7 @@ export async function fetchUsage(
     for (const [key, until] of rateLimitedUntil) {
       if (until <= now) rateLimitedUntil.delete(key);
     }
-    const tokenKey = hashAccountKey(token);
+    const tokenKey = hashAccountKey(token + providerNetworkKey());
     const limitedUntil = rateLimitedUntil.get(tokenKey);
     if (limitedUntil !== undefined && limitedUntil > now)
       throw rateLimitedError(limitedUntil - now);
@@ -642,7 +643,7 @@ const profileCache = new Map<string, { at: number; result: Promise<ClaudeIdentit
 
 function cachedProfile(token: string, now: number): Promise<ClaudeIdentity> | undefined {
   pruneProfileCache(now);
-  return profileCache.get(hashAccountKey(token))?.result;
+  return profileCache.get(hashAccountKey(token + providerNetworkKey()))?.result;
 }
 
 function pruneProfileCache(now: number): void {
@@ -656,7 +657,7 @@ async function readProfile(
   fetchApi: typeof fetch,
   now: () => number,
 ): Promise<ClaudeIdentity> {
-  const tokenHash = hashAccountKey(token);
+  const tokenHash = hashAccountKey(token + providerNetworkKey());
   pruneProfileCache(now());
   const pending = profileCache.get(tokenHash);
   if (pending) return pending.result;

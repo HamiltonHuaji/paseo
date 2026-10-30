@@ -1,3 +1,4 @@
+import { withProviderNetworkEnvironment } from "@getpaseo/plugin/server/provider-network";
 import { PluginHookHandlers } from "./lifecycle/index.js";
 import { evaluateBundle } from "./bundle-evaluator.js";
 import {
@@ -342,14 +343,14 @@ export function createPluginWorker(options: {
   function handleUsageRequest(
     message: Extract<PluginProcessRequest, { type: "usage.fetch" | "usage.discover" }>,
   ): void {
-    void (async () => {
+    void withProviderNetworkEnvironment(message.networkEnv ?? process.env, async () => {
       const source = usageSources.get(message.sourceId);
       if (!source) throw new Error(`Unknown usage source: ${message.sourceId}`);
       if (message.type === "usage.discover")
         return jsonTransportValue(await source.discover(message.scope));
       const input = await source.input.parseAsync(message.input);
       return jsonTransportValue(await source.fetch(input));
-    })().then(
+    }).then(
       (output) => send({ type: "result", requestId: message.requestId, output }),
       (error) => send({ type: "error", requestId: message.requestId, error: describeError(error) }),
     );

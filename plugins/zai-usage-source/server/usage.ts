@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import type { UsageInput } from "../shared/input.js";
 import { z } from "zod";
 import {
@@ -27,7 +28,7 @@ const ZaiUsageResponseSchema = z.object({
 
 export async function fetchUsage(
   input: UsageInput,
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
 ): Promise<UsageReport> {
   const token = process.env[input.locator];
   if (!token) throw new Error("Z.ai login store no longer exists");

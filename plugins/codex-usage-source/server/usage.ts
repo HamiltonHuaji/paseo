@@ -1,3 +1,4 @@
+import { providerFetch } from "@getpaseo/plugin/server/provider-network";
 import { discoverOmp, piAuthPath, readHarness, readJson, type StoreLookup } from "./stores.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -186,7 +187,7 @@ function usageWindows({
 
 export async function fetchUsage(
   input: CodexUsageInput,
-  fetchApi: typeof fetch = fetch,
+  fetchApi: typeof fetch = providerFetch,
   lookup: StoreLookup = {},
 ): Promise<UsageReport> {
   const auth = await readAuth(input, lookup);

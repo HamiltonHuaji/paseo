@@ -21,7 +21,9 @@ export const efforts = effortSchema.options.filter((effort) => effort !== "none"
 export function launchKey(launch: ProviderLaunch): string {
   // Hash values so credential-dependent cache identity never exposes credentials.
   const routingKeys = Object.keys(launch.env)
-    .filter((key) => /^(META_|MUSE_|XDG_|HOME$|PATH$|HTTP_PROXY$|HTTPS_PROXY$|NO_PROXY$)/.test(key))
+    .filter(
+      (key) => /^(META_|MUSE_|XDG_|HOME$|PATH$)/.test(key) || /^(https?|all|no)_proxy$/i.test(key),
+    )
     .sort();
   const environment = routingKeys.map((key) => [key, launch.env[key]]);
   return createHash("sha256")

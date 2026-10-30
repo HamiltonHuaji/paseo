@@ -66,6 +66,18 @@ host 级账号列表也受身份与出口约束，不因缺少 agent ID 就获�
 日志与普通客户端状态不暴露 token、代理密码或完整含密钥 URL。用量读取失败
 不修改原有凭证，不阻塞已经可用的会话主路径。
 
+## 当前提供商 HTTP 出口的配置
+
+用量、Claude 账号资料和云端语音支持 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`
+及小写形式。同名变量小写优先；协议专用变量优先于 `ALL_PROXY`；没有 HTTPS
+代理时可复用 HTTP 代理。支持 HTTP/HTTPS 代理及代理认证。未支持的协议（包括
+SOCKS）返回错误，不静默直连。`NO_PROXY` 支持主机、域名、可选端口和 `*`。
+
+host 级用量和云端语音使用 daemon 环境；会话用量保留该 agent 的有效环境。
+Codex/Claude 的独立模型目录属于 host/provider 作用域，使用该作用域配置，
+不会从任意一个会话推断全局代理。只在 agent 上设置代理，不会为其它 host 级
+后台任务配置代理；需要覆盖这些请求时，在 daemon/provider 环境设置代理。
+
 ## 验收项目
 
 以下定义行为场景，不指定代理库、全局 dispatcher 或独立网络服务等实现。

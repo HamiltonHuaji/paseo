@@ -1,3 +1,7 @@
+import {
+  providerProxyEnvironment,
+  providerNetworkKey,
+} from "@getpaseo/plugin/server/provider-network";
 import { createHash } from "node:crypto";
 import type { AgentUsageSession } from "../../agent/agent-sdk-types.js";
 import type { UsageScope } from "@getpaseo/plugin/server/usage";
@@ -16,10 +20,11 @@ export interface UsageSource {
   label: string;
   icon?: string;
   discover(scope: UsageScope): Promise<unknown>;
-  fetch(input: unknown): Promise<unknown>;
+  fetch(input: unknown, networkEnv?: Record<string, string>): Promise<unknown>;
 }
 
 interface Login {
+  networkEnv: Record<string, string>;
   input: unknown;
   harness: string;
 }
@@ -46,6 +51,7 @@ interface AgentReports {
   provider: string;
   model?: string;
   sessionKey: string;
+  networkKey: string;
   reports: Map<string, KnownReport>;
 }
 
@@ -132,11 +138,13 @@ export class UsageSourceRegistry {
       this.mergeKnown();
       return [];
     }
+    const networkKey = providerNetworkKey(session.env);
     const previous = this.byAgent.get(agentId);
     const sameScope =
       previous?.sessionKey === session.sessionKey &&
       previous.provider === session.provider &&
-      previous.model === session.model;
+      previous.model === session.model &&
+      previous.networkKey === networkKey;
     if (sameScope) return [...previous.reports.keys()];
     const reports = await this.discover({
       kind: "session",
@@ -145,9 +153,15 @@ export class UsageSourceRegistry {
       env: session.env,
     });
     // A query that finishes after a resume must not publish the previous launch's mapping.
-    if (this.agents.usageSession(agentId)?.sessionKey !== session.sessionKey) return [];
+    const current = this.agents.usageSession(agentId);
+    if (
+      current?.sessionKey !== session.sessionKey ||
+      providerNetworkKey(current.env) !== networkKey
+    )
+      return [];
     this.byAgent.set(agentId, {
       sessionKey: session.sessionKey,
+      networkKey,
       provider: session.provider,
       model: session.model,
       reports,
@@ -195,6 +209,7 @@ export class UsageSourceRegistry {
     scope: UsageScope,
     previous: ReadonlyMap<string, KnownReport> = new Map(),
   ): Promise<Map<string, KnownReport>> {
+    const networkEnv = providerProxyEnvironment(scope.kind === "session" ? scope.env : process.env);
     const discovered = await Promise.all(
       [...this.sources.values()].map(async (source) => {
         const reports = new Map<string, KnownReport>();
@@ -213,7 +228,11 @@ export class UsageSourceRegistry {
             const id = `${source.id}:${account.key}`;
             const known = reports.get(id);
             // COMPAT(usageLoginHarness): added in v0.11.0, remove after 2027-04-05 once plugin floor >= v0.11.0.
-            const login = { input: account.input, harness: account.harness ?? source.label };
+            const login = {
+              input: account.input,
+              harness: account.harness ?? source.label,
+              networkEnv,
+            };
             if (known) {
               if (!known.logins.some((existing) => loginKey(existing) === loginKey(login)))
                 known.logins.push(login);
@@ -224,7 +243,20 @@ export class UsageSourceRegistry {
           // A failed store read does not confirm removal. Session discovery has no previous
           // mapping because a resumed agent may use a different launch environment.
           for (const [id, report] of previous) {
-            if (report.source === source) reports.set(id, report);
+            if (report.source === source) {
+              const [first, ...rest] = report.logins;
+              reports.set(id, {
+                ...report,
+                logins: [
+                  { ...first, networkEnv },
+                  ...rest.map((login) => ({
+                    input: login.input,
+                    harness: login.harness,
+                    networkEnv,
+                  })),
+                ],
+              });
+            }
           }
         }
         return reports;
@@ -317,7 +349,7 @@ export class UsageSourceRegistry {
     this.cache.set(id, { at, entry });
   }
 
-  private async fetchBeforeDeadline(source: UsageSource, input: unknown): Promise<UsageReport> {
+  private async fetchBeforeDeadline(source: UsageSource, login: Login): Promise<UsageReport> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<UsageReport>((resolve) => {
       timer = setTimeout(
@@ -326,7 +358,7 @@ export class UsageSourceRegistry {
       );
     });
     try {
-      return await Promise.race([this.fetchLogin(source, input), deadline]);
+      return await Promise.race([this.fetchLogin(source, login), deadline]);
     } finally {
       clearTimeout(timer);
     }
@@ -337,9 +369,7 @@ export class UsageSourceRegistry {
   ): Promise<Pick<UsageReportEntry, "report" | "loginErrors">> {
     // Start each login within the same deadline window, then prefer discovery order.
     // Sequential deadlines can exceed the client's RPC timeout before all errors arrive.
-    const attempts = known.logins.map((login) =>
-      this.fetchBeforeDeadline(known.source, login.input),
-    );
+    const attempts = known.logins.map((login) => this.fetchBeforeDeadline(known.source, login));
     const loginErrors: NonNullable<UsageReportEntry["loginErrors"]> = [];
     for (const [index, login] of known.logins.entries()) {
       const report = await attempts[index]!;
@@ -351,9 +381,9 @@ export class UsageSourceRegistry {
     return { report: loginErrors[loginErrors.length - 1]!.report, loginErrors };
   }
 
-  private async fetchLogin(source: UsageSource, input: unknown): Promise<UsageReport> {
+  private async fetchLogin(source: UsageSource, login: Login): Promise<UsageReport> {
     try {
-      return UsageReportSchema.parse(await source.fetch(input));
+      return UsageReportSchema.parse(await source.fetch(login.input, login.networkEnv));
     } catch (error) {
       this.logger.warn({ sourceId: source.id, err: error }, "Usage fetch failed");
       return { status: "error", error: error instanceof Error ? error.message : String(error) };
