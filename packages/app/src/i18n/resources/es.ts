@@ -553,6 +553,7 @@ export const es: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "No se pudo listar el directorio",
+        outsideWorkspace: "Este archivo está fuera del árbol de archivos del espacio de trabajo.",
         createFailed: "No se pudo crear la entrada",
         renameFailed: "No se pudo renombrar la entrada",
         duplicateFailed: "No se pudo duplicar la entrada",
@@ -670,6 +671,7 @@ export const es: TranslationResources = {
         copyAgentId: "Copiar ID del agente",
         copyTerminalId: "Copiar ID del terminal",
         copyFilePath: "Copy file path",
+        revealInExplorer: "Mostrar en el explorador de archivos",
         rename: "Rebautizar",
         moveToStart: "Mover arriba del todo",
         moveToEnd: "Mover abajo del todo",

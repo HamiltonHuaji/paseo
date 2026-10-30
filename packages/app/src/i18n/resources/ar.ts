@@ -546,6 +546,7 @@ export const ar: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "فشل في سرد ​​الدليل",
+        outsideWorkspace: "هذا الملف خارج شجرة ملفات مساحة العمل.",
         createFailed: "فشل إنشاء العنصر",
         renameFailed: "فشل إعادة تسمية العنصر",
         duplicateFailed: "فشل تكرار العنصر",
@@ -663,6 +664,7 @@ export const ar: TranslationResources = {
         copyAgentId: "نسخ معرف الوكيل",
         copyTerminalId: "نسخ معرف المحطة",
         copyFilePath: "Copy file path",
+        revealInExplorer: "إظهار في مستكشف الملفات",
         rename: "إعادة تسمية",
         moveToStart: "نقل إلى الأعلى",
         moveToEnd: "نقل إلى الأسفل",

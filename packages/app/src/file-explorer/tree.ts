@@ -208,7 +208,7 @@ export async function revealExplorerDirectory(input: {
   requestDirectoryListing: (path: string) => Promise<ExplorerDirectory | null>;
   expandPaths: (paths: string[]) => void;
   showHiddenFiles: () => void;
-}): Promise<void> {
+}): Promise<boolean> {
   if (isHiddenExplorerPath(input.directoryPath)) input.showHiddenFiles();
   const paths = ["."];
   if (input.directoryPath !== ".") {
@@ -218,7 +218,8 @@ export async function revealExplorerDirectory(input: {
     }
   }
   for (const path of paths) {
-    if (!(await input.requestDirectoryListing(path))) return;
+    if (!(await input.requestDirectoryListing(path))) return false;
   }
   input.expandPaths(paths);
+  return true;
 }

@@ -2175,6 +2175,25 @@ function WorkspaceScreenContent({
     [toast, t],
   );
 
+  const { revealDirectory, revealFile } = useFileExplorerActions({
+    serverId: normalizedServerId,
+    workspaceId: normalizedWorkspaceId,
+    workspaceRoot: workspaceDirectory,
+  });
+  const handleRevealFileInExplorer = useStableEvent(async (path: string) => {
+    if (!isMobile && isFocusModeEnabled) toggleFocusMode();
+    openExplorerSidebarView({
+      isCompact: isMobile,
+      workspaceKey: persistenceKey,
+      view: "files",
+    });
+    try {
+      await revealFile(path);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  });
+
   const handleCopyFilePath = useCallback(
     async (path: string) => {
       if (!path) return;
@@ -3480,6 +3499,7 @@ function WorkspaceScreenContent({
             onCopyAgentId={handleCopyAgentId}
             onCopyTerminalId={handleCopyTerminalId}
             onCopyFilePath={handleCopyFilePath}
+            onRevealFileInExplorer={handleRevealFileInExplorer}
             onReloadAgent={handleReloadAgent}
             onRenameTab={handleRenameTab}
             onCloseTab={handleCloseTabById}
@@ -3521,6 +3541,7 @@ function WorkspaceScreenContent({
       handleCopyAgentId,
       handleCopyBranchName,
       handleCopyFilePath,
+      handleRevealFileInExplorer,
       handleCopyResumeCommand,
       handleCopyTerminalId,
       handleCopyWorkspacePath,
@@ -3571,6 +3592,7 @@ function WorkspaceScreenContent({
         onCopyAgentId={handleCopyAgentId}
         onCopyTerminalId={handleCopyTerminalId}
         onCopyFilePath={handleCopyFilePath}
+        onRevealFileInExplorer={handleRevealFileInExplorer}
         onReloadAgent={handleReloadAgent}
         onRenameTab={handleRenameTab}
         onCloseTabsToLeft={handleCloseTabsToLeftInPane}
@@ -3606,6 +3628,7 @@ function WorkspaceScreenContent({
     handleCopyAgentId,
     handleCopyTerminalId,
     handleCopyFilePath,
+    handleRevealFileInExplorer,
     handleReloadAgent,
     handleRenameTab,
     handleCloseTabsToLeftInPane,
@@ -3676,6 +3699,7 @@ function WorkspaceScreenContent({
             onCopyAgentId={handleCopyAgentId}
             onCopyTerminalId={handleCopyTerminalId}
             onCopyFilePath={handleCopyFilePath}
+            onRevealFileInExplorer={handleRevealFileInExplorer}
             onReloadAgent={handleReloadAgent}
             onRenameTab={handleRenameTab}
             onCloseTabsToLeft={handleCloseTabsToLeft}
@@ -3721,6 +3745,7 @@ function WorkspaceScreenContent({
         onCopyAgentId={handleCopyAgentId}
         onCopyTerminalId={handleCopyTerminalId}
         onCopyFilePath={handleCopyFilePath}
+        onRevealFileInExplorer={handleRevealFileInExplorer}
         onReloadAgent={handleReloadAgent}
         onRenameTab={handleRenameTab}
         onCloseTabsToLeft={handleCloseTabsToLeftInPane}
@@ -3762,6 +3787,7 @@ function WorkspaceScreenContent({
     handleCopyAgentId,
     handleCopyTerminalId,
     handleCopyFilePath,
+    handleRevealFileInExplorer,
     handleReloadAgent,
     handleRenameTab,
     handleCloseTabsToLeftInPane,
@@ -3775,11 +3801,6 @@ function WorkspaceScreenContent({
     desktopFocusModeEnabled,
   ]);
 
-  const { revealDirectory } = useFileExplorerActions({
-    serverId: normalizedServerId,
-    workspaceId: normalizedWorkspaceId,
-    workspaceRoot: workspaceDirectory,
-  });
   const openMarkdownFile = useStableEvent((location: WorkspaceFileLocation) => {
     handleOpenPreferredAssistantFile({ location, parentTabId: activeTabId });
   });

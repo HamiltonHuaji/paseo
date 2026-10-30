@@ -30,6 +30,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
         onCopyAgentId: vi.fn(),
         onCopyTerminalId: vi.fn(),
         onCopyFilePath: vi.fn(),
+        onRevealFileInExplorer: vi.fn(),
         onReloadAgent: vi.fn(),
         onRenameTab: vi.fn(),
         onCloseTab: vi.fn(),
@@ -67,6 +68,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
     const onCopyResumeCommand = vi.fn();
     const onCopyAgentId = vi.fn();
     const onCopyFilePath = vi.fn();
+    const onRevealFileInExplorer = vi.fn();
     const onReloadAgent = vi.fn();
     const onRenameTab = vi.fn();
     const onCloseTab = vi.fn();
@@ -84,6 +86,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId,
       onCopyTerminalId: vi.fn(),
       onCopyFilePath,
+      onRevealFileInExplorer,
       onReloadAgent,
       onRenameTab,
       onCloseTab,
@@ -115,6 +118,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId: vi.fn(),
       onCopyFilePath: vi.fn(),
+      onRevealFileInExplorer: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
       onCloseTab: vi.fn(),
@@ -151,6 +155,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId: vi.fn(),
       onCopyFilePath: vi.fn(),
+      onRevealFileInExplorer: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
       onCloseTab: vi.fn(),
@@ -180,6 +185,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId: vi.fn(),
       onCopyFilePath: vi.fn(),
+      onRevealFileInExplorer: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
       onCloseTab: vi.fn(),
@@ -210,6 +216,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId: vi.fn(),
       onCopyFilePath: vi.fn(),
+      onRevealFileInExplorer: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab,
       onCloseTab: vi.fn(),
@@ -246,6 +253,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId,
       onCopyFilePath: vi.fn(),
+      onRevealFileInExplorer: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab,
       onCloseTab: vi.fn(),
@@ -281,6 +289,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
 
   it("includes copy file path for file tabs", () => {
     const onCopyFilePath = vi.fn();
+    const onRevealFileInExplorer = vi.fn();
     const fileTab: WorkspaceTabDescriptor = {
       key: "file_abc",
       tabId: "file_abc",
@@ -297,6 +306,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId: vi.fn(),
       onCopyFilePath,
+      onRevealFileInExplorer,
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
       onCloseTab: vi.fn(),
@@ -320,6 +330,13 @@ describe("buildWorkspaceTabMenuEntries", () => {
     }
     copyFilePathEntry.onSelect();
     expect(onCopyFilePath).toHaveBeenCalledWith("/some/path.ts");
+    expect(onRevealFileInExplorer).not.toHaveBeenCalled();
+    const revealEntry = entries.find(
+      (entry) => entry.kind === "item" && entry.key === "reveal-in-explorer",
+    );
+    if (!revealEntry || revealEntry.kind !== "item") throw new Error("Reveal entry missing");
+    revealEntry.onSelect();
+    expect(onRevealFileInExplorer).toHaveBeenCalledWith("/some/path.ts");
     expect(entries[1]).toEqual({ kind: "file-panel-open-with", key: "file-panel-open-with" });
   });
 
@@ -341,6 +358,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId: vi.fn(),
       onCopyFilePath: vi.fn(),
+      onRevealFileInExplorer: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
       onCloseTab: vi.fn(),
@@ -372,6 +390,7 @@ describe("buildWorkspaceTabMenuEntries", () => {
       onCopyAgentId: vi.fn(),
       onCopyTerminalId: vi.fn(),
       onCopyFilePath: vi.fn(),
+      onRevealFileInExplorer: vi.fn(),
       onReloadAgent: vi.fn(),
       onRenameTab: vi.fn(),
       onCloseTab: vi.fn(),

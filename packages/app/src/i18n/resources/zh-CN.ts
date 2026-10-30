@@ -546,6 +546,7 @@ export const zhCN: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "列出目录失败",
+        outsideWorkspace: "此文件不在当前工作区的文件树内。",
         createFailed: "创建条目失败",
         renameFailed: "重命名条目失败",
         duplicateFailed: "复制条目失败",
@@ -663,6 +664,7 @@ export const zhCN: TranslationResources = {
         copyAgentId: "复制 Agent ID",
         copyTerminalId: "复制 Terminal ID",
         copyFilePath: "Copy file path",
+        revealInExplorer: "跳转到文件管理器",
         rename: "重命名",
         moveToStart: "移到最上方",
         moveToEnd: "移到最下方",

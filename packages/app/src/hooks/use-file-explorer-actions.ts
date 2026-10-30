@@ -8,6 +8,8 @@ import {
 import { usePanelStore } from "@/stores/panel-store";
 import { revealExplorerDirectory } from "@/file-explorer/tree";
 import { parentExplorerPath } from "@/utils/explorer-paths";
+import { resolveWorkspaceFilePaths } from "@/workspace/file-open";
+import { isHiddenExplorerPath } from "@/file-explorer/visibility";
 
 function createExplorerState(): AgentFileExplorerState {
   return {
@@ -173,8 +175,8 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
 
   const revealDirectory = useCallback(
     async (directoryPath: string) => {
-      if (!workspaceStateKey) return;
-      await revealExplorerDirectory({
+      if (!workspaceStateKey) return false;
+      return revealExplorerDirectory({
         directoryPath,
         requestDirectoryListing,
         showHiddenFiles: () => {
@@ -190,6 +192,36 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
       });
     },
     [requestDirectoryListing, workspaceStateKey],
+  );
+
+  const revealFile = useCallback(
+    async (path: string) => {
+      const relativePath = resolveWorkspaceFilePaths({
+        path,
+        workspaceRoot: normalizedWorkspaceRoot ?? "",
+      })?.relativePath;
+      if (!relativePath) throw new Error(t("workspace.fileExplorer.errors.outsideWorkspace"));
+      if (isHiddenExplorerPath(relativePath)) {
+        const panel = usePanelStore.getState();
+        if (!panel.explorerShowHiddenFiles) panel.toggleExplorerShowHiddenFiles();
+      }
+      if (!(await revealDirectory(parentExplorerPath(relativePath)))) return;
+      updateExplorerState((state) => ({
+        ...state,
+        selectedEntryPath: relativePath,
+        pendingRevealPath: relativePath,
+      }));
+    },
+    [normalizedWorkspaceRoot, revealDirectory, t, updateExplorerState],
+  );
+
+  const completeReveal = useCallback(
+    (path: string) => {
+      updateExplorerState((state) =>
+        state.pendingRevealPath === path ? { ...state, pendingRevealPath: null } : state,
+      );
+    },
+    [updateExplorerState],
   );
 
   const requestFileDownloadToken = useCallback(
@@ -311,6 +343,8 @@ export function useFileExplorerActions(params: { serverId: string } & FileExplor
   return {
     workspaceStateKey,
     revealDirectory,
+    revealFile,
+    completeReveal,
     requestDirectoryListing,
     requestFileDownloadToken,
     requestFileBytes,

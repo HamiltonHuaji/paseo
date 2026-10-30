@@ -548,6 +548,7 @@ export const ko: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "디렉터리 목록을 불러오지 못했습니다",
+        outsideWorkspace: "이 파일은 작업 공간의 파일 트리 밖에 있습니다.",
         createFailed: "항목을 만들지 못했습니다",
         renameFailed: "항목 이름을 바꾸지 못했습니다",
         duplicateFailed: "항목을 복제하지 못했습니다",
@@ -665,6 +666,7 @@ export const ko: TranslationResources = {
         copyAgentId: "에이전트 ID 복사",
         copyTerminalId: "터미널 ID 복사",
         copyFilePath: "파일 경로 복사",
+        revealInExplorer: "파일 탐색기에 표시",
         rename: "이름 변경",
         moveToStart: "맨 위로 이동",
         moveToEnd: "맨 아래로 이동",

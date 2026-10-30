@@ -137,6 +137,7 @@ interface MobileWorkspaceTabSwitcherProps {
   onCopyAgentId: (agentId: string) => Promise<void> | void;
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
+  onRevealFileInExplorer: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onCloseTab: (tabId: string) => Promise<void> | void;
@@ -158,6 +159,7 @@ function MobileWorkspaceTabOption({
   onCopyAgentId,
   onCopyTerminalId,
   onCopyFilePath,
+  onRevealFileInExplorer,
   onReloadAgent,
   onRenameTab,
   onMoveTabToStart,
@@ -179,6 +181,7 @@ function MobileWorkspaceTabOption({
   onCopyAgentId: (agentId: string) => Promise<void> | void;
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
+  onRevealFileInExplorer: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onMoveTabToStart?: (tabId: string) => void;
@@ -221,6 +224,7 @@ function MobileWorkspaceTabOption({
     onCopyAgentId,
     onCopyTerminalId,
     onCopyFilePath,
+    onRevealFileInExplorer,
     onReloadAgent,
     onRenameTab,
     onMoveTabToStart,
@@ -301,6 +305,7 @@ export const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitch
   onCopyAgentId,
   onCopyTerminalId,
   onCopyFilePath,
+  onRevealFileInExplorer,
   onReloadAgent,
   onRenameTab,
   onCloseTab,
@@ -431,6 +436,7 @@ export const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitch
           onCopyAgentId={onCopyAgentId}
           onCopyTerminalId={onCopyTerminalId}
           onCopyFilePath={onCopyFilePath}
+          onRevealFileInExplorer={onRevealFileInExplorer}
           onReloadAgent={onReloadAgent}
           onRenameTab={onRenameTab}
           onMoveTabToStart={handleMoveTabToStart}
@@ -452,6 +458,7 @@ export const MobileWorkspaceTabSwitcher = memo(function MobileWorkspaceTabSwitch
       onCopyAgentId,
       onCopyTerminalId,
       onCopyFilePath,
+      onRevealFileInExplorer,
       onReloadAgent,
       onRenameTab,
       handleMoveTabToStart,

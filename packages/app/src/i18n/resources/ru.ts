@@ -552,6 +552,7 @@ export const ru: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "Не удалось получить содержимое каталога",
+        outsideWorkspace: "Этот файл находится вне дерева файлов рабочего пространства.",
         createFailed: "Не удалось создать элемент",
         renameFailed: "Не удалось переименовать элемент",
         duplicateFailed: "Не удалось создать копию элемента",
@@ -671,6 +672,7 @@ export const ru: TranslationResources = {
         copyAgentId: "Скопировать идентификатор агента",
         copyTerminalId: "Скопировать идентификатор терминала",
         copyFilePath: "Скопировать путь к файлу",
+        revealInExplorer: "Показать в проводнике файлов",
         rename: "Переименовать",
         moveToStart: "Переместить в начало",
         moveToEnd: "Переместить в конец",

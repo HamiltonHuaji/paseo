@@ -552,6 +552,7 @@ export const fr: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "Impossible de lister le répertoire",
+        outsideWorkspace: "Ce fichier est hors de l’arborescence de l’espace de travail.",
         createFailed: "Impossible de créer l’élément",
         renameFailed: "Impossible de renommer l’élément",
         duplicateFailed: "Impossible de dupliquer l’élément",
@@ -670,6 +671,7 @@ export const fr: TranslationResources = {
         copyAgentId: "Copier l’ID de l’agent",
         copyTerminalId: "Copier l’ID du terminal",
         copyFilePath: "Copier le chemin du fichier",
+        revealInExplorer: "Afficher dans l’explorateur de fichiers",
         rename: "Renommer",
         moveToStart: "Déplacer tout en haut",
         moveToEnd: "Déplacer tout en bas",

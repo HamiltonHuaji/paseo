@@ -552,6 +552,7 @@ export const ptBR: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "Falha ao listar diretório",
+        outsideWorkspace: "Este arquivo está fora da árvore de arquivos do espaço de trabalho.",
         createFailed: "Falha ao criar entrada",
         renameFailed: "Falha ao renomear entrada",
         duplicateFailed: "Falha ao duplicar entrada",
@@ -669,6 +670,7 @@ export const ptBR: TranslationResources = {
         copyAgentId: "Copiar ID do agente",
         copyTerminalId: "Copiar ID do terminal",
         copyFilePath: "Copiar caminho do arquivo",
+        revealInExplorer: "Mostrar no explorador de arquivos",
         rename: "Renomear",
         moveToStart: "Mover para o topo",
         moveToEnd: "Mover para o final",

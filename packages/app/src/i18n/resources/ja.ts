@@ -553,6 +553,7 @@ export const ja: TranslationResources = {
       },
       errors: {
         failedToListDirectory: "ディレクトリの一覧取得に失敗しました",
+        outsideWorkspace: "このファイルはワークスペースのファイルツリー外にあります。",
         createFailed: "エントリの作成に失敗しました",
         renameFailed: "エントリの名前変更に失敗しました",
         duplicateFailed: "エントリの複製に失敗しました",
@@ -670,6 +671,7 @@ export const ja: TranslationResources = {
         copyAgentId: "エージェントIDをコピー",
         copyTerminalId: "ターミナルIDをコピー",
         copyFilePath: "ファイルパスをコピー",
+        revealInExplorer: "ファイルエクスプローラーで表示",
         rename: "名前を変更",
         moveToStart: "一番上へ移動",
         moveToEnd: "一番下へ移動",

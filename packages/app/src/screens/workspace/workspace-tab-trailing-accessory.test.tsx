@@ -32,6 +32,8 @@ vi.mock("lucide-react-native", () => {
   return {
     ArrowLeftToLine: StubIcon,
     ArrowRightToLine: StubIcon,
+    ArrowUpToLine: StubIcon,
+    ArrowDownToLine: StubIcon,
     Copy: StubIcon,
     CopyX: StubIcon,
     Ellipsis: StubIcon,
@@ -144,6 +146,7 @@ function renderAccessory(
     onCopyAgentId: vi.fn(),
     onCopyTerminalId: vi.fn(),
     onCopyFilePath: vi.fn(),
+    onRevealFileInExplorer: vi.fn(),
     onReloadAgent: vi.fn(),
     onRenameTab,
     onCloseTab: vi.fn(),

@@ -86,6 +86,7 @@ interface BuildWorkspaceTabMenuEntriesInput {
   onCopyAgentId: (agentId: string) => Promise<void> | void;
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
+  onRevealFileInExplorer: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onMoveTabToStart?: (tabId: string) => Promise<void> | void;
@@ -107,6 +108,7 @@ interface BuildWorkspaceDesktopTabActionsInput {
   onCopyAgentId: (agentId: string) => Promise<void> | void;
   onCopyTerminalId: (terminalId: string) => Promise<void> | void;
   onCopyFilePath: (path: string) => Promise<void> | void;
+  onRevealFileInExplorer: (path: string) => Promise<void> | void;
   onReloadAgent: (agentId: string) => Promise<void> | void;
   onRenameTab: (tab: WorkspaceTabDescriptor) => void;
   onMoveTabToStart?: (tabId: string) => Promise<void> | void;
@@ -220,6 +222,7 @@ export function buildWorkspaceTabMenuEntries(
     onCopyAgentId,
     onCopyTerminalId,
     onCopyFilePath,
+    onRevealFileInExplorer,
     onReloadAgent,
     onRenameTab,
     onMoveTabToStart,
@@ -297,6 +300,15 @@ export function buildWorkspaceTabMenuEntries(
       },
     });
     entries.push({ kind: "file-panel-open-with", key: "file-panel-open-with" });
+    entries.push({
+      kind: "item",
+      key: "reveal-in-explorer",
+      label: i18n.t("workspace.tabs.menu.revealInExplorer"),
+      testID: `${menuTestIDBase}-reveal-in-explorer`,
+      onSelect: () => {
+        void onRevealFileInExplorer(filePath);
+      },
+    });
   }
 
   if (tab.target.kind === "agent" || tab.target.kind === "terminal") {
@@ -419,6 +431,7 @@ export function buildWorkspaceDesktopTabActions(
       onCopyAgentId: input.onCopyAgentId,
       onCopyTerminalId: input.onCopyTerminalId,
       onCopyFilePath: input.onCopyFilePath,
+      onRevealFileInExplorer: input.onRevealFileInExplorer,
       onReloadAgent: input.onReloadAgent,
       onRenameTab: input.onRenameTab,
       onMoveTabToStart: input.onMoveTabToStart,

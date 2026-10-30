@@ -78,6 +78,7 @@ import { confirmDialog } from "@/utils/confirm-dialog";
 import { useToast } from "@/contexts/toast-context";
 import { openDesktopTarget, useDesktopOpenTargets } from "@/workspace/desktop-open-targets";
 import { useOpenDirectoryInEditor } from "@/workspace/open-in-editor/directory";
+import { useRetainedPanelActive } from "@/components/retained-panel";
 
 const SORT_OPTIONS: { value: SortOption }[] = [
   { value: "name" },
@@ -439,6 +440,7 @@ export function FileExplorerPane({
     duplicateEntry,
     deleteEntry,
     selectExplorerEntry,
+    completeReveal,
   } = useFileExplorerActions({
     serverId,
     workspaceId,
@@ -1063,6 +1065,8 @@ export function FileExplorerPane({
         showInitialLoading={showInitialLoading}
         showBackFromError={showBackFromError}
         listRows={listRows}
+        pendingRevealPath={explorerState?.pendingRevealPath ?? null}
+        completeReveal={completeReveal}
         onNewEntryAtRoot={fsEntryOpsEnabled ? handleNewEntry : undefined}
         currentSortLabel={currentSortLabel}
         isRefreshFetching={isRefreshFetching}
@@ -1137,6 +1141,8 @@ interface FileExplorerPaneContentProps {
   showInitialLoading: boolean;
   showBackFromError: boolean;
   listRows: ExplorerListRow[];
+  pendingRevealPath: string | null;
+  completeReveal: (path: string) => void;
   onNewEntryAtRoot?: (parentPath: string, kind: "file" | "directory") => void;
   currentSortLabel: string;
   isRefreshFetching: boolean;
@@ -1160,6 +1166,8 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
     showInitialLoading,
     showBackFromError,
     listRows,
+    pendingRevealPath,
+    completeReveal,
     onNewEntryAtRoot,
     currentSortLabel,
     isRefreshFetching,
@@ -1175,6 +1183,34 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
   } = props;
 
   const showHiddenFiles = usePanelStore((state) => state.explorerShowHiddenFiles);
+  const active = useRetainedPanelActive();
+  const revealNeedsMeasurement = useRef(false);
+  const handleScrollToIndexFailed = useCallback(
+    ({ index, averageItemLength }: { index: number; averageItemLength: number }) => {
+      // Materialize the virtualized target before asking FlatList for its exact position.
+      revealNeedsMeasurement.current = true;
+      treeListRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+    },
+    [treeListRef],
+  );
+  useEffect(() => {
+    if (!active || error || showInitialLoading || !pendingRevealPath) return;
+    const index = listRows.findIndex(
+      (row) => row.type === "entry" && row.row.entry.path === pendingRevealPath,
+    );
+    if (index < 0) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const scrollToFile = () => {
+      const list = treeListRef.current;
+      if (!list) return;
+      revealNeedsMeasurement.current = false;
+      list.scrollToIndex({ index, viewPosition: 0.5, animated: false });
+      if (revealNeedsMeasurement.current) timer = setTimeout(scrollToFile, 100);
+      else completeReveal(pendingRevealPath);
+    };
+    timer = setTimeout(scrollToFile, 0);
+    return () => clearTimeout(timer);
+  }, [active, completeReveal, error, listRows, pendingRevealPath, showInitialLoading, treeListRef]);
 
   const handleNewFileAtRoot = useCallback(() => {
     onNewEntryAtRoot?.(".", "file");
@@ -1330,6 +1366,7 @@ function FileExplorerPaneContent(props: FileExplorerPaneContentProps) {
               contentContainerStyle={styles.entriesContent}
               onLayout={scrollbar.onLayout}
               onScroll={scrollbar.onScroll}
+              onScrollToIndexFailed={handleScrollToIndexFailed}
               onContentSizeChange={scrollbar.onContentSizeChange}
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={!scrollbar.enabled}

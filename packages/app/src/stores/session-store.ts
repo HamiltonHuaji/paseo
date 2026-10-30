@@ -269,6 +269,7 @@ export interface AgentFileExplorerState {
   history: string[];
   lastVisitedPath: string;
   selectedEntryPath: string | null;
+  pendingRevealPath?: string | null;
 }
 
 export interface DaemonServerInfo {

@@ -543,6 +543,7 @@ export const en = {
       },
       errors: {
         failedToListDirectory: "Failed to list directory",
+        outsideWorkspace: "This file is outside the workspace file tree.",
         createFailed: "Failed to create entry",
         renameFailed: "Failed to rename entry",
         duplicateFailed: "Failed to duplicate entry",
@@ -660,6 +661,7 @@ export const en = {
         copyAgentId: "Copy agent id",
         copyTerminalId: "Copy terminal id",
         copyFilePath: "Copy file path",
+        revealInExplorer: "Reveal in File Explorer",
         rename: "Rename",
         moveToStart: "Move to top",
         moveToEnd: "Move to bottom",
