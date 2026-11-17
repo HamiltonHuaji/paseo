@@ -1,3 +1,5 @@
+import { Buffer } from "buffer";
+import { savedDaemonPairingOffer } from "@/data/daemon-pairing";
 import { describe, expect, it } from "vitest";
 import { defaultHostAppearance } from "@/hosts/appearance";
 import {
@@ -383,5 +385,41 @@ describe("resolveActiveHostServerId", () => {
         orderedHosts: [makeHost("srv_local"), makeHost("srv_remote")],
       }),
     ).toBe("srv_local");
+  });
+});
+
+describe("saved daemon pairing links", () => {
+  it("shares the preferred relay without including the saved password", () => {
+    const host = makeHost("srv_offline");
+    host.password = "private-password";
+    host.connections = [
+      { id: "old", type: "relay", relayEndpoint: "old.example:443", daemonPublicKeyB64: "old-key" },
+      {
+        id: "preferred",
+        type: "relay",
+        relayEndpoint: "relay.example:80",
+        useTls: false,
+        daemonPublicKeyB64: "public-key",
+      },
+    ];
+    host.preferredConnectionId = "preferred";
+    const result = savedDaemonPairingOffer(host);
+    expect(result?.relayEnabled).toBe(true);
+    const encoded = new URL(result!.url).hash.slice("#offer=".length);
+    expect(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"))).toEqual({
+      v: 2,
+      serverId: host.serverId,
+      daemonPublicKeyB64: "public-key",
+      relay: { endpoint: "relay.example:80", useTls: false },
+    });
+    host.preferredConnectionId = null;
+    expect(savedDaemonPairingOffer(host)?.url).not.toBe(result?.url);
+  });
+
+  it("requires saved relay information", () => {
+    const host = makeHost("srv_direct");
+    host.connections = [{ id: "direct", type: "directTcp", endpoint: "localhost:6767" }];
+    expect(savedDaemonPairingOffer(host)).toBeUndefined();
+    expect(savedDaemonPairingOffer(undefined)).toBeUndefined();
   });
 });

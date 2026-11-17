@@ -12,9 +12,9 @@ import { Button } from "@/components/ui/button";
 import { ExternalLink } from "@/components/ui/external-link";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useFetchQuery } from "@/data/query";
-import { daemonPairingOfferQueryKey } from "@/data/daemon-pairing";
+import { daemonPairingOfferQueryKey, savedDaemonPairingOffer } from "@/data/daemon-pairing";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
-import { useHostRuntimeClient, useHostRuntimeSnapshot } from "@/runtime/host-runtime";
+import { useHosts, useHostRuntimeClient, useHostRuntimeSnapshot } from "@/runtime/host-runtime";
 import type { Theme } from "@/styles/theme";
 import {
   EditingTextInput as TextInput,
@@ -38,6 +38,9 @@ export interface PairDeviceSectionProps {
 
 export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps) {
   const { t } = useTranslation();
+  const hosts = useHosts();
+  const host = hosts.find((entry) => entry.serverId === serverId);
+  const savedOffer = savedDaemonPairingOffer(host);
   const client = useHostRuntimeClient(serverId);
   const runtimeSnapshot = useHostRuntimeSnapshot(serverId);
   const isConnected = runtimeSnapshot?.connectionStatus === "online";
@@ -62,6 +65,8 @@ export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps)
     retry: 1,
   });
 
+  const offer = pairingQuery.data ?? savedOffer;
+
   const enableRelay = useMutation({
     mutationFn: async () => {
       if (client?.getLastServerInfoMessage()?.features?.relayConfig !== true) {
@@ -74,24 +79,24 @@ export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps)
   });
 
   const qrQuery = useFetchQuery({
-    queryKey: ["daemon-pairing-offer-qr", pairingQuery.data?.url],
+    queryKey: ["daemon-pairing-offer-qr", offer?.url],
     queryFn: () =>
-      QRCode.toString(pairingQuery.data?.url ?? "", {
+      QRCode.toString(offer?.url ?? "", {
         type: "svg",
         errorCorrectionLevel: "M",
         margin: 1,
       }),
-    enabled: Boolean(pairingQuery.data?.url),
+    enabled: Boolean(offer?.url),
     dataShape: "value",
     staleTimeMs: 5 * 60 * 1000,
   });
 
   const handleCopyLink = useCallback(async () => {
-    if (!pairingQuery.data?.url) return;
-    await Clipboard.setStringAsync(pairingQuery.data.url);
+    if (!offer?.url) return;
+    await Clipboard.setStringAsync(offer.url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [pairingQuery.data?.url]);
+  }, [offer?.url]);
   const handleCopyPress = useCallback(() => {
     void handleCopyLink();
   }, [handleCopyLink]);
@@ -110,8 +115,8 @@ export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps)
         isPending={supportsPairingRpc && pairingQuery.isPending}
         isDisconnected={isDisconnected}
         error={pairingQuery.error}
-        offer={pairingQuery.data}
-        canConfigureRelay={canConfigureRelay}
+        offer={offer}
+        canConfigureRelay={isConnected && canConfigureRelay}
         enablePending={enableRelay.isPending}
         enableError={enableRelay.error}
         qrSvg={qrSvg}
@@ -145,6 +150,9 @@ interface PairDeviceBodyProps {
 
 function PairDeviceBody(props: PairDeviceBodyProps) {
   const { t } = useTranslation();
+  if (props.offer?.relayEnabled && props.offer.url) {
+    return <PairingOffer {...props} offer={props.offer} />;
+  }
   if (props.isDisconnected) {
     return (
       <OfferLoadError message={t("workspace.terminal.hostDisconnected")} onRetry={props.onRetry} />
