@@ -342,7 +342,7 @@ it("preserves range statistics, custom axes, summary fallback and streamed JSON"
   expect(summary.series[3]!.last).toBe(42);
 });
 
-it("evicts old source state and drains scans when the reader closes", async () => {
+it("retains lightweight sources beyond the old count limit and drains scans on close", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "works-wandb-lifecycle-"));
   directories.push(directory);
   const reader = new WandbReader();
@@ -353,7 +353,7 @@ it("evicts old source state and drains scans when the reader closes", async () =
     await reader.read(source([file]));
   }
   const revisited = await reader.read(source([fixture]));
-  expect(revisited.generation).not.toBe(first.generation);
+  expect(revisited.generation).toBe(first.generation);
   expect(reader.meta(revisited).runs).toEqual(reader.meta(first).runs);
   const pending = reader.read(source([directory]));
   const cancelled = expect(pending).rejects.toThrow();
@@ -369,7 +369,7 @@ it("evicts old source state and drains scans when the reader closes", async () =
   await reader.clear();
 });
 
-it("bounds concurrent history scans and removes cancelled work from the queue", async () => {
+it("slow consumers do not block other history reads", async () => {
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -384,30 +384,32 @@ it("bounds concurrent history scans and removes cancelled work from the queue", 
       }),
     );
     scans.push(
-      scanWandb(fixture, 0, async () => {
-        started();
-        await held;
-      }),
+      scanWandb(
+        fixture,
+        0,
+        async () => {
+          started();
+          await held;
+        },
+        AbortSignal.timeout(5000),
+      ),
     );
   }
   try {
     await Promise.all(entered);
-    const abort = new AbortController();
-    let consumed = false;
-    const queued = scanWandb(
-      fixture,
-      0,
-      () => {
-        consumed = true;
-      },
-      abort.signal,
-    );
-    abort.abort();
-    await expect(queued).rejects.toThrow();
-    expect(consumed).toBe(false);
+    const result = await scanWandb(fixture, 0, () => {}, AbortSignal.timeout(2000));
+    expect(result.caughtUp).toBe(true);
   } finally {
     release();
     await Promise.all(scans);
   }
-  expect((await scanWandb(fixture, 0, () => {})).caughtUp).toBe(true);
+});
+
+it("still serves sources that exceed the metadata reuse budget", async () => {
+  const reader = new WandbReader({ cacheBytes: 1 });
+  const first = await reader.read(source([fixture]));
+  const next = await reader.read(source([fixture]));
+  expect(next.generation).not.toBe(first.generation);
+  expect(reader.meta(next)).toEqual({ ...reader.meta(first), generation: next.generation });
+  await reader.clear();
 });

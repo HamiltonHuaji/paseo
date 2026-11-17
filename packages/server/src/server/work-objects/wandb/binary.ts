@@ -185,51 +185,16 @@ async function readBlock(handle: FileHandle, position: number, length: number): 
   return block.subarray(0, filled);
 }
 
-// A process-wide I/O budget bounds open history files across sources and HTTP
-// consumers. Queued work has no file handle and is removed immediately on abort.
-const SCAN_CONCURRENCY = 4;
-let activeScans = 0;
-const scanQueue = new Set<() => void>();
-
-function acquireScan(signal?: AbortSignal): Promise<() => void> {
-  signal?.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const cancel = () => {
-      scanQueue.delete(start);
-      reject(signal?.reason);
-    };
-    const start = () => {
-      scanQueue.delete(start);
-      signal?.removeEventListener("abort", cancel);
-      activeScans++;
-      resolve(() => {
-        activeScans--;
-        scanQueue.values().next().value?.();
-      });
-    };
-    if (activeScans < SCAN_CONCURRENCY) start();
-    else {
-      scanQueue.add(start);
-      signal?.addEventListener("abort", cancel, { once: true });
-    }
-  });
-}
-
 export async function withWandbFile<T>(
   file: string,
   read: (handle: FileHandle) => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
-  const release = await acquireScan(signal);
+  signal?.throwIfAborted();
+  const handle = await open(file, "r");
   try {
-    signal?.throwIfAborted();
-    const handle = await open(file, "r");
-    try {
-      return await read(handle);
-    } finally {
-      await handle.close();
-    }
+    return await read(handle);
   } finally {
-    release();
+    await handle.close();
   }
 }

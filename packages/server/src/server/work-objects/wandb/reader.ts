@@ -3,6 +3,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { gunzip } from "node:zlib";
 import { promisify } from "node:util";
+import { getHeapStatistics } from "node:v8";
 import { z } from "zod";
 import { LRUCache } from "lru-cache";
 import type { WorkDataMeta, WorkArtifact } from "@getpaseo/protocol/work-data";
@@ -50,6 +51,7 @@ interface SourceRead {
   readers: number;
 }
 interface SourceCache {
+  bytes: number;
   generation: string;
   logs: Map<string, LogState>;
   revision: number;
@@ -63,14 +65,23 @@ const ManifestEntrySchema = z.object({
   local_path: z.string().optional(),
 });
 
+interface WandbReaderOptions {
+  cacheBytes?: number;
+}
+
 export class WandbReader {
-  // Four polling intervals of idle reuse; old projects must not live for the
-  // daemon's lifetime. Eviction affects reuse only, never readable history.
-  private readonly sources = new LRUCache<string, SourceCache>({
-    max: 64,
-    ttl: 60_000,
-    ttlAutopurge: true,
-  });
+  private readonly sources: LRUCache<string, SourceCache>;
+  private readonly cacheBytes: number;
+
+  constructor(options: WandbReaderOptions = {}) {
+    // Metadata reuse shares the daemon heap. Source count and elapsed idle time
+    // say nothing about memory pressure and must not force history rescans.
+    this.cacheBytes = options.cacheBytes ?? Math.floor(getHeapStatistics().heap_size_limit / 8);
+    this.sources = new LRUCache({
+      maxSize: this.cacheBytes,
+      sizeCalculation: (cache) => cache.bytes,
+    });
+  }
   private readonly active = new Map<string, SourceRead>();
   async clear(): Promise<void> {
     this.sources.clear();
@@ -89,15 +100,21 @@ export class WandbReader {
     let pending = this.active.get(key)?.promise;
     if (!pending) {
       const cache = this.sources.get(key) ?? {
+        bytes: 0,
         generation: randomUUID(),
         logs: new Map(),
         revision: 0,
       };
       this.sources.delete(key);
+      const revision = cache.revision;
       const controller = new AbortController();
       pending = this.refresh(source.paths, cache, controller.signal)
         .then((snapshot) => {
-          if (!controller.signal.aborted) this.sources.set(key, cache);
+          if (!controller.signal.aborted) {
+            if (cache.bytes === 0 || cache.revision !== revision)
+              cache.bytes = sourceBytes(cache, this.cacheBytes);
+            this.sources.set(key, cache);
+          }
           return snapshot;
         })
         .finally(() => this.active.delete(key));
@@ -535,4 +552,42 @@ async function assertHistoryUnchanged(log: HistoryLog, signal?: AbortSignal): Pr
   ) {
     throw new WorkError("data_corrupt", "W&B history changed; refresh the source before querying");
   }
+}
+
+// Approximate retained JS memory, including container overhead. Stop counting
+// once an entry cannot fit; do not serialize metadata into a second large buffer.
+function sourceBytes(cache: SourceCache, budget: number): number {
+  let bytes = 0;
+  const seen = new Set<object>();
+  function measure(value: unknown): void {
+    if (bytes > budget) return;
+    if (typeof value === "string") {
+      bytes += 24 + value.length * 2;
+      return;
+    }
+    if (typeof value !== "object" || value === null) {
+      bytes += 8;
+      return;
+    }
+    if (seen.has(value)) return;
+    seen.add(value);
+    bytes += 64;
+    if (value instanceof Map) {
+      for (const [key, entry] of value) {
+        bytes += 32;
+        measure(key);
+        measure(entry);
+        if (bytes > budget) break;
+      }
+    } else {
+      for (const [key, entry] of Object.entries(value)) {
+        bytes += 16;
+        measure(key);
+        measure(entry);
+        if (bytes > budget) break;
+      }
+    }
+  }
+  measure(cache);
+  return bytes;
 }
