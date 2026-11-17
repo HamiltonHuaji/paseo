@@ -42,6 +42,10 @@ type ReadSource = (source: WorkSourceRef) => Promise<WandbSnapshot>;
 
 export class WorkProgressReader {
   private readonly active = new Map<string, Promise<WorkProgressRefreshResult>>();
+  async close(): Promise<void> {
+    await Promise.allSettled(this.active.values());
+  }
+
   refresh(
     store: WorkStore,
     objectId: string,

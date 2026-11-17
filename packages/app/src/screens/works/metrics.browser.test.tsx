@@ -153,8 +153,15 @@ function renderPanel(
 }
 
 it("renders a loss curve without Progress or an HTML viewer", async () => {
-  const container = mount(async () => data);
+  const requests: string[] = [];
+  const container = mount(async (path) => {
+    requests.push(path);
+    return data;
+  });
   await expect.element(page.getByText("Loss", { exact: true })).toBeVisible();
+  const request = JSON.parse(new URL(requests[0]!, "http://viewer").searchParams.get("q")!);
+  expect(request.maxPoints).toBeGreaterThan(0);
+  expect(request.maxPoints).toBeLessThanOrEqual(380 * 2);
   expect(container.querySelectorAll("svg polyline").length).toBe(1);
   expect(container.querySelector("svg polyline")?.getAttribute("points")?.split(" ")).toHaveLength(
     4,

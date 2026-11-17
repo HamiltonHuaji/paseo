@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import express from "express";
@@ -10,7 +11,7 @@ import {
 import { WorkError } from "./store.js";
 import type { WorkService } from "./service.js";
 import { resolveViewerPath, viewerDataPath } from "./viewers.js";
-import { queryWandb } from "./wandb/query.js";
+import { writeWandbQuery } from "./wandb/query.js";
 
 interface ViewerRouterOptions {
   service: () => WorkService;
@@ -154,7 +155,22 @@ export function createWorkViewerRouter(options: ViewerRouterOptions): express.Ro
         const query = WorkDataQuerySchema.parse(
           JSON.parse(typeof req.query.q === "string" ? req.query.q : "{}"),
         );
-        res.json(await queryWandb(snapshot, query, signal));
+        res.type("json");
+        try {
+          await writeWandbQuery(
+            snapshot,
+            query,
+            async (chunk) => {
+              signal.throwIfAborted();
+              if (!res.write(chunk)) await once(res, "drain", { signal });
+            },
+            signal,
+          );
+          res.end();
+        } catch (error) {
+          if (res.headersSent) res.destroy();
+          throw error;
+        }
         return;
       }
       default:

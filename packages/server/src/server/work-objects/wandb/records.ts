@@ -34,11 +34,12 @@ export interface WandbRun {
   entity: string;
   startedAt: string | null;
   ended: boolean | null;
-  rows: WandbRow[];
+  rowCount: number;
+  firstTime: number | null;
+  lastStep: number | null;
   config: Map<string, unknown>;
   summary: Map<string, unknown>;
   artifacts: Map<string, WandbArtifact>;
-  uuids: Set<string>;
   activityAt: string | null;
   latest: Map<string, WandbValue>;
 }
@@ -50,11 +51,12 @@ export function emptyRun(): WandbRun {
     entity: "",
     startedAt: null,
     ended: null,
-    rows: [],
+    rowCount: 0,
+    firstTime: null,
+    lastStep: null,
     config: new Map(),
     summary: new Map(),
     artifacts: new Map(),
-    uuids: new Set(),
     activityAt: null,
     latest: new Map(),
   };
@@ -64,9 +66,8 @@ export function emptyRun(): WandbRun {
 // Decode the published wire contract without requiring the Python SDK.
 export function applyRecord(run: WandbRun, bytes: Buffer): void {
   const record = decodeProto(bytes);
-  const uuid = textField(record, 19);
-  if (uuid && run.uuids.has(uuid)) return;
-  if (uuid) run.uuids.add(uuid);
+  // Replay the transaction log in file order. UUIDs correlate requests and responses;
+  // the committed byte offset prevents replaying records on incremental refresh.
   for (const info of messages(record, 17)) applyRun(run, info);
   for (const history of messages(record, 2)) applyHistory(run, history);
   for (const config of messages(record, 5)) applyMap(run.config, config);
@@ -94,15 +95,26 @@ function applyRun(run: WandbRun, info: ProtoMessage): void {
   run.ended = false;
 }
 function applyHistory(run: WandbRun, history: ProtoMessage): void {
+  const { step, time, values } = historyRow(history);
+  if (run.rowCount === 0) run.firstTime = time;
+  run.rowCount++;
+  run.lastStep = step;
+  for (const [key, value] of values) run.latest.set(key, { value: numeric(value), time, step });
+  run.ended = false;
+  if (time !== null) run.activityAt = new Date(time * 1000).toISOString();
+}
+
+export function historyRow(history: ProtoMessage, keys?: ReadonlySet<string>): WandbRow {
   const values = new Map<string, unknown>();
-  for (const item of messages(history, 1)) values.set(itemKey(item), historyValue(item));
+  for (const item of messages(history, 1)) {
+    const key = itemKey(item);
+    if (!keys || keys.has(key) || key === '["_step"]' || key === '["_timestamp"]')
+      values.set(key, historyValue(item));
+  }
   const stepRecord = messages(history, 2)[0];
   const step = numeric(values.get('["_step"]')) ?? (stepRecord ? numberField(stepRecord, 1) : null);
   const time = numeric(values.get('["_timestamp"]'));
-  run.rows.push({ step, time, values });
-  for (const [key, value] of values) run.latest.set(key, { value, time, step });
-  run.ended = false;
-  if (time !== null) run.activityAt = new Date(time * 1000).toISOString();
+  return { step, time, values };
 }
 function applyMap(target: Map<string, unknown>, record: ProtoMessage): void {
   for (const item of messages(record, 1)) target.set(itemKey(item), jsonValue(textField(item, 16)));

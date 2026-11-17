@@ -135,6 +135,19 @@ it("serves Works RPCs, shared metrics/progress, artifact bytes and v1 viewers th
       [1, 0.8],
       [2, 0.4],
     ]);
+    const sampled = WorkDataQueryResultSchema.parse(
+      await (
+        await fetch(
+          `${origin}${source}/query?q=${encodeURIComponent(JSON.stringify({ series: [["loss"]], maxPoints: 1 }))}`,
+        )
+      ).json(),
+    );
+    expect(sampled.series[0]).toMatchObject({
+      count: 2,
+      last: 0.4,
+      points: [[2, 0.4]],
+      sampled: true,
+    });
     const artifacts = WorkArtifactsSchema.parse(
       await (await fetch(`${origin}${source}/artifacts`)).json(),
     );

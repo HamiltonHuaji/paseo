@@ -127,8 +127,6 @@ touches 是对象的内置字段，条目为 `{agentId,lastTouchedAt}`。agent �
     shared/
     cards/<card-directory>/
       items/<item-directory>/
-  cache/
-    wandb/<source-cache-key>/
 ```
 
 沿用 v1 的文件组织约定：Item 目录嵌套在所属 Card 下，保留可读、可按时间排序的目录名，以及项目共享的 `blobs/shared/`。按 Item ID 独立寻址由数据库完成，不要求文件系统平铺。`storage` 是接口中的存储信息字段，不要求物理目录也叫 storage。
@@ -140,9 +138,9 @@ touches 是对象的内置字段，条目为 `{agentId,lastTouchedAt}`。agent �
 
 slug 由 daemon 根据创建时的 title 生成：Unicode NFKC 规范化、转小写、保留 Unicode 字母和数字（含中文），其余连续字符转换为一个 ASCII 连字符，合并连字符并去除首尾连字符；按完整 Unicode 码点截到最多 96 UTF-8 字节，再去除末尾连字符。结果为空时分别用 card、item。完整目录相对路径创建时持久保存，后续标题修改不重命名目录。
 
-Card 自身的文件直接放在其目录中，Item 的文件放在各自目录中；不专门划出 viewer 文件目录。`blobs/shared/` 存放不同 Card 共用的脚本或材料。`cache/` 只存新增指标功能可重建的派生数据，不替代任何产物目录。
+Card 自身的文件直接放在其目录中，Item 的文件放在各自目录中；不专门划出 viewer 文件目录。`blobs/shared/` 存放不同 Card 共用的脚本或材料。旧版 `cache/wandb` 不再读取或写入。
 
-state.db 保存 Card、Item、Goal、内置 touches、组件配置、最新进度观测及 Canvas 布局。Card、Item 使用各自的表，touches 按对象与 agent 建索引，Sessions 单独保存。支持父关系、basedOn、Goal、label、归档状态、创建顺序和两种会话关联查询。指标历史的派生索引放在 cache，不写入对象正文或控制消息。
+state.db 保存 Card、Item、Goal、内置 touches、组件配置、最新进度观测及 Canvas 布局。Card、Item 使用各自的表，touches 按对象与 agent 建索引，Sessions 单独保存。支持父关系、basedOn、Goal、label、归档状态、创建顺序和两种会话关联查询。指标历史保留在用户原始 `.wandb` 文件中，不另建历史副本。
 
 对象创建时先保存记录与目录相对路径，再创建目录；归档或修改组件不改路径。获取 storage 时使用 recursive mkdir 补齐缺失目录，返回对象的绝对 `storage.path` 和项目共用的 `storage.sharedPath`，不要求 agent 拼接目录。此操作可以重试；创建空目录不代表恢复了原有文件，具体成果是否存在仍由实际访问判断。
 
@@ -376,13 +374,15 @@ v2 索引沿用 v1 的入口发现方式，按项目、Card 与 Item 展示 view
 
 读取范围由“能取得指标与 artifacts 所需的本地记录和内容”决定。需要识别 run 元信息、history、已有 summary／配置、结束证据，以及 artifact manifest、文件引用和本地内容。`.wandb` 只是可能的输入之一，不要求 agent 将目录预处理成某份指定文件。manifest 引用的内容若在额外目录中，可把该目录加入 source.paths；只在已挂载的范围内解析。仅存在远程引用时展示元信息和不可用原因，不假装本地已有内容。
 
-同一逻辑 run 的多文件与续跑记录按其实际身份和顺序读取，不以 Item 创建时间切分，不按文件名猜测“最新一次运行”。源文件只读；查看不执行 sync、resume、改名或写回。同一来源供 HTML、Metrics、Progress 共用读取模块与派生索引，消费者不会各实现一套解析器。普通前端可以通过 API 读取或下载 artifact，不要求客户端为每种 artifact 实现专用 renderer。
+同一逻辑 run 的多文件与续跑记录按其实际身份和顺序读取，不以 Item 创建时间切分，不按文件名猜测“最新一次运行”。源文件只读；查看不执行 sync、resume、改名或写回。同一来源供 HTML、Metrics、Progress 共用读取模块，消费者不会各实现一套解析器。普通前端可以通过 API 读取或下载 artifact，不要求客户端为每种 artifact 实现专用 renderer。
 
 **读取能力随 daemon 交付，运行时和安装时都不得依赖 Python。** 可以使用对口的官方 Node 包。已找到官方 [wandb-js／@wandb/sdk](https://github.com/wandb/wandb-js)，其 README 展示了基础日志写入；这不足以确认它覆盖本地 history 和 artifact 读取。实现时先评估实际读取能力，适用部分直接复用，缺失部分再实现 Node 适配，不因为包名相同就假定格式读取已经解决。
 
 自行解析 .wandb 时，以官方 [datastore 实现](https://github.com/wandb/wandb/blob/v0.19.0/wandb/sdk/internal/datastore.py)和 [Record／History protobuf](https://github.com/wandb/wandb/blob/main/wandb/proto/wandb_internal.proto)为依据；处理分块和完整记录，运行中的半写尾部留待下次读取。记录所用 schema 来源与许可证。artifact 内容可能分布在单独的缓存与文件目录，参照官方 [artifact cache 实现](https://github.com/wandb/wandb/blob/main/wandb/sdk/artifacts/artifact_file_cache.py)处理其引用，而不是只从 history 猜测内容路径。
 
-解析与查询不得阻塞 daemon 的会话控制。工作线程、增量索引与缓存可按实际数据规模使用；不硬编码两个 worker、64 MiB 单记录或其他未经验证的功能上限。派生状态可放在 v2 cache；同一实际来源复用缓存，源替换或重写时丢弃不适用的派生状态，同 run 的正常追加和续跑继续读取。
+解析与查询在扫描块之间让出事件循环。进度只保留最新状态与已提交读取位置；曲线按需扫描原文件，源替换或重写后重新读取。读取要求与内存边界见 [WORKS-02](../contracts/works.md#works-02--可复用成果来源与本地-wb)。
+
+一次查询固定各文件的已提交边界，统计与采样使用同一前缀；追加留给下一次刷新。查询期间文件替换使本次查询失败，避免将旧摘要与新曲线拼接。每次扫描在 finally 关闭文件，网络背压暂停完整历史的扫描，断开连接取消该查询。共享扫描保留到最后一个等待者退出，最后一个等待者取消时停止扫描；服务关闭时取消扫描并等候进度请求结束，再关闭对象存储。来源状态仅作短期复用，闲置过期或 LRU 淘汰后从原文件重新读取；活动任务独立于缓存，排队取消不保留文件 handle。
 
 记录来源 generation、revision、最后实际活动时间和读取是否追上当前输入。这些用于避免混用替换前后的数据及显示活动状态，不因查询次数递增。读取未完成时可以先返回已有快照并标记 catchingUp；错误保留最近有效快照并显示原因。来源明确结束与暂时读到文件末尾分别处理，后续续跑记录可更新 run 状态。
 
@@ -405,7 +405,7 @@ mode 为 series、summary 或 latest，默认 series。series 返回所选指标
 
 x、range 与 Metrics 配置一致。step 使用 history 的 \_step 或记录的 step 元信息，time 使用 \_timestamp；自定义横轴按 W&B 记录语义解析。latest 不需要横轴与曲线，返回 lastStep、明确或未知的 ended，以及每个 key 的最新值与记录时间。daemon 内 Progress adapter 直接使用同一查询模块，不经客户端代理绕回 host。
 
-默认返回所选范围的完整数据，不强制降采样。为绘图需要可显式请求 maxPoints；结果标明是否采样，摘要和最新值始终取自原始记录。无需规定固定点数上限、JSON 响应字节上限、since token 或 append／replace 协议；是否增加这些优化由实际性能问题决定。
+默认流式返回所选范围的完整数据，不强制降采样。内置曲线按面板宽度显式请求 maxPoints，普通前端也可请求；结果标明是否采样，摘要和最新值始终取自原始记录。无需规定固定点数上限、JSON 响应字节上限、since token 或 append／replace 协议；是否增加这些优化由实际性能问题决定。
 
 artifacts 返回记录中的 ID、名称、类型、版本信息（如有）、条目路径、可用状态和同源内容 href。由 href 取得本地字节；表格、图片或其他内容可交给普通 HTML 前端或现有文件查看器。缺失本地内容不隐藏整个 artifact，也不阻塞指标读取。这里提供数据与文件访问，不复刻完整 W&B UI。
 

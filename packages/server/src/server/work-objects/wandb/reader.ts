@@ -1,21 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
-import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { gunzip } from "node:zlib";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { LRUCache } from "lru-cache";
 import type { WorkDataMeta, WorkArtifact } from "@getpaseo/protocol/work-data";
 import { WorkError } from "../store.js";
 import { encodeViewerPath, errorMessage, type ResolvedWorkSource } from "../viewers.js";
-import { scanWandb } from "./binary.js";
+import { scanWandb, decodeProto, messages, withWandbFile } from "./binary.js";
 import {
   applyRecord,
   emptyRun,
+  historyRow,
+  type WandbRow,
   type WandbRun,
   type WandbArtifact,
   type WandbArtifactFile,
 } from "./records.js";
-import { restoreCache, persistCache } from "./cache.js";
 
 interface LogState {
   identity: string;
@@ -40,14 +42,17 @@ export interface WandbSnapshot {
   caughtUp: boolean;
   error: string | null;
   mounts: MountedPath[];
+  history: HistoryLog[];
+}
+interface SourceRead {
+  promise: Promise<WandbSnapshot>;
+  controller: AbortController;
+  readers: number;
 }
 interface SourceCache {
   generation: string;
   logs: Map<string, LogState>;
   revision: number;
-  active: Promise<WandbSnapshot> | null;
-  restored: boolean;
-  directory: string | null;
 }
 const inflate = promisify(gunzip);
 const ManifestEntrySchema = z.object({
@@ -59,42 +64,54 @@ const ManifestEntrySchema = z.object({
 });
 
 export class WandbReader {
-  private readonly sources = new Map<string, SourceCache>();
-  clear(): void {
+  // Four polling intervals of idle reuse; old projects must not live for the
+  // daemon's lifetime. Eviction affects reuse only, never readable history.
+  private readonly sources = new LRUCache<string, SourceCache>({
+    max: 64,
+    ttl: 60_000,
+    ttlAutopurge: true,
+  });
+  private readonly active = new Map<string, SourceRead>();
+  async clear(): Promise<void> {
     this.sources.clear();
+    for (const task of this.active.values()) task.controller.abort();
+    await Promise.allSettled([...this.active.values()].map((task) => task.promise));
   }
 
-  async read(
-    source: ResolvedWorkSource,
-    signal?: AbortSignal,
-    cacheRoot?: string,
-  ): Promise<WandbSnapshot> {
+  async read(source: ResolvedWorkSource, signal?: AbortSignal): Promise<WandbSnapshot> {
     signal?.throwIfAborted();
-    const key = JSON.stringify([cacheRoot ?? null, [...new Set(source.paths)].sort()]);
-    let cache = this.sources.get(key);
-    if (!cache) {
-      const directory = cacheRoot
-        ? path.join(cacheRoot, createHash("sha256").update(key).digest("hex"))
-        : null;
-      cache = {
+    const key = JSON.stringify([...new Set(source.paths)].sort());
+    const previous = this.active.get(key);
+    if (previous?.controller.signal.aborted) {
+      await previous.promise.catch(() => undefined);
+      signal?.throwIfAborted();
+    }
+    let pending = this.active.get(key)?.promise;
+    if (!pending) {
+      const cache = this.sources.get(key) ?? {
         generation: randomUUID(),
         logs: new Map(),
         revision: 0,
-        active: null,
-        restored: false,
-        directory,
       };
-      this.sources.set(key, cache);
+      this.sources.delete(key);
+      const controller = new AbortController();
+      pending = this.refresh(source.paths, cache, controller.signal)
+        .then((snapshot) => {
+          if (!controller.signal.aborted) this.sources.set(key, cache);
+          return snapshot;
+        })
+        .finally(() => this.active.delete(key));
+      this.active.set(key, { promise: pending, controller, readers: 0 });
     }
-    let pending = cache.active;
-    if (!pending) {
-      const current = cache;
-      pending = this.refresh(source.paths, current).finally(() => {
-        current.active = null;
-      });
-      current.active = pending;
+    const task = this.active.get(key)!;
+    task.readers++;
+    let snapshot: WandbSnapshot;
+    try {
+      snapshot = await waitForSnapshot(pending, signal);
+    } finally {
+      task.readers--;
+      if (task.readers === 0 && this.active.get(key) === task) task.controller.abort();
     }
-    const snapshot = await waitForSnapshot(pending, signal);
     let run: WandbRun | null = null;
     if (source.config.runId)
       run = snapshot.runs.find((value) => value.id === source.config.runId) ?? null;
@@ -175,18 +192,13 @@ export class WandbReader {
     return file;
   }
 
-  private async refresh(paths: string[], cache: SourceCache): Promise<WandbSnapshot> {
-    if (!cache.restored) {
-      const saved = cache.directory ? await restoreCache(cache.directory) : null;
-      if (saved) {
-        cache.generation = saved.generation;
-        cache.logs = saved.logs;
-        cache.revision = saved.revision;
-      }
-      cache.restored = true;
-    }
+  private async refresh(
+    paths: string[],
+    cache: SourceCache,
+    signal: AbortSignal,
+  ): Promise<WandbSnapshot> {
     const mounts = await mountedPaths(paths);
-    const files = await discoverLogs(mounts);
+    const files = await discoverLogs(mounts, signal);
     const found = new Set(files);
     let changed = false;
     for (const old of cache.logs.keys())
@@ -195,23 +207,12 @@ export class WandbReader {
         cache.generation = randomUUID();
         changed = true;
       }
-    for (const file of files) changed = (await refreshLog(cache, file)) || changed;
+    for (const file of files) changed = (await refreshLog(cache, file, signal)) || changed;
     if (changed) cache.revision += 1;
     const logs = [...cache.logs.values()];
     const generation = cache.generation;
     const runs = mergeRuns(logs);
     const errors = logs.flatMap((log) => (log.error ? [log.error] : []));
-    if (changed && cache.directory) {
-      try {
-        await persistCache(cache.directory, {
-          generation: cache.generation,
-          revision: cache.revision,
-          logs: cache.logs,
-        });
-      } catch (error) {
-        errors.push(`Unable to save derived W&B cache: ${errorMessage(error)}`);
-      }
-    }
     if (!files.length)
       errors.push("No local W&B transaction log has been produced in these mounts");
     const activity = logs.flatMap((log) => [
@@ -221,6 +222,17 @@ export class WandbReader {
     activity.sort();
     return {
       runs,
+      history: [...cache.logs.entries()]
+        .sort((a, b) => segmentTime(a[1]) - segmentTime(b[1]))
+        .map(([file, log]) => ({
+          file,
+          identity: log.identity,
+          offset: log.offset,
+          anchor: log.anchor,
+          size: log.size,
+          mtime: log.mtime,
+          runId: log.run.id,
+        })),
       run: null,
       mounts,
       generation,
@@ -267,13 +279,14 @@ function isMissing(error: unknown): boolean {
     (error.code === "ENOENT" || error.code === "ENOTDIR")
   );
 }
-async function discoverLogs(mounts: MountedPath[]): Promise<string[]> {
+async function discoverLogs(mounts: MountedPath[], signal: AbortSignal): Promise<string[]> {
   const found = new Set<string>();
   const visited = new Set<string>();
   const directories = mounts.filter((mount) => mount.directory).map((mount) => mount.path);
   for (const mount of mounts)
     if (!mount.directory && mount.path.endsWith(".wandb")) found.add(mount.path);
   while (directories.length) {
+    signal.throwIfAborted();
     const directory = directories.pop()!;
     const physical = await realpath(directory);
     if (visited.has(physical)) continue;
@@ -291,7 +304,7 @@ async function discoverLogs(mounts: MountedPath[]): Promise<string[]> {
   return [...found].sort();
 }
 
-async function refreshLog(cache: SourceCache, file: string): Promise<boolean> {
+async function refreshLog(cache: SourceCache, file: string, signal: AbortSignal): Promise<boolean> {
   const info = await stat(file);
   const identity = `${info.dev}:${info.ino}:${info.birthtimeMs}`;
   let log = cache.logs.get(file);
@@ -302,7 +315,7 @@ async function refreshLog(cache: SourceCache, file: string): Promise<boolean> {
     (log.identity !== identity ||
       info.size < log.size ||
       (info.size === log.size && info.mtimeMs !== log.mtime) ||
-      (await logAnchor(file, log.offset)) !== log.anchor);
+      (await logAnchor(file, log.offset, signal)) !== log.anchor);
   if (!log || rewritten) {
     if (rewritten) cache.generation = randomUUID();
     log = {
@@ -322,33 +335,40 @@ async function refreshLog(cache: SourceCache, file: string): Promise<boolean> {
   log.mtime = info.mtimeMs;
   try {
     const target = log;
-    const result = await scanWandb(file, log.offset, (bytes, offset) => {
-      applyRecord(target.run, bytes);
-      target.offset = offset;
-    });
+    const result = await scanWandb(
+      file,
+      log.offset,
+      (bytes, offset) => {
+        applyRecord(target.run, bytes);
+        target.offset = offset;
+      },
+      signal,
+    );
     log.offset = result.offset;
     log.caughtUp = result.caughtUp;
     log.error = null;
   } catch (error) {
+    signal.throwIfAborted();
     log.error = errorMessage(error);
     log.caughtUp = false;
   }
-  log.anchor = await logAnchor(file, log.offset);
+  log.anchor = await logAnchor(file, log.offset, signal);
   return rewritten === true || log.offset !== before;
 }
 
-async function logAnchor(file: string, offset: number): Promise<string> {
+async function logAnchor(file: string, offset: number, signal?: AbortSignal): Promise<string> {
   if (!offset) return "";
-  const handle = await open(file, "r");
-  try {
-    const length = Math.min(128, offset);
-    const bytes = Buffer.alloc(length * 2);
-    await handle.read(bytes, 0, length, 0);
-    await handle.read(bytes, length, length, offset - length);
-    return createHash("sha256").update(bytes).digest("hex");
-  } finally {
-    await handle.close();
-  }
+  return withWandbFile(
+    file,
+    async (handle) => {
+      const length = Math.min(128, offset);
+      const bytes = Buffer.alloc(length * 2);
+      await handle.read(bytes, 0, length, 0);
+      await handle.read(bytes, length, length, offset - length);
+      return createHash("sha256").update(bytes).digest("hex");
+    },
+    signal,
+  );
 }
 
 function mergeRuns(logs: LogState[]): WandbRun[] {
@@ -361,7 +381,7 @@ function mergeRuns(logs: LogState[]): WandbRun[] {
       combined = {
         ...emptyRun(),
         ...run,
-        rows: [],
+        rowCount: 0,
         artifacts: new Map(),
         config: new Map(),
         summary: new Map(),
@@ -369,7 +389,8 @@ function mergeRuns(logs: LogState[]): WandbRun[] {
       };
       groups.set(run.id, combined);
     }
-    combined.rows = combined.rows.concat(run.rows);
+    combined.rowCount += run.rowCount;
+    if (run.rowCount) combined.lastStep = run.lastStep;
     combined.ended = run.ended;
     for (const [key, value] of run.config) combined.config.set(key, value);
     for (const [key, value] of run.summary) combined.summary.set(key, value);
@@ -380,7 +401,7 @@ function mergeRuns(logs: LogState[]): WandbRun[] {
 }
 
 function segmentTime(log: LogState): number {
-  return log.run.rows[0]?.time ?? (Date.parse(log.run.startedAt ?? "") || log.mtime) / 1000;
+  return log.run.firstTime ?? (Date.parse(log.run.startedAt ?? "") || log.mtime) / 1000;
 }
 
 // A closed HTTP request stops waiting without cancelling another consumer's shared scan.
@@ -462,4 +483,56 @@ async function locateContent(
     if (found) return found;
   }
   return null;
+}
+
+interface HistoryLog {
+  file: string;
+  identity: string;
+  offset: number;
+  anchor: string;
+  size: number;
+  mtime: number;
+  runId: string;
+}
+
+// Read only the committed prefix that produced this snapshot, including on a
+// second sampling pass. Appends are allowed; replacements invalidate the query.
+export async function scanHistory(
+  snapshot: WandbSnapshot,
+  keys: ReadonlySet<string>,
+  consume: (row: WandbRow) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const run = requireRun(snapshot);
+  for (const log of snapshot.history) {
+    if (log.runId !== run.id || !log.offset) continue;
+    await assertHistoryUnchanged(log, signal);
+    const result = await scanWandb(
+      log.file,
+      0,
+      async (bytes) => {
+        for (const history of messages(decodeProto(bytes), 2)) {
+          const consumed = consume(historyRow(history, keys));
+          if (consumed) await consumed;
+        }
+      },
+      signal,
+      log.offset,
+    );
+    if (result.offset !== log.offset)
+      throw new WorkError("data_corrupt", "W&B history changed during query");
+    await assertHistoryUnchanged(log, signal);
+  }
+}
+
+async function assertHistoryUnchanged(log: HistoryLog, signal?: AbortSignal): Promise<void> {
+  const info = await stat(log.file);
+  if (
+    `${info.dev}:${info.ino}:${info.birthtimeMs}` !== log.identity ||
+    info.size < log.size ||
+    (info.size === log.size && info.mtimeMs !== log.mtime) ||
+    (await logAnchor(log.file, log.offset, signal)) !== log.anchor
+  ) {
+    throw new WorkError("data_corrupt", "W&B history changed; refresh the source before querying");
+  }
 }

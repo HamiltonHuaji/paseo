@@ -17,7 +17,6 @@ import type {
   WorkSourceRef,
   WorkProgressRefreshResult,
 } from "@getpaseo/protocol/work-objects";
-import path from "node:path";
 import type { ProjectRegistry } from "../workspace-registry.js";
 import { WorkStore, WorkError } from "./store.js";
 import {
@@ -85,11 +84,12 @@ export class WorkService {
     return WorkStore.open(project.rootPath);
   }
   async close(): Promise<void> {
+    await this.wandb.clear();
+    await this.progressReader.close();
     const stores = await Promise.all(this.stores.values());
     for (const store of stores) store.close();
     this.stores.clear();
     this.listeners.clear();
-    this.wandb.clear();
   }
   subscribe(projectId: string, listener: (change: WorkChange) => void): () => void {
     let subscribers = this.listeners.get(projectId);
@@ -241,11 +241,7 @@ export class WorkService {
     signal?: AbortSignal,
   ): Promise<WandbSnapshot> {
     const store = await this.store(projectId);
-    const snapshot = await this.wandb.read(
-      await resolveWorkSource(store, source),
-      signal,
-      path.join(store.projectRoot, ".paseo", "v2", "cache", "wandb"),
-    );
+    const snapshot = await this.wandb.read(await resolveWorkSource(store, source), signal);
     const objects = [
       store.get(source.objectId),
       ...store.sourceConsumers(source.objectId, source.source),
