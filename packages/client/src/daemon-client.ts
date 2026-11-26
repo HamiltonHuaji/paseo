@@ -915,11 +915,7 @@ export type ProjectListOptions = Omit<ProjectListRequest, "type" | "requestId"> 
 export interface CreateScheduleOptions {
   prompt: string;
   name?: string | null;
-  cadence: {
-    type: "cron";
-    expression: string;
-    timezone?: string;
-  };
+  cadence: ScheduleCadence;
   target:
     | {
         type: "self";

@@ -726,6 +726,7 @@ const SplitPaneView = memo(function SplitPaneView({
   );
   const tabs = (
     <TabsComponent
+      paneWidth={paneWidth}
       paneId={pane.id}
       isFocused={isFocused && isWorkspaceFocused}
       tabs={desktopTabRowItems}

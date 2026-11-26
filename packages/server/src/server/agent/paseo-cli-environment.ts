@@ -13,10 +13,8 @@ function quoteShell(value: string): string {
 /** Keep managed tool shells on this daemon's CLI after Bash login profiles rewrite PATH. */
 export function withPaseoAgentCliEnvironment(env: ExternalProcessEnv): ExternalProcessEnv {
   const cli = resolvePaseoCliExecutablePath();
-  if (!cli)
-    throw new Error(
-      "The running Paseo distribution has no built CLI. Build or reinstall it before starting an agent.",
-    );
+  // Chat and MCP work without the optional shell integration.
+  if (!cli) return env;
   const binDir = path.dirname(cli);
   const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
   const next = {

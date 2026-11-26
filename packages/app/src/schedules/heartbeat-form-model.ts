@@ -1,3 +1,4 @@
+import type { CreateScheduleOptions } from "@getpaseo/client/internal/daemon-client";
 import type {
   ScheduleCadence,
   ScheduleSummary,
@@ -71,6 +72,7 @@ export interface HeartbeatFormModel {
   addTerm(field: CronFieldKey): void;
   removeTerm(field: CronFieldKey, id: number): void;
   setPreset(expression: string): void;
+  buildCreate(agentId: string): CreateScheduleOptions;
   buildUpdate(): UpdateScheduleInput;
 }
 
@@ -191,7 +193,21 @@ function hasCadenceChanged(
   return true;
 }
 
-export function openHeartbeatForm(schedule: ScheduleSummary): HeartbeatFormModel {
+type HeartbeatFormSource = Pick<
+  ScheduleSummary,
+  "id" | "name" | "prompt" | "cadence" | "maxRuns" | "expiresAt"
+>;
+
+export function openHeartbeatForm(
+  schedule: HeartbeatFormSource = {
+    id: "",
+    name: null,
+    prompt: "",
+    cadence: { type: "every", everyMs: 600_000 },
+    maxRuns: null,
+    expiresAt: null,
+  },
+): HeartbeatFormModel {
   const original = schedule.cadence;
   const initialInterval = intervalParts(original.type === "every" ? original.everyMs : 600_000);
   const calendar =
@@ -300,6 +316,18 @@ export function openHeartbeatForm(schedule: ScheduleSummary): HeartbeatFormModel
         for (const term of terms) term.id = nextId++;
       }
       publish({ type: "cron", calendar: parsed });
+    },
+    buildCreate: (agentId) => {
+      if (!state.canSubmit || !state.cadence) throw new Error("Heartbeat form is not valid");
+      return {
+        name: state.name.trim() || null,
+        prompt: state.prompt.trim(),
+        cadence: state.cadence,
+        target: { type: "agent", agentId },
+        runOnCreate: false,
+        ...(state.maxRuns === "" ? {} : { maxRuns: Number(state.maxRuns) }),
+        ...(state.expiresAt === "" ? {} : { expiresAt: new Date(state.expiresAt).toISOString() }),
+      };
     },
     buildUpdate: () => {
       if (!state.canSubmit || !state.cadence) throw new Error("Heartbeat form is not valid");

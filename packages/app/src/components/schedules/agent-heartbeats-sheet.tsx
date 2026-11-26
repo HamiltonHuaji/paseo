@@ -20,6 +20,7 @@ import {
   type HeartbeatFormState,
 } from "@/schedules/heartbeat-form-model";
 import { resolveScheduleTitle } from "@/utils/schedule-format";
+import { confirmDialog } from "@/utils/confirm-dialog";
 import { toErrorMessage } from "@/utils/error-messages";
 import { HeartbeatCadenceEditor, HeartbeatCadenceSummary } from "./heartbeat-cadence-editor";
 
@@ -30,10 +31,15 @@ interface AgentHeartbeatsSheetProps {
 }
 type SheetPage =
   | { kind: "list" }
+  | { kind: "create"; model: HeartbeatFormModel }
   | { kind: "edit"; schedule: ScheduleSummary; model: HeartbeatFormModel };
-type SheetIntent = { type: "list" } | { type: "edit"; schedule: ScheduleSummary };
+type SheetIntent =
+  | { type: "list" }
+  | { type: "create" }
+  | { type: "edit"; schedule: ScheduleSummary };
 function sheetPageReducer(_page: SheetPage, intent: SheetIntent): SheetPage {
   if (intent.type === "list") return { kind: "list" };
+  if (intent.type === "create") return { kind: "create", model: openHeartbeatForm() };
   return { kind: "edit", schedule: intent.schedule, model: openHeartbeatForm(intent.schedule) };
 }
 const emptySubscribe = () => () => {};
@@ -75,7 +81,7 @@ function OpenAgentHeartbeatsSheet({ serverId, agentId, onClose }: AgentHeartbeat
   const runtime = getHostRuntimeStore();
   const online = useHostRuntimeIsConnected(serverId);
   const [page, dispatch] = useReducer(sheetPageReducer, { kind: "list" });
-  const model = page.kind === "edit" ? page.model : null;
+  const model = page.kind === "list" ? null : page.model;
   const state = useHeartbeatDraftState(model);
   const query = useFetchQuery({
     queryKey: [...schedulesQueryBaseKey, "host", serverId, online],
@@ -86,23 +92,29 @@ function OpenAgentHeartbeatsSheet({ serverId, agentId, onClose }: AgentHeartbeat
     enabled: online,
   });
   const mutations = useScheduleMutations({ serverId });
+  const saving = mutations.isCreating || mutations.isUpdating;
+  const managing = [mutations.isDeleting, mutations.isPausing, mutations.isResuming].includes(true);
   const [error, setError] = useState<string | null>(null);
   const schedules = query.data?.status === "loaded" ? query.data.data : [];
   const heartbeats = schedules.filter(
     (schedule) => schedule.target.type === "agent" && schedule.target.agentId === agentId,
   );
   const goBack = useCallback(() => {
-    if (mutations.isUpdating) return;
+    if (saving) return;
     setError(null);
     dispatch({ type: "list" });
-  }, [mutations.isUpdating]);
+  }, [saving]);
+  const openCreate = useCallback(() => {
+    setError(null);
+    dispatch({ type: "create" });
+  }, []);
   const openEditor = useCallback((schedule: ScheduleSummary) => {
     setError(null);
     dispatch({ type: "edit", schedule });
   }, []);
   const close = useCallback(() => {
-    if (!mutations.isUpdating) onClose();
-  }, [mutations.isUpdating, onClose]);
+    if (!saving && !managing) onClose();
+  }, [saving, managing, onClose]);
   const { refetch } = query;
   const refresh = useCallback(() => {
     void refetch();
@@ -119,47 +131,76 @@ function OpenAgentHeartbeatsSheet({ serverId, agentId, onClose }: AgentHeartbeat
     },
     [mutations],
   );
+  const remove = useCallback(
+    async (schedule: ScheduleSummary) => {
+      const confirmed = await confirmDialog({
+        title: t("heartbeats.delete"),
+        message: t("heartbeats.deleteConfirm", { name: resolveScheduleTitle(schedule) }),
+        confirmLabel: t("heartbeats.delete"),
+        destructive: true,
+      });
+      if (!confirmed) return;
+      setError(null);
+      try {
+        await mutations.deleteSchedule(schedule.id);
+      } catch (failure) {
+        setError(toErrorMessage(failure));
+      }
+    },
+    [mutations, t],
+  );
   const save = useCallback(async () => {
-    if (!model || !state?.canSubmit || mutations.isUpdating) return;
+    if (!model || !state?.canSubmit || saving) return;
     setError(null);
     try {
-      await mutations.updateSchedule(model.buildUpdate());
+      if (page.kind === "create") await mutations.createSchedule(model.buildCreate(agentId));
+      else await mutations.updateSchedule(model.buildUpdate());
       dispatch({ type: "list" });
     } catch (failure) {
       setError(toErrorMessage(failure));
     }
-  }, [model, state?.canSubmit, mutations]);
+  }, [model, state?.canSubmit, saving, page.kind, mutations, agentId]);
   const savePress = useCallback(() => {
     void save();
   }, [save]);
   const header = useMemo(() => {
-    if (page.kind === "edit") return { title: t("heartbeats.edit"), back: { onPress: goBack } };
+    if (page.kind !== "list") {
+      return {
+        title: t(page.kind === "create" ? "heartbeats.create" : "heartbeats.edit"),
+        back: { onPress: goBack },
+      };
+    }
     return { title: t("heartbeats.title") };
   }, [page.kind, goBack, t]);
   const footer = useMemo(() => {
     if (!model || !state) return null;
     return (
       <View style={styles.actions}>
-        <Button variant="secondary" onPress={goBack} disabled={mutations.isUpdating}>
+        <Button variant="secondary" onPress={goBack} disabled={saving}>
           {t("common.actions.cancel")}
         </Button>
         <Button
           variant="default"
           onPress={savePress}
-          disabled={!online || !state.canSubmit || mutations.isUpdating}
-          loading={mutations.isUpdating}
+          disabled={!online || !state.canSubmit || saving}
+          loading={saving}
           testID="heartbeat-save"
         >
           {t("heartbeats.save")}
         </Button>
       </View>
     );
-  }, [model, state, online, goBack, savePress, mutations.isUpdating, t]);
+  }, [model, state, online, goBack, savePress, saving, t]);
   let content;
   if (!online) content = <Text style={styles.summary}>{t("heartbeats.unavailable")}</Text>;
-  else if (model && state && page.kind === "edit") {
+  else if (model && state) {
     content = (
-      <HeartbeatEditorFields key={page.schedule.id} model={model} state={state} size={size} />
+      <HeartbeatEditorFields
+        key={page.kind === "edit" ? page.schedule.id : "create"}
+        model={model}
+        state={state}
+        size={size}
+      />
     );
   } else if (query.isError) {
     content = (
@@ -182,7 +223,8 @@ function OpenAgentHeartbeatsSheet({ serverId, agentId, onClose }: AgentHeartbeat
         schedule={schedule}
         onEdit={openEditor}
         onToggleStatus={toggleStatus}
-        pending={mutations.isPausing || mutations.isResuming}
+        onDelete={remove}
+        pending={managing}
       />
     ));
   }
@@ -207,6 +249,14 @@ function OpenAgentHeartbeatsSheet({ serverId, agentId, onClose }: AgentHeartbeat
             >
               {t("heartbeats.refresh")}
             </Button>
+            <Button
+              size="sm"
+              onPress={openCreate}
+              disabled={!online || managing}
+              testID="heartbeat-create"
+            >
+              {t("heartbeats.create")}
+            </Button>
           </View>
         ) : null}
         {content}
@@ -224,11 +274,15 @@ interface HeartbeatRowProps {
   schedule: ScheduleSummary;
   onEdit(schedule: ScheduleSummary): void;
   onToggleStatus(schedule: ScheduleSummary): Promise<void>;
+  onDelete(schedule: ScheduleSummary): Promise<void>;
   pending: boolean;
 }
-function HeartbeatRow({ schedule, onEdit, onToggleStatus, pending }: HeartbeatRowProps) {
+function HeartbeatRow({ schedule, onEdit, onToggleStatus, onDelete, pending }: HeartbeatRowProps) {
   const { t } = useTranslation();
   const edit = useCallback(() => onEdit(schedule), [onEdit, schedule]);
+  const remove = useCallback(() => {
+    void onDelete(schedule);
+  }, [onDelete, schedule]);
   const toggle = useCallback(() => {
     void onToggleStatus(schedule);
   }, [onToggleStatus, schedule]);
@@ -249,11 +303,22 @@ function HeartbeatRow({ schedule, onEdit, onToggleStatus, pending }: HeartbeatRo
           {t("heartbeats.lastRun", { time: new Date(schedule.lastRunAt).toLocaleString() })}
         </Text>
       ) : null}
-      {schedule.status !== "completed" ? (
-        <Button variant="outline" size="sm" disabled={pending} onPress={toggle}>
-          {t(schedule.status === "paused" ? "heartbeats.resume" : "heartbeats.pause")}
+      <View style={styles.actions}>
+        {schedule.status !== "completed" ? (
+          <Button variant="outline" size="sm" disabled={pending} onPress={toggle}>
+            {t(schedule.status === "paused" ? "heartbeats.resume" : "heartbeats.pause")}
+          </Button>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={pending}
+          onPress={remove}
+          testID={`heartbeat-delete-${schedule.id}`}
+        >
+          {t("heartbeats.delete")}
         </Button>
-      ) : null}
+      </View>
     </View>
   );
 }

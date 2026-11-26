@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   checkProviderLaunchAvailable,
@@ -17,6 +17,7 @@ const originalPath = process.env.PATH;
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   process.env.PATH = originalPath;
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
@@ -440,6 +441,24 @@ describe("migrateProviderSettings", () => {
 });
 
 describe("managed Paseo CLI environment", () => {
+  test("starts a managed Codex session environment without a built Paseo CLI", async () => {
+    const cliPath = await import("../session/daemon/cli-path.js");
+    const resolveCli = vi.spyOn(cliPath, "resolvePaseoCliExecutablePath").mockReturnValue(null);
+    try {
+      const { buildCodexAppServerEnv } = await import("./providers/codex-app-server-agent.js");
+      const launchEnv = {
+        PASEO_AGENT_ID: "managed-agent-id",
+        PASEO_HOME: makeTempDir(),
+        BASH_ENV: "/existing/hook",
+        PATH: "/existing/bin",
+      };
+      expect(buildCodexAppServerEnv(undefined, launchEnv)).toMatchObject(launchEnv);
+      expect(resolveCli).toHaveBeenCalled();
+    } finally {
+      resolveCli.mockRestore();
+    }
+  });
+
   test.skipIf(process.platform === "win32")(
     "keeps the source CLI in ordinary and login Bash without changing user profiles",
     async () => {
@@ -447,6 +466,11 @@ describe("managed Paseo CLI environment", () => {
       const { mkdirSync, readFileSync, statSync } = await import("node:fs");
       const { withPaseoAgentCliEnvironment } = await import("./paseo-cli-environment.js");
       const { resolvePaseoCliExecutablePath } = await import("../session/daemon/cli-path.js");
+      const { currentDaemonDistribution } = await import("../session/daemon/distribution.js");
+      if (currentDaemonDistribution.kind !== "source") {
+        throw new Error("Expected the source checkout distribution");
+      }
+      vi.stubEnv("PASEO_CLI", undefined);
       const root = mkdtempSync(path.join(tmpdir(), "paseo CLI 中文 ' "));
       tempDirs.push(root);
       const foreignBin = path.join(root, "foreign bin");
@@ -485,7 +509,7 @@ describe("managed Paseo CLI environment", () => {
         const lines = result.stdout.trim().split("\n");
         expect(lines).toEqual([
           resolvePaseoCliExecutablePath(),
-          "0.13.1",
+          currentDaemonDistribution.version,
           "managed-agent-id",
           "preserved",
         ]);

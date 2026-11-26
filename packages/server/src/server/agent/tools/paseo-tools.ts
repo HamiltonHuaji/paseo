@@ -70,6 +70,7 @@ import {
   type ScheduleService,
 } from "../../schedule/service.js";
 import {
+  ScheduleCadenceSchema,
   ScheduleRunSchema,
   ScheduleSummarySchema,
   StoredScheduleSchema,
@@ -2903,6 +2904,60 @@ function createToolCatalog(
         ...(expiresAt === undefined ? {} : { expiresAt }),
       });
 
+      return {
+        content: [],
+        structuredContent: ensureValidJson(toScheduleSummary(schedule)),
+      };
+    },
+  );
+
+  registerTool(
+    "list_heartbeats",
+    {
+      title: "List heartbeats",
+      description: "List the heartbeats that wake up this session.",
+      inputSchema: {},
+      outputSchema: { heartbeats: z.array(ScheduleSummarySchema) },
+    },
+    async () => {
+      if (!scheduleService) {
+        throw new Error("Schedule service is not configured");
+      }
+      if (!callerAgentId) {
+        throw new PaseoToolInputError("Heartbeat operations require an agent-scoped session");
+      }
+      resolveCallerAgent();
+      const heartbeats = (await scheduleService.list())
+        .filter(
+          (schedule) =>
+            schedule.target.type === "agent" && schedule.target.agentId === callerAgentId,
+        )
+        .map(toScheduleSummary);
+      return { content: [], structuredContent: ensureValidJson({ heartbeats }) };
+    },
+  );
+
+  registerTool(
+    "update_heartbeat",
+    {
+      title: "Update heartbeat",
+      description: "Edit one of this session's heartbeats in place. Omitted fields stay unchanged.",
+      inputSchema: z.strictObject({
+        id: z.string().min(1),
+        prompt: z.string().trim().min(1).optional(),
+        name: z.string().trim().min(1).nullable().optional(),
+        cadence: ScheduleCadenceSchema.optional(),
+        maxRuns: z.number().int().positive().nullable().optional(),
+        expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
+      }),
+      outputSchema: ScheduleSummarySchema.shape,
+    },
+    async (input: UpdateScheduleInput) => {
+      if (!scheduleService) {
+        throw new Error("Schedule service is not configured");
+      }
+      await requireCallerHeartbeat(input.id);
+      const schedule = await runScheduleAction(() => scheduleService.update(input));
       return {
         content: [],
         structuredContent: ensureValidJson(toScheduleSummary(schedule)),

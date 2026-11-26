@@ -151,9 +151,11 @@ Both use the same cron engine, but they have deliberately different interfaces.
 | `run_schedule_once` | Start one new-agent schedule run without changing its cron.                  |
 | `delete_schedule`   | Delete a new-agent schedule permanently.                                     |
 | `create_heartbeat`  | Send a recurring cron-backed prompt into the current agent.                  |
+| `list_heartbeats`   | List heartbeats targeting the current agent.                                 |
+| `update_heartbeat`  | Edit a heartbeat in place without changing its target.                       |
 | `delete_heartbeat`  | Delete one of the current agent's heartbeats.                                |
 
-MCP heartbeats are ephemeral: create or delete them. To change one, delete it and create a replacement. Pause, resume, update, inspect, logs, and run-once apply to new-agent schedules only.
+Heartbeat tools are scoped to the current session. Updates preserve the heartbeat ID, run history, and target agent.
 
 New-agent run workspaces are archived when each run ends by default. `create_schedule` and `update_schedule` do not expose **Archive on finish** (`archiveOnFinish`); [change the option in the app](/docs/schedules#keep-run-workspaces) to keep subsequent run workspaces active.
 

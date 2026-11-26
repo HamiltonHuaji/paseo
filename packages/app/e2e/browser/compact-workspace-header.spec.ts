@@ -107,6 +107,34 @@ for (const width of [320, 390]) {
   }
 }
 
+test("manage a heartbeat from the agent composer", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const workspace = await openNamedWorkspace(page, labels.short);
+  try {
+    await page.getByRole("button", { name: "Heartbeats", exact: true }).click();
+    await expect(page.getByTestId("agent-heartbeats-sheet")).toBeVisible();
+    await expect(page.getByTestId("heartbeats-empty")).toBeVisible();
+    await page.getByTestId("heartbeat-create").click();
+    await page.getByTestId("heartbeat-prompt").fill("Review the current progress");
+    await page.getByTestId("heartbeat-save").click();
+    await page.getByRole("button", { name: "Review the current progress" }).click();
+    await page.getByTestId("heartbeat-prompt").fill("Review progress and report blockers");
+    await page.getByTestId("heartbeat-save").click();
+    await expect(
+      page.getByRole("button", { name: "Review progress and report blockers" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Pause", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Resume", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+    page.once("dialog", (dialog) => void dialog.accept());
+    await page.getByRole("button", { name: "Delete heartbeat", exact: true }).click();
+    await expect(page.getByTestId("heartbeats-empty")).toBeVisible();
+  } finally {
+    await workspace.cleanup();
+  }
+});
+
 const KEEP_ALIVE = 'node -e "setInterval(() => {}, 1000)"';
 const WEB_SERVER =
   "node -e \"require('http').createServer((q, r) => r.end('ok')).listen(process.env.PASEO_PORT)\"";

@@ -143,9 +143,11 @@ Paseo Agent 默认会收到完成、错误和权限通知；设置 `notifyOnFini
 | `run_schedule_once` | 启动一次新建 Agent 的定时任务运行，不改变它的 cron。      |
 | `delete_schedule`   | 永久删除一个新建 Agent 的定时任务。                       |
 | `create_heartbeat`  | 向当前 Agent 发送一段由 cron 驱动的周期性提示词。         |
+| `list_heartbeats`   | 列出当前 Agent 的 heartbeat。                             |
+| `update_heartbeat`  | 原地编辑当前 Agent 的 heartbeat。                         |
 | `delete_heartbeat`  | 删除当前 Agent 的某个 heartbeat。                         |
 
-MCP heartbeat 是临时的：只能创建或删除。要修改一个 heartbeat，请删除它并创建一个替代的。暂停、恢复、更新、查看、日志和单次运行只适用于新建 Agent 的定时任务。
+Heartbeat 工具只管理当前会话的 heartbeat。原地更新保留 ID、运行记录和目标 Agent。
 
 默认情况下，新建 Agent 的定时任务每次运行结束时都会归档其工作区。`create_schedule` 和 `update_schedule` 不提供 **Archive on finish**（`archiveOnFinish`）；要让之后的运行工作区保持活跃，请[在应用中修改该选项](/docs/schedules#keep-run-workspaces)。
 

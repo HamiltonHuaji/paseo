@@ -1,3 +1,8 @@
+import {
+  DEFAULT_WORKSPACE_TAB_RAIL_WIDTH,
+  MIN_WORKSPACE_TAB_RAIL_WIDTH,
+  MAX_WORKSPACE_TAB_RAIL_WIDTH,
+} from "@/constants/workspace-tabs";
 import { isSyntaxThemeId, type SyntaxThemeId } from "@getpaseo/highlight";
 import type { ActiveTurnBehavior } from "@getpaseo/protocol/messages";
 import type { QueryClient } from "@tanstack/react-query";
@@ -94,6 +99,7 @@ export interface AppSettings {
   syntaxTheme: SyntaxThemeId; // default "one"
   workspaceTitleSource: WorkspaceTitleSource;
   workspaceTabPlacement: WorkspaceTabPlacement;
+  workspaceTabRailWidth: number;
   sidebarWorkspaceTrailing: SidebarWorkspaceTrailing;
   sidebarRowItems: SidebarRowItems;
   sidebarChecksDisplay: SidebarChecksDisplay;
@@ -155,6 +161,7 @@ export const DEFAULT_CLIENT_SETTINGS: AppSettings = {
   syntaxTheme: "one",
   workspaceTitleSource: "title",
   workspaceTabPlacement: "top",
+  workspaceTabRailWidth: DEFAULT_WORKSPACE_TAB_RAIL_WIDTH,
   sidebarWorkspaceTrailing: "timestamp",
   sidebarRowItems: DEFAULT_SIDEBAR_ROW_ITEMS,
   sidebarChecksDisplay: DEFAULT_SIDEBAR_CHECKS_DISPLAY,
@@ -249,6 +256,10 @@ const StoredAppSettingsSchema = z
     syntaxTheme: z.string().refine(isSyntaxThemeId).catch("one"),
     workspaceTitleSource: z.enum(["title", "branch"]).catch("title"),
     workspaceTabPlacement: z.enum(["top", "left"]).catch("top"),
+    workspaceTabRailWidth: clampedNumber(
+      MIN_WORKSPACE_TAB_RAIL_WIDTH,
+      MAX_WORKSPACE_TAB_RAIL_WIDTH,
+    ).catch(DEFAULT_WORKSPACE_TAB_RAIL_WIDTH),
     sidebarWorkspaceTrailing: z.enum(["diff", "timestamp", "none"]).catch("timestamp"),
     sidebarRowItems: SidebarRowItemsSchema,
     sidebarChecksDisplay: z

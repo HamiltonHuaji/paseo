@@ -18,6 +18,11 @@ export function savedDaemonPairingOffer(host: HostProfile | undefined) {
     daemonPublicKeyB64: relay.daemonPublicKeyB64,
     relay: { endpoint: relay.relayEndpoint, useTls: relay.useTls },
   };
-  const encoded = Buffer.from(JSON.stringify(offer), "utf8").toString("base64url");
+  // The client Buffer polyfill supports base64 but not the base64url encoding name.
+  const encoded = Buffer.from(JSON.stringify(offer), "utf8")
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
   return { relayEnabled: true, url: `https://app.paseo.sh/#offer=${encoded}` };
 }

@@ -35,6 +35,7 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useHasFinePointer } from "@/hooks/use-fine-pointer";
 import { useShallow } from "zustand/shallow";
 import {
+  AlarmClock,
   ArrowUp,
   Square,
   Pencil,
@@ -54,6 +55,8 @@ import {
   type DraftAgentControlsProps,
 } from "@/composer/agent-controls";
 import { ContextWindowMeter } from "@/components/context-window-meter";
+import { ToolbarButton } from "@/components/ui/pane-content-toolbar";
+import { openAgentHeartbeats } from "@/schedules/heartbeat-editor";
 import { useImageAttachmentPicker } from "@/hooks/use-image-attachment-picker";
 import { selectAgentTurnPresentation, useSessionStore } from "@/stores/session-store";
 import { useFilePicker } from "@/hooks/use-file-picker";
@@ -1197,6 +1200,30 @@ function ComposerVoiceModeButton({
   );
 }
 
+function ComposerHeartbeatButton({
+  serverId,
+  agentId,
+  compact,
+}: {
+  serverId: string;
+  agentId: string;
+  compact: boolean;
+}) {
+  const { t } = useTranslation();
+  const open = useCallback(() => openAgentHeartbeats(serverId, agentId), [serverId, agentId]);
+  return (
+    <ToolbarButton
+      label={t("heartbeats.title")}
+      onPress={open}
+      compact={compact}
+      tooltipSide="top"
+      testID="composer-heartbeats"
+    >
+      <ThemedAlarmClock size={ICON_SIZE.md} uniProps={iconForegroundMutedMapping} />
+    </ToolbarButton>
+  );
+}
+
 export function Composer({ isPaneFocused, ...props }: ComposerProps) {
   // A compact overlay panel (agent list, explorer) covers the pane without taking its
   // focus. The composer gives up input from the moment the user asks for the panel,
@@ -2062,16 +2089,23 @@ function ComposerContentImpl({
   const beforeVoiceContent = useMemo(
     () =>
       hasAgent ? (
-        <View style={styles.contextWindowMeterSlot}>
-          <ContextWindowMeter
+        <>
+          <ComposerHeartbeatButton
             serverId={serverId}
             agentId={agentId}
-            maxTokens={agentState.contextWindowMaxTokens}
-            usedTokens={agentState.contextWindowUsedTokens}
-            totalCostUsd={agentState.totalCostUsd}
-            glyphSize={contextWindowMeterGlyphSize}
+            compact={isCompactLayout}
           />
-        </View>
+          <View style={styles.contextWindowMeterSlot}>
+            <ContextWindowMeter
+              serverId={serverId}
+              agentId={agentId}
+              maxTokens={agentState.contextWindowMaxTokens}
+              usedTokens={agentState.contextWindowUsedTokens}
+              totalCostUsd={agentState.totalCostUsd}
+              glyphSize={contextWindowMeterGlyphSize}
+            />
+          </View>
+        </>
       ) : null,
     [
       hasAgent,
@@ -2081,6 +2115,7 @@ function ComposerContentImpl({
       agentState.contextWindowUsedTokens,
       agentState.totalCostUsd,
       contextWindowMeterGlyphSize,
+      isCompactLayout,
     ],
   );
 
@@ -2674,6 +2709,7 @@ const styles = StyleSheet.create((theme: Theme) => ({
 
 const ThemedAttachmentSpinner = withUnistyles(LoadingSpinner);
 const ThemedPencil = withUnistyles(Pencil);
+const ThemedAlarmClock = withUnistyles(AlarmClock);
 const ThemedArrowUp = withUnistyles(ArrowUp);
 const ThemedGitPullRequest = withUnistyles(GitPullRequest);
 const ThemedCircleDot = withUnistyles(CircleDot);

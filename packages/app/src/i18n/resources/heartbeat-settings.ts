@@ -1,6 +1,9 @@
 const en = {
   title: "Heartbeats",
   edit: "Edit heartbeat",
+  create: "New heartbeat",
+  delete: "Delete heartbeat",
+  deleteConfirm: "Delete “{{name}}”? This cannot be undone.",
   empty: "This agent has no heartbeats.",
   loadError: "Could not load heartbeats.",
   name: "Name",
@@ -516,6 +519,9 @@ export const heartbeatSettings = {
   },
   "zh-CN": {
     ...en,
+    create: "新建 heartbeat",
+    delete: "删除 heartbeat",
+    deleteConfirm: "删除「{{name}}」？此操作无法撤销。",
     title: "Heartbeats",
     edit: "编辑 heartbeat",
     empty: "此 agent 尚未设置 heartbeat。",

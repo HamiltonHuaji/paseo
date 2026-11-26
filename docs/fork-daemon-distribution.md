@@ -34,10 +34,10 @@ It reports dependency failures only, without package-style or unused-code sugges
 it is not part of the fixed release checks. Automatic scope belongs to
 [RELEASE-02](contracts/distribution.md#release-02--验证范围与发行解耦).
 
-Agent terminals and managed Codex tools use the CLI from the running distribution. Build the CLI
-before starting Codex from a source checkout; a missing source or bundled CLI must not resolve to an
-outer checkout or separately installed package. A restart through the wrong CLI can replace the
-running fork daemon.
+Paseo supplies agent terminals and managed Codex tools with the CLI from the running distribution.
+Codex chat and MCP start even when this shell integration is unavailable. Build the matching CLI
+before using Paseo commands from a source checkout. The daemon resolves its CLI within the current
+distribution. A restart through a different CLI can replace the running fork daemon.
 
 Bash login profiles can replace the inherited `PATH`. Managed Codex tools retain the distribution's
 CLI after those profiles run, using a private hook under `PASEO_HOME/agent-shell`. Your existing

@@ -35,6 +35,35 @@ beforeEach(() => {
 });
 
 describe("openPreferredWorkspacePreview", () => {
+  it.each([false, true])("keeps file tabs when opening another file (side=%s)", (side) => {
+    const store = useWorkspaceLayoutStore.getState();
+    store.openTab({ workspaceKey: WORKSPACE_KEY, target: { kind: "files" }, intent: "reveal" });
+    const openFile = (path: string) =>
+      openPreferredWorkspacePreview({
+        workspaceKey: WORKSPACE_KEY,
+        serverId: "server-1",
+        workspaceId: "workspace-1",
+        explorerSidebarPaneId: "explorer",
+        lastMainPaneId: "main",
+        target: { kind: "file", path },
+        source: "explorerFiles",
+        preferences: { ...DEFAULT_APP_SETTINGS.openInSidePane, explorerFiles: side },
+      });
+    const first = openFile("src/first.ts");
+    expect(openFile("src/first.ts")).toBe(first);
+    const second = openFile("src/second.ts");
+    expect(second).not.toBe(first);
+    expect(openFile("src/first.ts")).toBe(first);
+    const root = useWorkspaceLayoutStore.getState().layoutByWorkspace[WORKSPACE_KEY].root;
+    expect(
+      collectAllTabs(root)
+        .filter((tab) => tab.target.kind === "file")
+        .map((tab) => tab.target),
+    ).toEqual([
+      { kind: "file", path: "src/first.ts" },
+      { kind: "file", path: "src/second.ts" },
+    ]);
+  });
   it("opens a compact file preview in the sheet instead of replacing the active file tab", () => {
     const store = useWorkspaceLayoutStore.getState();
     const fileTabId = store.openTab({

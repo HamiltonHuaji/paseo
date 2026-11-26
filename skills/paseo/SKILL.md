@@ -121,7 +121,11 @@ Only set feature IDs returned by `inspect_provider`. For Codex fast mode, look f
 
 **`create_heartbeat`** — sends you a prompt on a cron cadence. Required: `prompt`, `cron`. Optional: `timezone`, `name`, `maxRuns`, `expiresIn`. Use for reminders, PR/build babysitting, and status checks that should return to this conversation.
 
-**`delete_heartbeat`** stops it. MCP intentionally exposes no heartbeat update tool; delete and recreate when its task or cadence changes.
+**`list_heartbeats`** lists heartbeats targeting the current session.
+
+**`update_heartbeat`** edits an existing heartbeat by ID. Pass only the fields you want to change: `prompt`, `name`, `cadence` (fixed interval or cron), `maxRuns`, or `expiresAt`. The ID and target stay the same.
+
+**`delete_heartbeat`** stops and deletes an existing heartbeat by ID.
 
 Schedules have the full list/inspect/update/pause/resume/run-once/log/delete surface. Heartbeats deliberately do not.
 

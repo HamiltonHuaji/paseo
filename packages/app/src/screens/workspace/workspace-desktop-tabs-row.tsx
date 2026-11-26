@@ -2,7 +2,9 @@ import type { TabDropPreview } from "@/components/split-container-tab-drop-previ
 import type { DragOrientation } from "@/components/drag-orientation";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { TreeChevron, treeRowPaddingLeft } from "@/components/tree-primitives";
-import { WORKSPACE_TAB_RAIL_WIDTH } from "./workspace-tab-placement";
+import { MIN_LEFT_WORKSPACE_TAB_PANE_WIDTH } from "./workspace-tab-placement";
+import { useWorkspaceTabRailResize } from "./use-workspace-tab-rail-resize";
+import { SidebarResizeHandle } from "@/components/sidebar-resize-handle";
 import { getWorkspaceTabRevealOffset } from "./workspace-tab-scroll";
 import { useWorkspaceTabHorizontalScroll } from "@/hooks/use-workspace-tab-horizontal-scroll";
 import {
@@ -602,6 +604,7 @@ function sameWidths(left: number[], right: number[]): boolean {
 }
 
 export interface WorkspaceDesktopTabsRowProps {
+  paneWidth?: number;
   host?: PaneHost;
   launchPurpose?: WorkspaceTabLaunchPurpose;
   paneId?: string;
@@ -1677,6 +1680,7 @@ function ResolvedWorkspaceDesktopTabsRail({
   paneId,
   isFocused = false,
   ownsKeyboardShortcuts = isFocused,
+  paneWidth = MIN_LEFT_WORKSPACE_TAB_PANE_WIDTH,
   tabs,
   normalizedServerId,
   normalizedWorkspaceId,
@@ -1708,6 +1712,7 @@ function ResolvedWorkspaceDesktopTabsRail({
   onExitFocusMode,
 }: ResolvedWorkspaceDesktopTabsRowProps) {
   const { t } = useTranslation();
+  const railResize = useWorkspaceTabRailResize(paneWidth);
   const newTabKeys = useShortcutKeys("workspace-tab-new");
   const panePanelKinds = useMemo(() => tabs.map(({ tab }) => tab.target.kind), [tabs]);
   const railScrollRef = useRef<ScrollView>(null);
@@ -1966,7 +1971,7 @@ function ResolvedWorkspaceDesktopTabsRail({
           onCloseTabsToLeft={onCloseTabsToLeft}
           onCloseTabsToRight={onCloseTabsToRight}
           onCloseOtherTabs={onCloseOtherTabs}
-          resolvedTabWidth={WORKSPACE_TAB_RAIL_WIDTH - 8}
+          resolvedTabWidth={railResize.width - 8}
           showLabel
           showCloseButton
           setHoveredCloseTabKey={setHoveredCloseTabKey}
@@ -1983,6 +1988,7 @@ function ResolvedWorkspaceDesktopTabsRail({
       );
     },
     [
+      railResize.width,
       activeDragTabId,
       handleMoveTabToEnd,
       handleMoveTabToStart,
@@ -2019,7 +2025,16 @@ function ResolvedWorkspaceDesktopTabsRail({
 
   return (
     <RenderProfile id="WorkspaceDesktopTabsRail">
-      <View style={styles.railContainer} testID="workspace-tabs-rail">
+      <View
+        style={[styles.railContainer, { width: railResize.width }]}
+        testID="workspace-tabs-rail"
+      >
+        <SidebarResizeHandle
+          edge="right"
+          gesture={railResize.gesture}
+          pressed={railResize.pressed}
+          testID="workspace-tabs-rail-resize-handle"
+        />
         <ScrollView
           ref={railScrollRef}
           style={styles.railScroll}
@@ -2257,9 +2272,7 @@ function ResolvedDesktopTabChip({
 
 const styles = StyleSheet.create((theme) => ({
   railContainer: {
-    width: WORKSPACE_TAB_RAIL_WIDTH,
-    minWidth: WORKSPACE_TAB_RAIL_WIDTH,
-    maxWidth: WORKSPACE_TAB_RAIL_WIDTH,
+    position: "relative",
     height: "100%",
     minHeight: 0,
     flexShrink: 0,

@@ -1,6 +1,16 @@
 import type { WorkspaceTabPlacement } from "@/hooks/use-settings";
 
-export const WORKSPACE_TAB_RAIL_WIDTH = 220;
+import {
+  MIN_WORKSPACE_TAB_RAIL_WIDTH,
+  MAX_WORKSPACE_TAB_RAIL_WIDTH,
+} from "@/constants/workspace-tabs";
+
+export function resolveWorkspaceTabRailWidth(requestedWidth: number, paneWidth: number): number {
+  return Math.max(
+    MIN_WORKSPACE_TAB_RAIL_WIDTH,
+    Math.min(requestedWidth, MAX_WORKSPACE_TAB_RAIL_WIDTH, paneWidth / 2),
+  );
+}
 export const MIN_LEFT_WORKSPACE_TAB_PANE_WIDTH = 640;
 
 export type EffectiveWorkspaceTabPlacement = WorkspaceTabPlacement | "dropdown";

@@ -1911,7 +1911,6 @@ describe("create_agent MCP tool", () => {
     expect(lookupTool(server, "list_worktrees")).toBeUndefined();
     expect(lookupTool(server, "archive_worktree")).toBeUndefined();
     expect(lookupTool(server, "detach_agent")).toBeUndefined();
-    expect(lookupTool(server, "update_heartbeat")).toBeUndefined();
   });
 
   it("surfaces createAgent validation failures", async () => {
@@ -5221,6 +5220,49 @@ describe("heartbeat ownership MCP tools", () => {
     await registeredTool(server, "delete_heartbeat").handler({ id: heartbeat.id });
 
     expect(deleteSchedule).toHaveBeenCalledWith(heartbeat.id);
+  });
+
+  it("lists only the caller's heartbeats and edits them in place", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockReturnValue({
+      id: "parent-agent",
+      config: { title: "Parent agent" },
+    } as ManagedAgent);
+    const heartbeat = createStoredSchedule({
+      prompt: "check status",
+      cadence: { type: "cron", expression: "*/15 * * * *" },
+      target: { type: "agent", agentId: "parent-agent" },
+    });
+    const foreignHeartbeat = {
+      ...heartbeat,
+      id: "foreign-heartbeat",
+      target: { type: "agent" as const, agentId: "other-agent" },
+    };
+    const update = vi.fn(async () => ({ ...heartbeat, prompt: "check again" }));
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      scheduleService: {
+        list: vi.fn(async () => [heartbeat, foreignHeartbeat]),
+        inspect: vi.fn(async (id: string) => (id === heartbeat.id ? heartbeat : foreignHeartbeat)),
+        update,
+      } as unknown as ScheduleService,
+      callerAgentId: "parent-agent",
+      logger,
+    });
+
+    const listing = await registeredTool(server, "list_heartbeats").handler({});
+    expect(listing.structuredContent?.heartbeats).toEqual([
+      expect.objectContaining({ id: heartbeat.id }),
+    ]);
+    const tool = registeredTool(server, "update_heartbeat");
+    await invokeToolWithParsedInput(tool, { id: heartbeat.id, prompt: "check again" });
+    expect(update).toHaveBeenCalledExactlyOnceWith({ id: heartbeat.id, prompt: "check again" });
+    await expect(
+      invokeToolWithParsedInput(tool, { id: foreignHeartbeat.id, prompt: "do not change" }),
+    ).rejects.toThrow("does not belong to caller");
+    expect(update).toHaveBeenCalledTimes(1);
   });
 
   it("rejects another agent's heartbeat", async () => {

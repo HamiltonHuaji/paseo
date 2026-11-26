@@ -9,7 +9,6 @@ import {
   useWorkspaceLayoutStore,
   type WorkspaceTabPlacement,
 } from "@/stores/workspace-layout-store";
-import { getPanelInstanceAttributes } from "@/panels/panel-instance-attributes";
 import { workspaceTabTargetsEqual } from "@/workspace-tabs/identity";
 import type { WorkspaceTabTarget } from "@/workspace-tabs/model";
 
@@ -64,27 +63,6 @@ function resolveMainPane(input: {
   );
 }
 
-function canReplacePreview(input: {
-  serverId: string;
-  workspaceId: string;
-  tabId: string;
-  currentTarget: WorkspaceTabTarget;
-  nextTarget: WorkspaceTabTarget;
-}): boolean {
-  if (input.nextTarget.kind === "working_diff") {
-    return input.currentTarget.kind === "working_diff";
-  }
-  return (
-    input.nextTarget.kind === "file" &&
-    input.currentTarget.kind === "file" &&
-    !getPanelInstanceAttributes({
-      serverId: input.serverId,
-      workspaceId: input.workspaceId,
-      tabId: input.tabId,
-    }).modified
-  );
-}
-
 /** Opens an implicit target according to its source-specific desktop preference. */
 export function openPreferredWorkspaceTarget(
   input: OpenPreferredWorkspaceTargetInput,
@@ -130,7 +108,7 @@ export function openWorkspaceTargetAtLocation(
   );
 }
 
-/** Opens a tree selection while reusing an unmodified preview in its destination pane. */
+/** Opens a tree selection, retaining file tabs and reusing only working diff previews. */
 export function openPreferredWorkspacePreview(
   input: OpenPreferredWorkspacePreviewInput,
 ): string | null {
@@ -166,13 +144,8 @@ export function openPreferredWorkspacePreview(
     : null;
   if (
     activeTab &&
-    canReplacePreview({
-      serverId: input.serverId,
-      workspaceId: input.workspaceId,
-      tabId: activeTab.tabId,
-      currentTarget: activeTab.target,
-      nextTarget: input.target,
-    })
+    activeTab.target.kind === "working_diff" &&
+    input.target.kind === "working_diff"
   ) {
     return revealWorkspaceTab(
       input.workspaceKey,
