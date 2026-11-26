@@ -161,6 +161,10 @@ it("serves Works RPCs, shared metrics/progress, artifact bytes and v1 viewers th
     );
     const href = available.artifacts[0]!.files[0]!.href!;
     expect(await (await fetch(`${origin}${href}`)).text()).toBe("artifact content");
+    const artifactPart = await fetch(`${origin}${href}`, { headers: { Range: "bytes=9-" } });
+    expect(artifactPart.status).toBe(206);
+    expect(artifactPart.headers.get("content-range")).toBe("bytes 9-15/16");
+    expect(await artifactPart.text()).toBe("content");
     await writeFile(artifactFile, Buffer.alloc(16 * 1024 * 1024, 42));
     const download = await fetch(`${origin}${href}`);
     const downloadReader = download.body!.getReader();
@@ -223,6 +227,12 @@ it("serves Works RPCs, shared metrics/progress, artifact bytes and v1 viewers th
     expect(await (await fetch(`${origin}${legacyViewers.entries[0]!.url}`)).text()).toContain(
       "Works report",
     );
+    const legacyRange = await fetch(`${origin}${legacyViewers.entries[0]!.url}`, {
+      headers: { Range: "bytes=1000-" },
+    });
+    expect(legacyRange.status).toBe(416);
+    expect(legacyRange.headers.get("content-range")).toBe("bytes */57");
+    expect(await legacyRange.text()).toBe("");
     expect(
       (await client.listExperiments({ projectId })).experiments.map((record) => record.id),
     ).toEqual([legacy.experiment.id]);

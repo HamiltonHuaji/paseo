@@ -12,6 +12,7 @@ import { WorkError } from "./store.js";
 import type { WorkService } from "./service.js";
 import { resolveViewerPath, viewerDataPath } from "./viewers.js";
 import { writeWandbQuery } from "./wandb/query.js";
+import { sendViewerFile } from "../viewer-http/send-viewer-file.js";
 
 interface ViewerRouterOptions {
   service: () => WorkService;
@@ -109,13 +110,10 @@ export function createWorkViewerRouter(options: ViewerRouterOptions): express.Ro
       res.redirect(308, `${url.pathname}/${url.search}`);
       return;
     }
-    res.sendFile(
-      info.isDirectory() ? path.join(file, "index.html") : file,
-      { dotfiles: "allow" },
-      (error) => {
-        if (error) sendError(res, error);
-      },
-    );
+    const filePath = info.isDirectory() ? path.join(file, "index.html") : file;
+    if (!(await sendViewerFile({ req, res, filePath }))) {
+      throw new WorkError("file_missing", "Viewer resource not found");
+    }
   });
   route(
     "/:projectId/:objectId/data/:source/artifacts/:artifactId/files/:viewerPath(*)",
@@ -131,9 +129,9 @@ export function createWorkViewerRouter(options: ViewerRouterOptions): express.Ro
         req.params.artifactId!,
         req.params.viewerPath!,
       );
-      res.sendFile(file, { dotfiles: "allow" }, (error) => {
-        if (error) sendError(res, error);
-      });
+      if (!(await sendViewerFile({ req, res, filePath: file }))) {
+        throw new WorkError("file_missing", "Viewer resource not found");
+      }
     },
   );
   route("/:projectId/:objectId/data/:source/:operation", async (req, res, signal) => {

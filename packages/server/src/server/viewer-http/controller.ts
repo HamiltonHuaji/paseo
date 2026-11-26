@@ -20,9 +20,11 @@ const HEADER_TIMEOUT_MS = 30_000;
 const REQUEST_HEADERS = new Set([
   "accept",
   "cache-control",
+  "if-match",
   "if-modified-since",
   "if-none-match",
   "if-range",
+  "if-unmodified-since",
   "range",
 ]);
 const RESPONSE_HEADERS = new Set([

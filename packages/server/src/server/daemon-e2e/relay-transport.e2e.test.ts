@@ -355,6 +355,21 @@ async function waitForCapturedLog(
           daemonPublicKeyB64,
         });
         const artifact = report.replace("index.html", "artifact.bin");
+        const multipart = await fetch(`${proxy.origin}${report}`, {
+          headers: { Range: "bytes=0-10,17-" },
+        });
+        expect(multipart.status).toBe(206);
+        const boundary = multipart.headers
+          .get("content-type")
+          ?.match(/^multipart\/byteranges; boundary=(\w+)$/)?.[1];
+        expect(boundary).toMatch(/^\w+$/);
+        expect(await multipart.text()).toBe(
+          [
+            `--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Range: bytes 0-10/23\r\n\r\nIndependent\r\n`,
+            `--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Range: bytes 17-22/23\r\n\r\nviewer\r\n`,
+            `--${boundary}--\r\n`,
+          ].join(""),
+        );
         const paused = await response(artifact);
         paused.pause();
         try {

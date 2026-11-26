@@ -62,7 +62,7 @@ test.each([true, false])(
     const { DaemonClient } = await import("./test-utils/daemon-client.js");
     const { createLocalViewerHttpProxy } =
       await import("@getpaseo/client/node/local-viewer-http-proxy");
-    const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+    const { mkdtemp, rename, utimes, writeFile, rm } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const path = await import("node:path");
     const { createServer } = await import("node:http");
@@ -76,6 +76,8 @@ test.each([true, false])(
     const occupied = createServer();
     try {
       await writeFile(path.join(root, "index.html"), "viewer report");
+      const modified = new Date("2023-01-01T00:00:00Z");
+      await utimes(path.join(root, "index.html"), modified, modified);
       await writeFile(path.join(root, "large.bin"), Buffer.alloc(2 * 1024 * 1024, 97));
       await client.connect();
       expect(client.getLastServerInfoMessage()?.features?.viewerHttpProxy).toBe(true);
@@ -99,9 +101,103 @@ test.each([true, false])(
       ).toEqual(Array(4).fill("viewer report"));
       const range = await fetch(`${origin}${report}`, { headers: { Range: "bytes=0-5" } });
       expect(range.status).toBe(206);
+      expect(range.headers.get("content-range")).toBe("bytes 0-5/13");
       expect(await range.text()).toBe("viewer");
+
+      const multipart = await fetch(`${origin}${report}`, {
+        headers: { Range: "bytes=7-9,0-2" },
+      });
+      expect(multipart.status).toBe(206);
+      expect(multipart.headers.get("content-range")).toBeNull();
+      const boundary = multipart.headers
+        .get("content-type")
+        ?.match(/^multipart\/byteranges; boundary=(\w+)$/)?.[1];
+      expect(boundary).toMatch(/^\w+$/);
+      const parts = [
+        `--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Range: bytes 7-9/13\r\n\r\nrep\r\n`,
+        `--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Range: bytes 0-2/13\r\n\r\nvie\r\n`,
+        `--${boundary}--\r\n`,
+      ].join("");
+      expect(multipart.headers.get("content-length")).toBe(String(Buffer.byteLength(parts)));
+      expect(await multipart.text()).toBe(parts);
+
+      const unsatisfiable = await fetch(`${origin}${report}`, { headers: { Range: "bytes=13-" } });
+      expect(unsatisfiable.status).toBe(416);
+      expect(unsatisfiable.headers.get("content-range")).toBe("bytes */13");
+      expect(await unsatisfiable.text()).toBe("");
+
+      for (const [rangeHeader, contentRange, body] of [
+        ["bytes=10-20", "bytes 10-12/13", "ort"],
+        ["bytes=10-", "bytes 10-12/13", "ort"],
+        ["bytes=-3", "bytes 10-12/13", "ort"],
+        ["bytes=0-2,2-4,999999999999999999999-", "bytes 0-4/13", "viewe"],
+      ] as const) {
+        const result = await fetch(`${origin}${report}`, { headers: { Range: rangeHeader } });
+        expect(result.status).toBe(206);
+        expect(result.headers.get("content-range")).toBe(contentRange);
+        expect(await result.text()).toBe(body);
+      }
+      for (const invalid of [
+        "items=0-2",
+        "bytes=0-2,8-4",
+        `bytes=${Array(17).fill("0-0").join(",")}`,
+      ]) {
+        const result = await fetch(`${origin}${report}`, { headers: { Range: invalid } });
+        expect(result.status).toBe(200);
+        expect(await result.text()).toBe("viewer report");
+      }
+
+      const head = await fetch(`${origin}${report}`, {
+        method: "HEAD",
+        headers: { Range: "bytes=0-2" },
+      });
+      expect(head.status).toBe(200);
+      expect(head.headers.get("accept-ranges")).toBe("bytes");
+      expect(head.headers.get("content-length")).toBe("13");
+      expect(head.headers.get("content-range")).toBeNull();
+      const etag = head.headers.get("etag")!;
+      expect(etag).toMatch(/^".+"$/);
+      expect(head.headers.get("last-modified")).toBe(modified.toUTCString());
+      for (const [headers, status, body] of [
+        [{ "If-Range": etag }, 206, "vie"],
+        [{ "If-Range": modified.toUTCString() }, 206, "vie"],
+        [{ "If-Range": "Mon, 02 Jan 2023 00:00:00 GMT" }, 200, "viewer report"],
+        [
+          {
+            "If-Match": `"other,tag", ${etag}`,
+            "If-Unmodified-Since": "Thu, 01 Jan 1970 00:00:00 GMT",
+          },
+          206,
+          "vie",
+        ],
+        [{ "If-Range": `W/${etag}` }, 200, "viewer report"],
+        [{ "If-Match": `W/${etag}` }, 412, ""],
+        [{ "If-Unmodified-Since": "Thu, 01 Jan 1970 00:00:00 GMT" }, 412, ""],
+        [{ "If-None-Match": `W/${etag}` }, 304, ""],
+        [{ "If-Modified-Since": modified.toUTCString() }, 304, ""],
+      ] as const) {
+        const result = await fetch(`${origin}${report}`, {
+          headers: { Range: "bytes=0-2", ...headers },
+        });
+        expect(result.status).toBe(status);
+        expect(await result.text()).toBe(body);
+      }
+
+      await writeFile(path.join(root, "replacement.html"), "second report");
+      await utimes(path.join(root, "replacement.html"), modified, modified);
+      await rename(path.join(root, "replacement.html"), path.join(root, "index.html"));
+      const replaced = await fetch(`${origin}${report}`, {
+        headers: { Range: "bytes=0-2", "If-Range": etag },
+      });
+      expect(replaced.status).toBe(200);
+      expect(replaced.headers.get("etag")).not.toBe(etag);
+      expect(await replaced.text()).toBe("second report");
+      await writeFile(path.join(root, "index.html"), "viewer report");
       const large = report.replace("index.html", "large.bin");
-      const cancelled = await fetch(`${origin}${large}`);
+      const cancelled = await fetch(`${origin}${large}`, {
+        headers: { Range: "bytes=0-786431,1048576-1835007" },
+      });
+      expect(cancelled.status).toBe(206);
       await cancelled.body!.cancel();
       expect((await (await fetch(`${origin}${large}`)).arrayBuffer()).byteLength).toBe(
         2 * 1024 * 1024,

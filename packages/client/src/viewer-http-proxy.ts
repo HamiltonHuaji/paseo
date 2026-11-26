@@ -40,9 +40,11 @@ export interface ViewerHttpRequest {
 export const VIEWER_REQUEST_HEADERS = [
   "accept",
   "cache-control",
+  "if-match",
   "if-modified-since",
   "if-none-match",
   "if-range",
+  "if-unmodified-since",
   "range",
 ] as const;
 

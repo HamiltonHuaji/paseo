@@ -2,6 +2,7 @@ import { ExperimentService } from "./experiments/service.js";
 import { WorkService } from "./work-objects/service.js";
 import { isIP } from "node:net";
 import { createWorkViewerRouter } from "./work-objects/viewer-http.js";
+import { sendViewerFile } from "./viewer-http/send-viewer-file.js";
 import { ViewerDirectoryCursorError } from "./experiments/viewer-directory.js";
 import { renderExperimentViewerIndex } from "./experiments/viewer-index.js";
 import { SkillRepositoryService } from "./skill-repositories/service.js";
@@ -1818,10 +1819,9 @@ export async function createPaseoDaemon(
         res.status(404).end();
         return;
       }
-      res.sendFile(filePath, { dotfiles: "allow" }, (error) => {
-        if (error && !res.headersSent && !res.destroyed) res.status(404).end();
-      });
+      if (!(await sendViewerFile({ req, res, filePath }))) res.status(404).end();
     } catch (error) {
+      if (res.destroyed || res.headersSent) return;
       if (error instanceof ViewerDirectoryCursorError) {
         res.status(error.code === "cursor_expired" ? 410 : 400).json({ error: error.code });
         return;
