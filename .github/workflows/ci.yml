@@ -1,11 +1,6 @@
 name: Quick Checks
 
 on:
-  push:
-    branches: [overlay]
-  pull_request:
-    branches: [overlay]
-  merge_group:
   workflow_dispatch:
 
 permissions:

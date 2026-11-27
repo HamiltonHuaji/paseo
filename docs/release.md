@@ -54,7 +54,9 @@ artifact for testing.
 5. Wait for explicit publish authorization. Keep all preparation local until then.
 
 Keep automatic verification within [RELEASE-02](contracts/distribution.md#release-02--验证范围与发行解耦).
-Quick Checks runs formatting, lint, and typecheck after building workspace declarations. It does
+Run formatting, lint, and typecheck locally before pushing. Quick Checks is manual-only;
+pushes, pull requests, and merge queues do not trigger it. When explicitly dispatched, it runs
+the same checks after building workspace declarations. It does
 not install browsers or run test suites. Existing fast Node unit tests may be retained only within
 the agreed scope; do not restore upstream test matrices during a baseline bump. Broader validation
 requires a separate explicit user request, and a one-time request does not authorize a recurring job.

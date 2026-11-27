@@ -99,7 +99,9 @@ Fork 工作流不会发布到官方 npm、商店或云端渠道。Release 的可
 ## RELEASE-02 — 验证范围与发行解耦
 
 常规 push、PR 和发布不会自动启动全量测试矩阵、浏览器下载、E2E、集成或原生
-provider 验证。自动检查限于格式、lint、typecheck 及明确保留的快速 Node 单测；
+provider 验证。格式、lint、typecheck 在开发机本地执行。Quick Checks 仅允许
+手动触发，普通 push、PR 和 merge queue 不触发它。手动检查限于格式、lint、
+typecheck 及明确保留的快速 Node 单测；
 构建所需声明不改变验证范围。远程轻量检查与产物发布独立，其状态不成为发行门槛。
 
 发行产物在上传前通过固定的依赖完整性检查。新增检查仅覆盖依赖声明、模块解析、
