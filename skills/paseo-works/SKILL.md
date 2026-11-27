@@ -1,6 +1,6 @@
 ---
 name: paseo-works
-description: Record progress, link related sessions, and organize outputs in Paseo when developing or maintaining software, running training or evaluations, processing data, or producing reports, charts, pages, or creative assets. Also apply this skill when asked to organize collected, analyzed, or accumulated materials and results for the user to consult and use. Give outputs a clear home and make them findable from the work record, even for one-off delivery or a specified output path. Research or analysis solely to answer questions or offer advice does not trigger use; organizing the materials or results for the user does. Chat-based creation and routine file operations do not trigger use merely because they produce files. Apply it to find or continue earlier work; keep follow-up work under the same topic or experiment. Do not wait for the user to request tracking. Long runs and multiple sessions are not required.
+description: Record progress, link related sessions, and organize outputs in Paseo when developing or maintaining software, running training or evaluations, processing data, or producing reports, charts, pages, or creative assets. Also apply this skill when asked to organize collected, analyzed, or accumulated materials and results for the user to consult and use. Give outputs a clear home and make them findable from the work record, even for one-off delivery or a specified output path. Research or analysis solely to answer questions or offer advice does not trigger use; organizing the materials or results for the user does. Chat-based creation and routine file operations do not trigger use merely because they produce files. Apply it to find or continue earlier work. Reuse records whose scope still matches the work; give distinct branches their own Cards and preserve their relationship to earlier work. Do not wait for the user to request tracking. Long runs and multiple sessions are not required.
 ---
 
 # Paseo works
@@ -21,16 +21,23 @@ Look up related records and results using the project and conversation context.
 Read the relevant record before changing it. When asked to find an earlier result,
 return its existing entry point and status rather than generating it again.
 
-Keep follow-up work under the existing topic or experiment. An attempt records
-one experimental execution: create a new attempt for a new run, retry, or resume,
+Choose Card boundaries by the work the user needs to track and revisit separately.
+Cards include both Experiment and Topic. Continue an existing Card while follow-up
+work advances its current subject and scope. When the work branches into a distinct
+direction, alternative, or deliverable that needs its own ongoing record, create a
+new Card. Use basedOn when the new Card derives from earlier work; shared goals and
+dependencies can span multiple Cards. Use Items for concrete tasks and executions
+within a Card's scope.
+
+An attempt records one experimental execution: create a new attempt for a new run, retry, or resume,
 even when it continues the same W&B run. Preserve the earlier execution's inputs,
 code, timing, and results so it can be understood and compared independently.
 
 An issue records the problem or change being delivered. Continue diagnosis,
 implementation, and validation in that issue while its intended outcome remains
 the same; a failed build or another edit does not require a new issue. Create a
-separate item when a development variant or execution needs its own retained
-result or comparison. Update the current request when the user refines it.
+separate item when a development variant or execution within the Card's scope needs
+its own retained result or comparison. Update the current request when the user refines it.
 
 Choose the area or outcome the user will recognize in Canvas. Put a software fix
 under its module or feature and a run under its experiment. Keep a library or
@@ -149,7 +156,9 @@ when work resumes.
 
 ## Tool workflow
 
-1. Find a relevant Card with list_cards; read it and search only that Card's Items.
+1. Find and read related Cards with list_cards. Apply the Card boundaries above to
+   decide whether to reuse an existing Card or create a new one. For an existing
+   Card, search its Items for the relevant task or execution.
 2. Create or update the appropriate record; request storage or selected components
    in the same receipt. See [tool reference](references/tools.md) for patch rules.
 3. Save outputs in returned storage or record their established location. Configure

@@ -65,7 +65,12 @@ Card 默认提供摘要，用户可逐 Card 选择曲线。Item 按顺序连续�
 
 ## WORKS-05 — Agent 工作有归属和可访问成果
 
-`paseo-works` 指引 agent 先查已有相关工作，同一开发交付继续同一 Issue；
+`paseo-works` 指引 agent 先查已有相关工作，再判断 Card 的范围是否仍匹配。
+同一工作对象继续复用 Card；需要分别持续记录的派生方向、替代方案或交付对象
+使用各自的 Card，以 basedOn 保留实际来源。此边界同时适用于 Experiment 和
+Topic；多个 Card 可以共享目标、彼此依赖。
+
+Card 范围内的具体任务和执行使用 Item。同一开发交付继续同一 Issue；
 新实验运行、重试和续跑分别保留 Attempt，即使复用一个 W&B run。
 是否登记由用户工作成果决定，普通咨询不因调用工具而强制登记。
 
@@ -74,9 +79,12 @@ storage 或用户指定位置并登记；用户入口只列可查看的结果。
 工作区由 Git 管理并与并行修改隔离；清理 checkout 后必要结果与代码仍可恢复。
 
 验收：另一 agent 能继续同一问题、找到旧执行和成果；失败与重试不会覆盖旧证据。
+同一报告的修订继续原 Card，从报告派生的软件实现使用新 Card 并保留来源；
+baseline 与需要分别评估的组件变体使用不同 Experiment Card，同一设定的重试
+和续跑使用该 Card 内的不同 Attempt。
 链接会话、touch、记录完成均不自动授权委派或启动操作。工具缺失时明确报告限制，
 不伪造保存成功、不把 v2 调用写进 v1。实际 skill 边界见
-[paseo-works](https://github.com/HamiltonHuaji/paseo/blob/1bd70fb5056d623e8da784dce82d8ee72fa5f486/skills/paseo-works/SKILL.zh-CN.md)。
+[paseo-works](../../skills/paseo-works/SKILL.zh-CN.md)。
 
 ## EXP-01 — v1 数据与入口连续可用
 
